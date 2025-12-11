@@ -1,18 +1,11 @@
-
-# ============================================================================
-# ЧАСТЬ 1: Установка зависимостей и импорты
-# ============================================================================
-
-
-print("✅ Все зависимости установлены")
-# Установка необходимых библиотек (запустить один раз)
-!playwright install chromium
+# -*- coding: utf-8 -*-
 
 # Отключаем предупреждения о небезопасных SSL соединениях
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Импорты
+import os
 import requests
 import hashlib
 import json
@@ -31,20 +24,22 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 # Применяем nest_asyncio для поддержки вложенных event loop'ов
 nest_asyncio.apply()
 
-print("✅ Зависимости установлены и импортированы")
+print("✅ Зависимости импортированы")
 
 # ============================================================================
 # ЧАСТЬ 2: Конфигурация и константы
 # ============================================================================
 
-import os
-
-# --- Supabase Credentials ---
+# --- Credentials из переменных окружения ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-# --- OpenRouter LLM Credentials ---
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+# --- OpenRouter LLM ---
+LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # --- Настройки ---
 REQUEST_TIMEOUT = 30
@@ -56,11 +51,34 @@ PLAYWRIGHT_TIMEOUT = 30000
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 print("✅ Конфигурация загружена")
-print(f"📊 Supabase URL: {SUPABASE_URL}")
-print(f"🤖 LLM модель: {LLM_MODEL}")
 
 # ============================================================================
-# ЧАСТЬ 3: Утилиты и вспомогательные функции
+# ЧАСТЬ 3: Telegram функции
+# ============================================================================
+
+def send_telegram_message(message: str) -> bool:
+    """Отправляет сообщение в Telegram"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram не настроен")
+        return False
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        response = requests.post(url, json=payload, timeout=30)
+        response.raise_for_status()
+        print("✅ Сообщение отправлено в Telegram")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка отправки в Telegram: {str(e)}")
+        return False
+
+# ============================================================================
+# ЧАСТЬ 4: Утилиты и вспомогательные функции
 # ============================================================================
 
 def generate_unique_id(prefix: str = "") -> str:
@@ -88,7 +106,7 @@ def clean_html_content(soup: BeautifulSoup) -> str:
 async def render_page_with_browser(url: str) -> Optional[str]:
     """Загружает страницу через безголовый браузер Playwright"""
     try:
-        print(f"   🌐 Запуск браузерного рендеринга (асинхронно)...")
+        print(f"   🌐 Запуск браузерного рендеринга...")
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -238,7 +256,7 @@ def fetch_website_content(url: str, retry_count: int = 3) -> Optional[str]:
 print("✅ Вспомогательные функции загружены")
 
 # ============================================================================
-# ЧАСТЬ 4: Функции работы с LLM (OpenRouter)
+# ЧАСТЬ 5: Функции работы с LLM (OpenRouter)
 # ============================================================================
 
 def call_llm(prompt: str, max_tokens: int = 500) -> Optional[str]:
@@ -326,21 +344,18 @@ def generate_overall_report(summaries: List[Dict[str, str]]) -> str:
 print("✅ Функции работы с LLM загружены")
 
 # ============================================================================
-# ЧАСТЬ 5: Функции работы с Supabase
+# ЧАСТЬ 6: Функции работы с Supabase
 # ============================================================================
 
 def get_previous_hash(competitor_id: str) -> Optional[str]:
     """Получает предыдущий хеш из последней записи сканирования"""
     try:
-        # Получаем competitor с last_scan_id
         competitor = supabase.table('competitors').select('last_scan_id').eq('id', competitor_id).single().execute()
 
         if not competitor.data or not competitor.data.get('last_scan_id'):
             return None
 
         last_scan_id = competitor.data['last_scan_id']
-
-        # Получаем last_hash из scan_results
         scan_result = supabase.table('scan_results').select('last_hash').eq('id', last_scan_id).single().execute()
 
         return scan_result.data.get('last_hash') if scan_result.data else None
@@ -398,34 +413,6 @@ def update_competitor_last_scan(competitor_id: str, scan_result_id: str) -> bool
         return False
 
 
-def add_comment_to_competitor(competitor_id: str, comment_text: str, source: str = "Script") -> bool:
-    """Добавляет новый комментарий в поле comment"""
-    try:
-        # Получаем текущие комментарии
-        competitor = supabase.table('competitors').select('comment').eq('id', competitor_id).single().execute()
-
-        current_comments = competitor.data.get('comment', []) if competitor.data else []
-
-        # Добавляем новый комментарий
-        new_comment = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "source": source,
-            "text": comment_text
-        }
-        current_comments.append(new_comment)
-
-        # Обновляем запись
-        supabase.table('competitors').update({
-            'comment': current_comments
-        }).eq('id', competitor_id).execute()
-
-        return True
-
-    except Exception as e:
-        print(f"❌ Ошибка при добавлении комментария: {str(e)}")
-        return False
-
-
 def create_summary_report(report_id: str, report_date: str) -> Optional[str]:
     """Создает новую запись в таблице summary_reports"""
     try:
@@ -463,7 +450,7 @@ def update_summary_report(report_id: str, overall_report: str) -> bool:
 print("✅ Функции работы с Supabase загружены")
 
 # ============================================================================
-# ЧАСТЬ 6: Основная логика мониторинга
+# ЧАСТЬ 7: Основная логика мониторинга
 # ============================================================================
 
 def scan_competitor(
@@ -537,12 +524,15 @@ def scan_competitor(
 print("✅ Основная логика мониторинга загружена")
 
 # ============================================================================
-# ЧАСТЬ 7: Функция для запуска системы мониторинга
+# ЧАСТЬ 8: Функция для запуска системы мониторинга
 # ============================================================================
 
 def run_monitoring_system():
     """Запускает систему мониторинга конкурентов"""
     print("🚀 Запуск системы мониторинга конкурентов...")
+    
+    # Отправляем уведомление о старте
+    send_telegram_message("🚀 <b>Запуск мониторинга конкурентов</b>")
 
     # 1. Создаем общий отчет
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -551,6 +541,7 @@ def run_monitoring_system():
 
     if not summary_report_id:
         print("❌ Не удалось создать запись для общего отчета. Мониторинг прерван.")
+        send_telegram_message("❌ <b>Ошибка:</b> Не удалось создать отчет")
         return
 
     print(f"📊 Создан общий отчет: {report_id}")
@@ -561,6 +552,7 @@ def run_monitoring_system():
         competitors = competitors_response.data
     except Exception as e:
         print(f"❌ Ошибка при получении списка конкурентов: {str(e)}")
+        send_telegram_message(f"❌ <b>Ошибка:</b> {str(e)[:200]}")
         return
 
     print(f"🌐 Найдено {len(competitors)} конкурентов для сканирования.")
@@ -580,10 +572,30 @@ def run_monitoring_system():
         overall_llm_report = generate_overall_report(llm_summaries_for_report)
         update_summary_report(summary_report_id, overall_llm_report)
         print(f"✅ Общий LLM отчет обновлен в Supabase")
+        
+        # Отправляем отчет в Telegram
+        telegram_message = f"""📊 <b>Отчёт мониторинга конкурентов</b>
+📅 Дата: {current_date}
+
+🔔 <b>Обнаружены изменения у {len(llm_summaries_for_report)} конкурентов:</b>
+
+"""
+        for item in llm_summaries_for_report:
+            telegram_message += f"• <b>{item['competitor']}</b>\n{item['summary']}\n\n"
+        
+        send_telegram_message(telegram_message[:4000])  # Telegram лимит 4096 символов
+        
     else:
         overall_llm_report = "Изменений не обнаружено ни у одного конкурента."
         update_summary_report(summary_report_id, overall_llm_report)
         print("ℹ️ Изменений не обнаружено. Общий отчет обновлен.")
+        
+        # Отправляем уведомление об отсутствии изменений
+        send_telegram_message(f"""✅ <b>Мониторинг завершён</b>
+📅 Дата: {current_date}
+🌐 Проверено: {len(competitors)} сайтов
+
+Изменений не обнаружено.""")
 
     print("✅ Система мониторинга конкурентов завершила работу.")
 
@@ -591,7 +603,7 @@ def run_monitoring_system():
 print("✅ Функция run_monitoring_system загружена")
 
 # ============================================================================
-# ЧАСТЬ 8: ЗАПУСК СИСТЕМЫ
+# ЧАСТЬ 9: ЗАПУСК СИСТЕМЫ
 # ============================================================================
 
 if __name__ == "__main__":
