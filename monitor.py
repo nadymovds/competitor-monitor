@@ -37,14 +37,14 @@ print("✅ Зависимости установлены и импортиров
 # ЧАСТЬ 2: Конфигурация и константы
 # ============================================================================
 
+import os
+
 # --- Supabase Credentials ---
-SUPABASE_URL = "https://yjkxkhsblvoretlbrgzf.supabase.co"  # ЗАМЕНИТЕ НА ВАШ URL
-SUPABASE_KEY = "sb_secret_jRkjwwVxxwS5oY7RHgEigw__uxuOsjV"  # ЗАМЕНИТЕ НА ВАШ ANON KEY
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 # --- OpenRouter LLM Credentials ---
-OPENROUTER_API_KEY = "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"
-LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 # --- Настройки ---
 REQUEST_TIMEOUT = 30
