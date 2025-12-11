@@ -1,7 +1,7 @@
 name: Competitor Monitor
 
 on:
-  workflow_dispatch:  # Позволяет запускать вручную и через API
+  workflow_dispatch:
 
 jobs:
   monitor:
@@ -23,84 +23,8 @@ jobs:
           playwright install-deps chromium
       
       - name: Run monitoring script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python monitor.py
-```
-
----
-
-### ШАГ 4: Создайте GitHub Personal Access Token
-
-1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)**
-2. Generate new token (classic)
-3. Выберите scope: **`repo`** (полный доступ к репозиториям)
-4. Скопируйте токен (он покажется только один раз!)
-
----
-
-### ШАГ 5: Настройте n8n workflow
-
-Откройте n8n и создайте новый workflow из **3 nodes**:
-```
-[Schedule Trigger] → [HTTP Request] → [NoOp / Respond]
-```
-
-#### Node 1: Schedule Trigger
-
-| Параметр | Значение |
-|----------|----------|
-| Trigger Interval | Cron |
-| Cron Expression | `0 9 * * *` (ежедневно в 9:00) |
-
-> Настройте расписание под себя. Примеры:
-> - `0 */6 * * *` — каждые 6 часов
-> - `0 9,18 * * *` — в 9:00 и 18:00
-> - `0 10 * * 1-5` — по будням в 10:00
-
----
-
-#### Node 2: HTTP Request
-
-| Параметр | Значение |
-|----------|----------|
-| **Method** | POST |
-| **URL** | `https://api.github.com/repos/YOUR_USERNAME/competitor-monitor/actions/workflows/monitor.yml/dispatches` |
-| **Authentication** | Generic Credential Type |
-| **Generic Auth Type** | Header Auth |
-| **Header Name** | Authorization |
-| **Header Value** | `Bearer ghp_YOUR_TOKEN_HERE` |
-| **Send Headers** | Yes |
-| **Header 1 Name** | Accept |
-| **Header 1 Value** | `application/vnd.github.v3+json` |
-| **Send Body** | Yes |
-| **Body Content Type** | JSON |
-| **Body** | `{"ref": "main"}` |
-
-> Замените `YOUR_USERNAME` на ваш GitHub username и `ghp_YOUR_TOKEN_HERE` на токен из шага 4.
-
----
-
-#### Node 3 (опционально): NoOp или Set node
-
-Просто для завершения workflow. Можно добавить **Slack/Telegram notification** если хотите получать уведомления о запуске.
-
----
-
-## Итоговая схема
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│ Schedule Trigger│────▶│  HTTP Request    │────▶│   (Optional)    │
-│ (Cron: 0 9 * * *)│     │  GitHub API      │     │   Notification  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │  GitHub Actions  │
-                    │  runs your       │
-                    │  Python script   │
-                    └──────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │    Supabase      │
-                    │  (results saved) │
-                    └──────────────────┘
