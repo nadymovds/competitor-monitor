@@ -1,6 +1,8 @@
 name: Competitor Monitor
 
 on:
+  schedule:
+    - cron: '0 6 * * *'   # каждый день в 9:00 по Москве (6:00 UTC)
   workflow_dispatch:
 
 jobs:
@@ -27,4 +29,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python monitor.py
