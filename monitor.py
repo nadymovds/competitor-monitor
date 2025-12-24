@@ -103,6 +103,51 @@ def clean_html_content(soup: BeautifulSoup) -> str:
     return text
 
 
+def is_protection_page(content: str) -> bool:
+    """Проверяет, является ли контент страницей защиты (Cloudflare, Captcha и т.п.)"""
+    protection_patterns = [
+        'cloudflare',
+        'ray id',
+        'checking your browser',
+        'ddos protection',
+        'please wait while we verify',
+        'just a moment',
+        'enable javascript and cookies',
+        'attention required',
+        'security check',
+        'access denied',
+        'please complete the security check',
+        'recaptcha',
+        'hcaptcha',
+        'verifying you are human',
+        'browser verification',
+        'защита от ботов',
+        'проверка браузера',
+        'подождите, идет проверка',
+    ]
+    
+    content_lower = content.lower()
+    
+    # Проверяем паттерны
+    for pattern in protection_patterns:
+        if pattern in content_lower:
+            return True
+    
+    # Дополнительная проверка: слишком короткий контент с признаками защиты
+    if len(content) < 1000:
+        short_content_patterns = [
+            'checking',
+            'verify',
+            'moment',
+            'wait',
+        ]
+        matches = sum(1 for p in short_content_patterns if p in content_lower)
+        if matches >= 2:
+            return True
+    
+    return False
+
+
 async def render_page_with_browser(url: str) -> Optional[str]:
     """Загружает страницу через безголовый браузер Playwright"""
     try:
@@ -358,7 +403,13 @@ def get_previous_hash(competitor_id: str) -> Optional[str]:
         last_scan_id = competitor.data['last_scan_id']
         scan_result = supabase.table('scan_results').select('last_hash').eq('id', last_scan_id).single().execute()
 
-        return scan_result.data.get('last_hash') if scan_result.data else None
+        if scan_result.data:
+            last_hash = scan_result.data.get('last_hash')
+            # Если предыдущее сканирование было страницей защиты, ищем более раннее
+            if last_hash == "PROTECTION_PAGE":
+                return None  # Считаем как первое сканирование
+            return last_hash
+        return None
 
     except Exception as e:
         print(f"⚠️ Не удалось получить предыдущий хеш: {str(e)}")
@@ -457,7 +508,7 @@ def scan_competitor(
     competitor: Dict,
     report_id: str,
     scan_date: str
-) -> Optional[Dict[str, str]]:
+) -> Optional[Dict[str, Any]]:
     """Сканирует одного конкурента и создает запись в scan_results"""
     competitor_id = competitor['id']
     competitor_name = competitor.get('name', 'Unknown')
@@ -477,7 +528,37 @@ def scan_competitor(
 
     if not current_content:
         print(f"   ❌ Не удалось загрузить сайт")
-        return None
+        return {
+            'competitor': competitor_name,
+            'summary': '❌ Сайт недоступен',
+            'is_error': True
+        }
+
+    # Проверяем на страницу защиты (Cloudflare, Captcha и т.п.)
+    if is_protection_page(current_content):
+        print(f"   ⚠️ Обнаружена страница защиты (Cloudflare/Captcha)")
+        
+        # Создаём запись без изменений, но с пометкой
+        scan_id = generate_unique_id("scan_")
+        scan_result_id = create_scan_result(
+            scan_id=scan_id,
+            scan_date=scan_date,
+            competitor_id=competitor_id,
+            new_hash="PROTECTION_PAGE",
+            content_changed=False,
+            raw_content="",
+            llm_summary="Сайт недоступен (защита Cloudflare/Captcha)",
+            report_id=None
+        )
+        
+        # НЕ обновляем last_scan_id — чтобы при следующем успешном сканировании 
+        # сравнить с предыдущим реальным хешем
+        
+        return {
+            'competitor': competitor_name,
+            'summary': '⚠️ Сайт защищён (Cloudflare)',
+            'is_error': True
+        }
 
     new_hash = calculate_hash(current_content)
     print(f"   ✅ Новый хеш: {new_hash[:16]}...")
@@ -497,7 +578,8 @@ def scan_competitor(
 
         summary_dict = {
             'competitor': competitor_name,
-            'summary': llm_summary
+            'summary': llm_summary,
+            'is_error': False
         }
     else:
         print(f"   ✅ Изменений не обнаружено")
@@ -558,12 +640,17 @@ def run_monitoring_system():
     print(f"🌐 Найдено {len(competitors)} конкурентов для сканирования.")
 
     llm_summaries_for_report = []
+    error_summaries = []
 
     # 3. Сканируем каждого конкурента
     for competitor in competitors:
         summary = scan_competitor(competitor, summary_report_id, current_date)
         if summary:
-            llm_summaries_for_report.append(summary)
+            if summary.get('is_error'):
+                # Ошибки доступа собираем отдельно
+                error_summaries.append(summary)
+            else:
+                llm_summaries_for_report.append(summary)
         time.sleep(2)
 
     # 4. Генерируем общий LLM отчет
@@ -583,6 +670,14 @@ def run_monitoring_system():
         for item in llm_summaries_for_report:
             telegram_message += f"• <b>{item['competitor']}</b>\n{item['summary']}\n\n"
         
+        # Добавляем информацию об ошибках, если есть
+        if error_summaries:
+            telegram_message += f"\n⚠️ <b>Не удалось проверить ({len(error_summaries)}):</b>\n"
+            for item in error_summaries[:10]:  # Максимум 10 ошибок в отчёте
+                telegram_message += f"• {item['competitor']}: {item['summary']}\n"
+            if len(error_summaries) > 10:
+                telegram_message += f"... и ещё {len(error_summaries) - 10}\n"
+        
         send_telegram_message(telegram_message[:4000])  # Telegram лимит 4096 символов
         
     else:
@@ -590,12 +685,22 @@ def run_monitoring_system():
         update_summary_report(summary_report_id, overall_llm_report)
         print("ℹ️ Изменений не обнаружено. Общий отчет обновлен.")
         
-        # Отправляем уведомление об отсутствии изменений
-        send_telegram_message(f"""✅ <b>Мониторинг завершён</b>
+        # Формируем сообщение
+        telegram_message = f"""✅ <b>Мониторинг завершён</b>
 📅 Дата: {current_date}
 🌐 Проверено: {len(competitors)} сайтов
 
-Изменений не обнаружено.""")
+Изменений не обнаружено."""
+
+        # Добавляем информацию об ошибках, если есть
+        if error_summaries:
+            telegram_message += f"\n\n⚠️ <b>Не удалось проверить ({len(error_summaries)}):</b>\n"
+            for item in error_summaries[:10]:
+                telegram_message += f"• {item['competitor']}: {item['summary']}\n"
+            if len(error_summaries) > 10:
+                telegram_message += f"... и ещё {len(error_summaries) - 10}\n"
+        
+        send_telegram_message(telegram_message[:4000])
 
     print("✅ Система мониторинга конкурентов завершила работу.")
 
