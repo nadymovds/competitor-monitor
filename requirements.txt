@@ -4,3 +4,4 @@ beautifulsoup4
 lxml
 playwright
 nest_asyncio
+reportlab
