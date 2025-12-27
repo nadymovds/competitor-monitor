@@ -18,8 +18,17 @@ import time
 import asyncio
 import nest_asyncio
 
-# Новые импорты для Playwright
+# Импорты для Playwright
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+
+# Импорты для PDF
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # Применяем nest_asyncio для поддержки вложенных event loop'ов
 nest_asyncio.apply()
@@ -50,6 +59,30 @@ PLAYWRIGHT_TIMEOUT = 30000
 # Инициализация Supabase клиента
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- Регистрация русского шрифта для PDF ---
+def register_fonts():
+    """Регистрирует шрифты с поддержкой кириллицы"""
+    font_paths = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    ]
+    
+    try:
+        if os.path.exists(font_paths[0]):
+            pdfmetrics.registerFont(TTFont('DejaVuSans', font_paths[0]))
+            if os.path.exists(font_paths[1]):
+                pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', font_paths[1]))
+            print("✅ Шрифты DejaVu зарегистрированы")
+            return 'DejaVuSans'
+    except Exception as e:
+        print(f"⚠️ Не удалось зарегистрировать DejaVu: {e}")
+    
+    # Fallback - используем Helvetica
+    print("⚠️ Используется стандартный шрифт Helvetica")
+    return 'Helvetica'
+
+FONT_NAME = register_fonts()
+
 print("✅ Конфигурация загружена")
 
 # ============================================================================
@@ -76,6 +109,33 @@ def send_telegram_message(message: str) -> bool:
     except Exception as e:
         print(f"❌ Ошибка отправки в Telegram: {str(e)}")
         return False
+
+
+def send_telegram_document(file_path: str, caption: str = "") -> bool:
+    """Отправляет документ в Telegram"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram не настроен")
+        return False
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+        
+        with open(file_path, 'rb') as f:
+            files = {'document': f}
+            data = {
+                'chat_id': TELEGRAM_CHAT_ID,
+                'caption': caption,
+                'parse_mode': 'HTML'
+            }
+            response = requests.post(url, data=data, files=files, timeout=60)
+            response.raise_for_status()
+        
+        print("✅ Документ отправлен в Telegram")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка отправки документа в Telegram: {str(e)}")
+        return False
+
 
 # ============================================================================
 # ЧАСТЬ 4: Утилиты и вспомогательные функции
@@ -370,15 +430,14 @@ def generate_overall_report(summaries: List[Dict[str, str]]) -> str:
 ИЗМЕНЕНИЯ У КОНКУРЕНТОВ:
 {changes_text}
 
-Задача: Напиши краткий отчет об изменениях на сайтах конкурентов который включает:
-1. Дата отчета
-2. Общее количество сайтов, включенных в мониторинг
-3. Количество сайтов, на которых были обнаружены изменения
-4. Список сайтов с названиями конкурентов и кратко что изменилось
+Задача: Напиши краткий аналитический отчет (3-5 предложений) с выводами:
+- Какие общие тренды прослеживаются
+- На что стоит обратить внимание
+- Рекомендации
 
-Ответ должен быть структурированным и конкретным."""
+Ответ должен быть конкретным и полезным для бизнеса."""
 
-    report = call_llm(prompt, max_tokens=800)
+    report = call_llm(prompt, max_tokens=400)
 
     if not report:
         return f"Зафиксированы изменения у {len(summaries)} конкурентов."
@@ -389,7 +448,171 @@ def generate_overall_report(summaries: List[Dict[str, str]]) -> str:
 print("✅ Функции работы с LLM загружены")
 
 # ============================================================================
-# ЧАСТЬ 6: Функции работы с Supabase
+# ЧАСТЬ 6: Генерация PDF отчёта
+# ============================================================================
+
+def generate_pdf_report(
+    report_date: str,
+    total_checked: int,
+    changes_list: List[Dict[str, str]],
+    errors_list: List[Dict[str, str]],
+    overall_analysis: str
+) -> str:
+    """Генерирует PDF отчёт и возвращает путь к файлу"""
+    
+    # Путь к файлу
+    filename = f"/tmp/competitor_report_{report_date}.pdf"
+    
+    # Создаём документ
+    doc = SimpleDocTemplate(
+        filename,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
+    )
+    
+    # Определяем шрифт (с fallback)
+    font_regular = FONT_NAME
+    font_bold = f"{FONT_NAME}-Bold" if FONT_NAME == 'DejaVuSans' else 'Helvetica-Bold'
+    
+    # Стили с поддержкой кириллицы
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        fontName=font_bold,
+        fontSize=18,
+        spaceAfter=12,
+        alignment=1,  # Center
+        textColor=colors.HexColor('#1a1a1a')
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        fontName=font_bold,
+        fontSize=14,
+        spaceBefore=16,
+        spaceAfter=8,
+        textColor=colors.HexColor('#2c5aa0')
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        fontName=font_regular,
+        fontSize=10,
+        spaceAfter=6,
+        leading=14
+    )
+    
+    bold_style = ParagraphStyle(
+        'CustomBold',
+        fontName=font_bold,
+        fontSize=10,
+        spaceAfter=4,
+        leading=14
+    )
+    
+    small_style = ParagraphStyle(
+        'CustomSmall',
+        fontName=font_regular,
+        fontSize=9,
+        textColor=colors.grey,
+        alignment=1
+    )
+    
+    # Контент документа
+    content = []
+    
+    # Заголовок
+    content.append(Paragraph("Отчёт мониторинга конкурентов", title_style))
+    content.append(Paragraph(f"Дата: {report_date}", small_style))
+    content.append(Spacer(1, 12))
+    
+    # Статистика
+    content.append(Paragraph("Статистика", heading_style))
+    
+    stats_data = [
+        ["Показатель", "Значение"],
+        ["Проверено сайтов", str(total_checked)],
+        ["Обнаружено изменений", str(len(changes_list))],
+        ["Не удалось проверить", str(len(errors_list))]
+    ]
+    
+    stats_table = Table(stats_data, colWidths=[100*mm, 50*mm])
+    stats_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c5aa0')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), font_bold),
+        ('FONTNAME', (0, 1), (-1, -1), font_regular),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f5f5f5')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc'))
+    ]))
+    content.append(stats_table)
+    content.append(Spacer(1, 16))
+    
+    # Изменения
+    if changes_list:
+        content.append(Paragraph("Обнаруженные изменения", heading_style))
+        
+        for i, item in enumerate(changes_list, 1):
+            competitor = item.get('competitor', 'Неизвестно')
+            summary = item.get('summary', '')
+            
+            content.append(Paragraph(f"{i}. {competitor}", bold_style))
+            content.append(Paragraph(summary, normal_style))
+            content.append(Spacer(1, 6))
+    
+    # Общий анализ
+    if overall_analysis and changes_list:
+        content.append(Paragraph("Аналитика", heading_style))
+        content.append(Paragraph(overall_analysis, normal_style))
+        content.append(Spacer(1, 12))
+    
+    # Ошибки
+    if errors_list:
+        content.append(Paragraph("Не удалось проверить", heading_style))
+        
+        errors_data = [["Конкурент", "Причина"]]
+        for item in errors_list:
+            competitor = item.get('competitor', 'Неизвестно')
+            reason = item.get('summary', 'Неизвестно')
+            errors_data.append([competitor, reason])
+        
+        errors_table = Table(errors_data, colWidths=[80*mm, 70*mm])
+        errors_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#ff9800')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), font_bold),
+            ('FONTNAME', (0, 1), (-1, -1), font_regular),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fff3e0')),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc'))
+        ]))
+        content.append(errors_table)
+    
+    # Если нет ни изменений, ни ошибок
+    if not changes_list and not errors_list:
+        content.append(Paragraph("Результат", heading_style))
+        content.append(Paragraph("Изменений на сайтах конкурентов не обнаружено.", normal_style))
+    
+    # Генерируем PDF
+    doc.build(content)
+    print(f"✅ PDF отчёт создан: {filename}")
+    
+    return filename
+
+
+print("✅ Функции генерации PDF загружены")
+
+# ============================================================================
+# ЧАСТЬ 7: Функции работы с Supabase
 # ============================================================================
 
 def get_previous_hash(competitor_id: str) -> Optional[str]:
@@ -405,9 +628,9 @@ def get_previous_hash(competitor_id: str) -> Optional[str]:
 
         if scan_result.data:
             last_hash = scan_result.data.get('last_hash')
-            # Если предыдущее сканирование было страницей защиты, ищем более раннее
+            # Если предыдущее сканирование было страницей защиты, считаем как первое
             if last_hash == "PROTECTION_PAGE":
-                return None  # Считаем как первое сканирование
+                return None
             return last_hash
         return None
 
@@ -501,7 +724,7 @@ def update_summary_report(report_id: str, overall_report: str) -> bool:
 print("✅ Функции работы с Supabase загружены")
 
 # ============================================================================
-# ЧАСТЬ 7: Основная логика мониторинга
+# ЧАСТЬ 8: Основная логика мониторинга
 # ============================================================================
 
 def scan_competitor(
@@ -530,7 +753,7 @@ def scan_competitor(
         print(f"   ❌ Не удалось загрузить сайт")
         return {
             'competitor': competitor_name,
-            'summary': '❌ Сайт недоступен',
+            'summary': 'Сайт недоступен',
             'is_error': True
         }
 
@@ -556,7 +779,7 @@ def scan_competitor(
         
         return {
             'competitor': competitor_name,
-            'summary': '⚠️ Сайт защищён (Cloudflare)',
+            'summary': 'Защита Cloudflare',
             'is_error': True
         }
 
@@ -606,7 +829,7 @@ def scan_competitor(
 print("✅ Основная логика мониторинга загружена")
 
 # ============================================================================
-# ЧАСТЬ 8: Функция для запуска системы мониторинга
+# ЧАСТЬ 9: Функция для запуска системы мониторинга
 # ============================================================================
 
 def run_monitoring_system():
@@ -637,7 +860,8 @@ def run_monitoring_system():
         send_telegram_message(f"❌ <b>Ошибка:</b> {str(e)[:200]}")
         return
 
-    print(f"🌐 Найдено {len(competitors)} конкурентов для сканирования.")
+    total_competitors = len(competitors)
+    print(f"🌐 Найдено {total_competitors} конкурентов для сканирования.")
 
     llm_summaries_for_report = []
     error_summaries = []
@@ -653,54 +877,47 @@ def run_monitoring_system():
                 llm_summaries_for_report.append(summary)
         time.sleep(2)
 
-    # 4. Генерируем общий LLM отчет
+    # 4. Генерируем общий LLM анализ
+    overall_analysis = ""
     if llm_summaries_for_report:
-        print("✏️ Генерируем общий LLM отчет по изменениям...")
-        overall_llm_report = generate_overall_report(llm_summaries_for_report)
-        update_summary_report(summary_report_id, overall_llm_report)
+        print("✏️ Генерируем общий LLM анализ по изменениям...")
+        overall_analysis = generate_overall_report(llm_summaries_for_report)
+        update_summary_report(summary_report_id, overall_analysis)
         print(f"✅ Общий LLM отчет обновлен в Supabase")
-        
-        # Отправляем отчет в Telegram
-        telegram_message = f"""📊 <b>Отчёт мониторинга конкурентов</b>
+
+    # 5. Генерируем PDF отчёт
+    print("📄 Генерируем PDF отчёт...")
+    pdf_path = generate_pdf_report(
+        report_date=current_date,
+        total_checked=total_competitors,
+        changes_list=llm_summaries_for_report,
+        errors_list=error_summaries,
+        overall_analysis=overall_analysis
+    )
+
+    # 6. Отправляем в Telegram
+    changes_count = len(llm_summaries_for_report)
+    errors_count = len(error_summaries)
+    
+    # Краткое сообщение со статистикой
+    telegram_message = f"""📊 <b>Мониторинг завершён</b>
+
 📅 Дата: {current_date}
+🌐 Проверено сайтов: <b>{total_competitors}</b>
+🔔 Обнаружено изменений: <b>{changes_count}</b>
+⚠️ Не удалось проверить: <b>{errors_count}</b>
 
-🔔 <b>Обнаружены изменения у {len(llm_summaries_for_report)} конкурентов:</b>
+📎 Подробный отчёт во вложении"""
 
-"""
-        for item in llm_summaries_for_report:
-            telegram_message += f"• <b>{item['competitor']}</b>\n{item['summary']}\n\n"
-        
-        # Добавляем информацию об ошибках, если есть
-        if error_summaries:
-            telegram_message += f"\n⚠️ <b>Не удалось проверить ({len(error_summaries)}):</b>\n"
-            for item in error_summaries[:10]:  # Максимум 10 ошибок в отчёте
-                telegram_message += f"• {item['competitor']}: {item['summary']}\n"
-            if len(error_summaries) > 10:
-                telegram_message += f"... и ещё {len(error_summaries) - 10}\n"
-        
-        send_telegram_message(telegram_message[:4000])  # Telegram лимит 4096 символов
-        
-    else:
-        overall_llm_report = "Изменений не обнаружено ни у одного конкурента."
-        update_summary_report(summary_report_id, overall_llm_report)
-        print("ℹ️ Изменений не обнаружено. Общий отчет обновлен.")
-        
-        # Формируем сообщение
-        telegram_message = f"""✅ <b>Мониторинг завершён</b>
-📅 Дата: {current_date}
-🌐 Проверено: {len(competitors)} сайтов
-
-Изменений не обнаружено."""
-
-        # Добавляем информацию об ошибках, если есть
-        if error_summaries:
-            telegram_message += f"\n\n⚠️ <b>Не удалось проверить ({len(error_summaries)}):</b>\n"
-            for item in error_summaries[:10]:
-                telegram_message += f"• {item['competitor']}: {item['summary']}\n"
-            if len(error_summaries) > 10:
-                telegram_message += f"... и ещё {len(error_summaries) - 10}\n"
-        
-        send_telegram_message(telegram_message[:4000])
+    # Отправляем PDF с подписью
+    send_telegram_document(pdf_path, telegram_message)
+    
+    # Удаляем временный файл
+    try:
+        os.remove(pdf_path)
+        print(f"🗑️ Временный PDF удалён")
+    except:
+        pass
 
     print("✅ Система мониторинга конкурентов завершила работу.")
 
@@ -708,7 +925,7 @@ def run_monitoring_system():
 print("✅ Функция run_monitoring_system загружена")
 
 # ============================================================================
-# ЧАСТЬ 9: ЗАПУСК СИСТЕМЫ
+# ЧАСТЬ 10: ЗАПУСК СИСТЕМЫ
 # ============================================================================
 
 if __name__ == "__main__":
