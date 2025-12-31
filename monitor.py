@@ -52,11 +52,11 @@ LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # --- Настройки ---
-REQUEST_TIMEOUT = 45  # Увеличен таймаут
+REQUEST_TIMEOUT = 35
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 MIN_CONTENT_LENGTH = 300
-PLAYWRIGHT_TIMEOUT = 45000  # Увеличен таймаут
-MAX_RETRIES = 4  # Увеличено количество попыток
+PLAYWRIGHT_TIMEOUT = 35000
+MAX_RETRIES = 2
 
 # --- Категории изменений ---
 CATEGORY_PRODUCTS = "products"      # Продукты и услуги
