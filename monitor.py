@@ -11,13 +11,14 @@ import hashlib
 import json
 import uuid
 import re
+import ssl
+import aiohttp
+import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 import time
-import asyncio
-import nest_asyncio
 
 # Импорты для Playwright
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
@@ -27,12 +28,9 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, ListFlowable, ListItem
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-
-# Применяем nest_asyncio для поддержки вложенных event loop'ов
-nest_asyncio.apply()
 
 print("✅ Зависимости импортированы")
 
@@ -58,35 +56,52 @@ MIN_CONTENT_LENGTH = 300
 PLAYWRIGHT_TIMEOUT = 35000
 MAX_RETRIES = 2
 
+# --- Параллельность ---
+MAX_CONCURRENT_REQUESTS = 15  # Одновременных HTTP запросов
+MAX_CONCURRENT_BROWSER = 3    # Одновременных браузеров (тяжёлые)
+MAX_CONCURRENT_LLM = 5        # Одновременных LLM запросов
+
 # --- Категории изменений ---
-CATEGORY_PRODUCTS = "products"      # Продукты и услуги
-CATEGORY_PRICES = "prices"          # Цены и акции
-CATEGORY_NEWS = "news"              # Новости
-CATEGORY_TECHNICAL = "technical"    # Технические изменения
-CATEGORY_UNREADABLE = "unreadable"  # Нечитаемый контент
+CATEGORY_PRODUCTS = "products"
+CATEGORY_PRICES = "prices"
+CATEGORY_NEWS = "news"
+CATEGORY_TECHNICAL = "technical"
+CATEGORY_UNREADABLE = "unreadable"
 
 # --- Теги ---
 TAGS = {
-    "новый_продукт": {"color": "#4CAF50", "text": "белый"},
-    "оборудование": {"color": "#2196F3", "text": "белый"},
-    "тахографы": {"color": "#9C27B0", "text": "белый"},
-    "мониторинг": {"color": "#00BCD4", "text": "белый"},
-    "ПО": {"color": "#607D8B", "text": "белый"},
-    "акция": {"color": "#FF9800", "text": "белый"},
-    "скидка": {"color": "#F44336", "text": "белый"},
-    "новая_цена": {"color": "#E91E63", "text": "белый"},
-    "бесплатно": {"color": "#8BC34A", "text": "белый"},
-    "новость": {"color": "#3F51B5", "text": "белый"},
-    "важное": {"color": "#f44336", "text": "белый"},
-    "партнёрство": {"color": "#009688", "text": "белый"},
-    "законодательство": {"color": "#795548", "text": "белый"},
-    "обновление_сайта": {"color": "#9E9E9E", "text": "белый"},
-    "wialon": {"color": "#FF5722", "text": "белый"},
-    "глонасс": {"color": "#673AB7", "text": "белый"},
+    "новый_продукт": {"color": "#4CAF50"},
+    "оборудование": {"color": "#2196F3"},
+    "тахографы": {"color": "#9C27B0"},
+    "мониторинг": {"color": "#00BCD4"},
+    "ПО": {"color": "#607D8B"},
+    "акция": {"color": "#FF9800"},
+    "скидка": {"color": "#F44336"},
+    "новая_цена": {"color": "#E91E63"},
+    "бесплатно": {"color": "#8BC34A"},
+    "новость": {"color": "#3F51B5"},
+    "важное": {"color": "#f44336"},
+    "партнёрство": {"color": "#009688"},
+    "законодательство": {"color": "#795548"},
+    "обновление_сайта": {"color": "#9E9E9E"},
+    "wialon": {"color": "#FF5722"},
+    "глонасс": {"color": "#673AB7"},
 }
 
 # Инициализация Supabase клиента
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- Семафоры для ограничения параллельности ---
+http_semaphore = None
+browser_semaphore = None
+llm_semaphore = None
+
+def init_semaphores():
+    """Инициализирует семафоры (вызывать внутри async контекста)"""
+    global http_semaphore, browser_semaphore, llm_semaphore
+    http_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+    browser_semaphore = asyncio.Semaphore(MAX_CONCURRENT_BROWSER)
+    llm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM)
 
 # --- Регистрация русского шрифта для PDF ---
 def register_fonts():
@@ -183,24 +198,14 @@ def calculate_hash(content: str) -> str:
 
 def normalize_content_for_hash(content: str) -> str:
     """Нормализует контент перед хешированием - убирает динамические элементы"""
-    # Убираем даты в разных форматах
     content = re.sub(r'\d{1,2}[./]\d{1,2}[./]\d{2,4}', '', content)
     content = re.sub(r'\d{4}-\d{2}-\d{2}', '', content)
-    
-    # Убираем время
     content = re.sub(r'\d{1,2}:\d{2}(:\d{2})?', '', content)
-    
-    # Убираем года
     content = re.sub(r'202[0-9]|203[0-9]', '', content)
-    
-    # Убираем счётчики посетителей и подобное
     content = re.sub(r'посетител\w*\s*:?\s*\d+', '', content, flags=re.IGNORECASE)
     content = re.sub(r'онлайн\s*:?\s*\d+', '', content, flags=re.IGNORECASE)
     content = re.sub(r'просмотр\w*\s*:?\s*\d+', '', content, flags=re.IGNORECASE)
-    
-    # Убираем множественные пробелы
     content = ' '.join(content.split())
-    
     return content
 
 
@@ -208,330 +213,222 @@ def clean_html_content(soup: BeautifulSoup) -> str:
     """Очищает HTML от скриптов, стилей и служебных элементов"""
     for element in soup(['script', 'style', 'nav', 'footer', 'header', 'noscript', 'iframe']):
         element.decompose()
-
     text = soup.get_text(separator=' ', strip=True)
     text = ' '.join(text.split())
     return text
 
 
 def is_protection_page(content: str) -> bool:
-    """Проверяет, является ли контент страницей защиты (Cloudflare, Captcha и т.п.)"""
+    """Проверяет, является ли контент страницей защиты"""
     protection_patterns = [
-        'cloudflare',
-        'ray id',
-        'checking your browser',
-        'ddos protection',
-        'please wait while we verify',
-        'just a moment',
-        'enable javascript and cookies',
-        'attention required',
-        'security check',
-        'access denied',
-        'please complete the security check',
-        'recaptcha',
-        'hcaptcha',
-        'verifying you are human',
-        'browser verification',
-        'защита от ботов',
-        'проверка браузера',
-        'подождите, идет проверка',
+        'cloudflare', 'ray id', 'checking your browser', 'ddos protection',
+        'please wait while we verify', 'just a moment', 'enable javascript and cookies',
+        'attention required', 'security check', 'access denied',
+        'please complete the security check', 'recaptcha', 'hcaptcha',
+        'verifying you are human', 'browser verification',
+        'защита от ботов', 'проверка браузера', 'подождите, идет проверка',
     ]
     
     content_lower = content.lower()
-    
     for pattern in protection_patterns:
         if pattern in content_lower:
             return True
     
     if len(content) < 1000:
-        short_content_patterns = ['checking', 'verify', 'moment', 'wait']
-        matches = sum(1 for p in short_content_patterns if p in content_lower)
-        if matches >= 2:
+        short_patterns = ['checking', 'verify', 'moment', 'wait']
+        if sum(1 for p in short_patterns if p in content_lower) >= 2:
             return True
     
     return False
 
 
 def is_unreadable_content(content: str) -> bool:
-    """Проверяет, является ли контент нечитаемым (бинарные данные, кодировка)"""
+    """Проверяет, является ли контент нечитаемым"""
     if not content or len(content) < 100:
         return True
     
-    # Проверяем на бинарные/нечитаемые символы
     non_printable = sum(1 for c in content[:1000] if ord(c) > 127 and not c.isalpha())
     if non_printable > len(content[:1000]) * 0.3:
         return True
     
-    # Проверяем на наличие осмысленных слов
     russian_words = len(re.findall(r'[а-яА-ЯёЁ]{3,}', content[:2000]))
     english_words = len(re.findall(r'[a-zA-Z]{3,}', content[:2000]))
     
     if russian_words + english_words < 20:
         return True
     
-    # Проверяем на характерные признаки сжатого/бинарного контента
-    binary_patterns = [
-        r'[\x00-\x08\x0b\x0c\x0e-\x1f]',  # Контрольные символы
-        r'�{3,}',  # Множественные символы замены
-    ]
-    
-    for pattern in binary_patterns:
-        if re.search(pattern, content[:1000]):
-            return True
-    
     return False
 
 
-async def render_page_with_browser(url: str, timeout: int = PLAYWRIGHT_TIMEOUT) -> Optional[str]:
-    """Загружает страницу через безголовый браузер Playwright"""
-    try:
-        print(f"   🌐 Запуск браузерного рендеринга...")
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent=USER_AGENT,
-                viewport={'width': 1920, 'height': 1080},
-                ignore_https_errors=True,
-                java_script_enabled=True
-            )
-
-            page = await context.new_page()
-            
-            # Блокируем ненужные ресурсы для ускорения
-            await page.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2}", lambda route: route.abort())
-
-            try:
-                await page.goto(url, timeout=timeout, wait_until='networkidle')
-                
-                # Ждём дополнительно для SPA
-                await page.wait_for_timeout(2000)
-                
-                html_content = await page.content()
-                soup = BeautifulSoup(html_content, 'lxml')
-                text = clean_html_content(soup)
-
-                print(f"   ✅ Браузерный рендеринг успешен: {len(text)} символов")
-
-                await context.close()
-                await browser.close()
-                return text
-
-            except PlaywrightTimeout:
-                print(f"   ⚠️ Таймаут при загрузке через браузер")
-                await context.close()
-                await browser.close()
-                return None
-            except Exception as e:
-                print(f"   ⚠️ Ошибка внутри Playwright: {str(e)[:200]}")
-                await context.close()
-                await browser.close()
-                return None
-
-    except Exception as e:
-        print(f"   ⚠️ Ошибка браузерного рендеринга: {str(e)[:200]}")
-        return None
-
-
 def is_content_insufficient(content: str) -> bool:
-    """Проверяет, достаточно ли контента или нужен fallback"""
+    """Проверяет, достаточно ли контента"""
     if len(content) < MIN_CONTENT_LENGTH:
         return True
 
-    spa_patterns = [
-        '<div id="root"></div>',
-        '<div id="app"></div>',
-        'document.getElementById',
-        'window.__INITIAL_STATE__'
-    ]
+    spa_patterns = ['<div id="root"></div>', '<div id="app"></div>',
+                    'document.getElementById', 'window.__INITIAL_STATE__']
 
     if len(content) < 500:
         for pattern in spa_patterns:
             if pattern.lower() in content.lower():
                 return True
-
     return False
-
-
-def fetch_website_content(url: str, retry_count: int = MAX_RETRIES) -> Tuple[Optional[str], str]:
-    """
-    Загружает и очищает содержимое веб-сайта с обходом защиты.
-    Возвращает (контент, статус_ошибки)
-    """
-    last_error = ""
-    
-    for attempt in range(retry_count):
-        try:
-            headers = {
-                'User-Agent': USER_AGENT,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Cache-Control': 'max-age=0',
-            }
-
-            session = requests.Session()
-            response = session.get(
-                url,
-                headers=headers,
-                timeout=REQUEST_TIMEOUT,
-                verify=False,
-                allow_redirects=True
-            )
-            response.raise_for_status()
-            
-            # Пауза между попытками
-            time.sleep(1 + attempt)
-
-            # Пробуем декодировать контент
-            try:
-                content = response.content.decode('utf-8')
-            except UnicodeDecodeError:
-                try:
-                    content = response.content.decode('cp1251')
-                except:
-                    content = response.text
-
-            soup = BeautifulSoup(content, 'lxml')
-            text = clean_html_content(soup)
-
-            if is_content_insufficient(text):
-                print(f"   ⚠️ Недостаточно контента ({len(text)} символов), попытка {attempt + 1}/{retry_count}")
-                print(f"   ↺ Переключение на браузерный рендеринг...")
-
-                try:
-                    browser_text = asyncio.run(render_page_with_browser(url))
-                except RuntimeError as e:
-                    print(f"   ⚠️ Ошибка asyncio.run(): {e}")
-                    browser_text = None
-
-                if browser_text and len(browser_text) >= MIN_CONTENT_LENGTH:
-                    return (browser_text, "")
-                elif attempt < retry_count - 1:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                else:
-                    return (text if text else None, "недостаточно_контента")
-
-            print(f"   ✅ Обычная загрузка успешна: {len(text)} символов")
-            return (text, "")
-
-        except requests.exceptions.SSLError as e:
-            last_error = "ssl_ошибка"
-            print(f"   ⚠️ SSL ошибка на попытке {attempt + 1}/{retry_count}")
-            if attempt < retry_count - 1:
-                time.sleep(2 * (attempt + 1))
-            else:
-                try:
-                    result = asyncio.run(render_page_with_browser(url))
-                    return (result, "" if result else "ssl_ошибка")
-                except RuntimeError:
-                    return (None, "ssl_ошибка")
-
-        except requests.exceptions.HTTPError as e:
-            status_code = e.response.status_code if e.response else 0
-            if status_code == 403:
-                last_error = "доступ_запрещён"
-                print(f"   ⚠️ 403 Forbidden на попытке {attempt + 1}/{retry_count}")
-                if attempt < retry_count - 1:
-                    time.sleep(3 * (attempt + 1))
-                else:
-                    try:
-                        result = asyncio.run(render_page_with_browser(url))
-                        return (result, "" if result else "доступ_запрещён")
-                    except RuntimeError:
-                        return (None, "доступ_запрещён")
-            elif status_code == 404:
-                return (None, "страница_не_найдена")
-            elif status_code >= 500:
-                last_error = "ошибка_сервера"
-                if attempt < retry_count - 1:
-                    time.sleep(3 * (attempt + 1))
-                    continue
-                return (None, "ошибка_сервера")
-            else:
-                return (None, f"http_{status_code}")
-
-        except requests.exceptions.ConnectTimeout:
-            last_error = "таймаут_соединения"
-            print(f"   ⚠️ Таймаут соединения на попытке {attempt + 1}/{retry_count}")
-            if attempt < retry_count - 1:
-                time.sleep(2 * (attempt + 1))
-            else:
-                try:
-                    result = asyncio.run(render_page_with_browser(url, timeout=60000))
-                    return (result, "" if result else "таймаут")
-                except RuntimeError:
-                    return (None, "таймаут")
-
-        except requests.exceptions.ConnectionError:
-            last_error = "нет_соединения"
-            print(f"   ⚠️ Ошибка соединения на попытке {attempt + 1}/{retry_count}")
-            if attempt < retry_count - 1:
-                time.sleep(3 * (attempt + 1))
-            else:
-                return (None, "нет_соединения")
-
-        except Exception as e:
-            last_error = "неизвестная_ошибка"
-            print(f"   ⚠️ Ошибка на попытке {attempt + 1}/{retry_count}: {str(e)[:200]}")
-            if attempt < retry_count - 1:
-                time.sleep(2 * (attempt + 1))
-            else:
-                try:
-                    result = asyncio.run(render_page_with_browser(url))
-                    return (result, "" if result else last_error)
-                except RuntimeError:
-                    return (None, last_error)
-
-    return (None, last_error or "неизвестная_ошибка")
 
 
 print("✅ Вспомогательные функции загружены")
 
 # ============================================================================
-# ЧАСТЬ 5: Функции работы с LLM (OpenRouter)
+# ЧАСТЬ 5: Асинхронные функции загрузки контента
 # ============================================================================
 
-def call_llm(prompt: str, max_tokens: int = 500, retry_count: int = 2) -> Optional[str]:
-    """Отправляет запрос к LLM через OpenRouter API с повторными попытками"""
-    for attempt in range(retry_count):
-        try:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            }
-
-            payload = {
-                "model": LLM_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-                "temperature": 0.5
-            }
-
-            response = requests.post(LLM_API_URL, headers=headers, json=payload, timeout=90)
-            response.raise_for_status()
-            time.sleep(2)
-
-            result = response.json()
-            answer = result['choices'][0]['message']['content'].strip()
-            return answer
-
-        except Exception as e:
-            print(f"   ⚠️ Ошибка LLM (попытка {attempt + 1}/{retry_count}): {str(e)[:100]}")
-            if attempt < retry_count - 1:
-                time.sleep(5)
-            else:
-                return None
+async def fetch_with_aiohttp(url: str, session: aiohttp.ClientSession) -> Tuple[Optional[str], str]:
+    """Асинхронная загрузка страницы через aiohttp"""
+    headers = {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
     
+    for attempt in range(MAX_RETRIES):
+        try:
+            async with http_semaphore:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT), ssl=False) as response:
+                    if response.status == 403:
+                        return (None, "доступ_запрещён")
+                    if response.status == 404:
+                        return (None, "страница_не_найдена")
+                    if response.status >= 500:
+                        if attempt < MAX_RETRIES - 1:
+                            await asyncio.sleep(2)
+                            continue
+                        return (None, "ошибка_сервера")
+                    
+                    response.raise_for_status()
+                    
+                    # Читаем контент
+                    content_bytes = await response.read()
+                    
+                    # Пробуем декодировать
+                    try:
+                        content = content_bytes.decode('utf-8')
+                    except UnicodeDecodeError:
+                        try:
+                            content = content_bytes.decode('cp1251')
+                        except:
+                            content = content_bytes.decode('utf-8', errors='ignore')
+                    
+                    soup = BeautifulSoup(content, 'lxml')
+                    text = clean_html_content(soup)
+                    
+                    if len(text) >= MIN_CONTENT_LENGTH:
+                        return (text, "")
+                    
+                    # Недостаточно контента
+                    if attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(1)
+                        continue
+                    
+                    return (text if text else None, "недостаточно_контента")
+                    
+        except asyncio.TimeoutError:
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(2)
+                continue
+            return (None, "таймаут")
+        except aiohttp.ClientConnectorError:
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(2)
+                continue
+            return (None, "нет_соединения")
+        except Exception as e:
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(1)
+                continue
+            return (None, f"ошибка: {str(e)[:50]}")
+    
+    return (None, "неизвестная_ошибка")
+
+
+async def render_with_browser(url: str, browser_context) -> Optional[str]:
+    """Рендеринг страницы через браузер"""
+    try:
+        async with browser_semaphore:
+            page = await browser_context.new_page()
+            try:
+                await page.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2}", lambda route: route.abort())
+                await page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until='networkidle')
+                await page.wait_for_timeout(1500)
+                html_content = await page.content()
+                soup = BeautifulSoup(html_content, 'lxml')
+                text = clean_html_content(soup)
+                await page.close()
+                return text if len(text) >= MIN_CONTENT_LENGTH else None
+            except Exception as e:
+                await page.close()
+                return None
+    except Exception as e:
+        return None
+
+
+async def fetch_website_content_async(url: str, session: aiohttp.ClientSession, browser_context=None) -> Tuple[Optional[str], str]:
+    """Асинхронная загрузка контента с fallback на браузер"""
+    # Сначала пробуем aiohttp
+    content, error = await fetch_with_aiohttp(url, session)
+    
+    if content and len(content) >= MIN_CONTENT_LENGTH:
+        return (content, "")
+    
+    # Fallback на браузер если есть контекст и контента мало
+    if browser_context and (not content or error == "недостаточно_контента"):
+        browser_content = await render_with_browser(url, browser_context)
+        if browser_content:
+            return (browser_content, "")
+    
+    return (content, error)
+
+
+print("✅ Асинхронные функции загрузки загружены")
+
+# ============================================================================
+# ЧАСТЬ 6: Функции работы с LLM (OpenRouter)
+# ============================================================================
+
+async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens: int = 400) -> Optional[str]:
+    """Асинхронный запрос к LLM"""
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.5
+    }
+    
+    for attempt in range(2):
+        try:
+            async with llm_semaphore:
+                async with session.post(LLM_API_URL, headers=headers, json=payload, 
+                                        timeout=aiohttp.ClientTimeout(total=90)) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    return result['choices'][0]['message']['content'].strip()
+        except Exception as e:
+            if attempt < 1:
+                await asyncio.sleep(3)
+                continue
+            return None
     return None
 
 
-def analyze_changes_with_category(competitor_name: str, new_content: str) -> Dict[str, Any]:
-    """Анализирует изменения и определяет категорию и теги"""
+async def analyze_changes_with_category_async(competitor_name: str, new_content: str, session: aiohttp.ClientSession) -> Dict[str, Any]:
+    """Асинхронный анализ изменений"""
     
     prompt = f"""Проанализируй контент сайта компании "{competitor_name}" и определи тип изменений.
 
@@ -549,19 +446,19 @@ def analyze_changes_with_category(competitor_name: str, new_content: str) -> Dic
 ПРАВИЛА КАТЕГОРИЗАЦИИ:
 - "products" — новые продукты, услуги, оборудование, решения
 - "prices" — акции, скидки, изменение цен, спецпредложения  
-- "news" — новости компании, события, партнёрства, изменения в законодательстве, уход/приход на рынок
+- "news" — новости компании, события, партнёрства, изменения в законодательстве
 - "technical" — обновления сайта, исправления, технические изменения
 
 ДОСТУПНЫЕ ТЕГИ: новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, новая_цена, бесплатно, новость, важное, партнёрство, законодательство, обновление_сайта, wialon, глонасс
 
 ВАЖНО:
-- is_meaningful=false если контент нечитаемый, бессмысленный или не содержит полезной информации
-- summary должен быть конкретным и информативным (3-4 предложения)
-- Выбери 1-3 наиболее подходящих тега
+- is_meaningful=false если контент нечитаемый или бессмысленный
+- summary должен быть информативным (3-4 предложения)
+- Выбери 1-3 подходящих тега
 
-Ответь ТОЛЬКО JSON, без пояснений."""
+Ответь ТОЛЬКО JSON."""
 
-    response = call_llm(prompt, max_tokens=400)
+    response = await call_llm_async(prompt, session)
     
     if not response:
         return {
@@ -571,9 +468,7 @@ def analyze_changes_with_category(competitor_name: str, new_content: str) -> Dic
             "is_meaningful": False
         }
     
-    # Парсим JSON из ответа
     try:
-        # Убираем возможные markdown-обёртки
         json_str = response.strip()
         if json_str.startswith("```"):
             json_str = re.sub(r'^```json?\s*', '', json_str)
@@ -581,15 +476,12 @@ def analyze_changes_with_category(competitor_name: str, new_content: str) -> Dic
         
         result = json.loads(json_str)
         
-        # Валидация категории
         if result.get("category") not in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_TECHNICAL]:
             result["category"] = CATEGORY_TECHNICAL
         
-        # Валидация тегов
         valid_tags = [t for t in result.get("tags", []) if t in TAGS]
-        result["tags"] = valid_tags[:3]  # Максимум 3 тега
+        result["tags"] = valid_tags[:3]
         
-        # Проверка summary
         if not result.get("summary") or len(result.get("summary", "")) < 20:
             result["summary"] = f"Обнаружены изменения на сайте {competitor_name}."
             result["is_meaningful"] = False
@@ -597,7 +489,6 @@ def analyze_changes_with_category(competitor_name: str, new_content: str) -> Dic
         return result
         
     except json.JSONDecodeError:
-        # Если не удалось распарсить JSON, пытаемся извлечь summary
         return {
             "category": CATEGORY_TECHNICAL,
             "tags": [],
@@ -609,7 +500,7 @@ def analyze_changes_with_category(competitor_name: str, new_content: str) -> Dic
 print("✅ Функции работы с LLM загружены")
 
 # ============================================================================
-# ЧАСТЬ 6: Генерация PDF отчёта
+# ЧАСТЬ 7: Генерация PDF отчёта
 # ============================================================================
 
 def generate_pdf_report(
@@ -618,7 +509,7 @@ def generate_pdf_report(
     categorized_changes: Dict[str, List[Dict]],
     errors_by_type: Dict[str, List[Dict]]
 ) -> str:
-    """Генерирует PDF отчёт с категориями и кликабельными ссылками"""
+    """Генерирует PDF отчёт"""
     
     filename = f"/tmp/competitor_report_{report_date}.pdf"
     
@@ -631,73 +522,18 @@ def generate_pdf_report(
         bottomMargin=15*mm
     )
     
-    # Шрифты
     font_regular = FONT_NAME
     font_bold = f"{FONT_NAME}-Bold" if FONT_NAME == 'DejaVuSans' else 'Helvetica-Bold'
     
     # Стили
-    title_style = ParagraphStyle(
-        'Title',
-        fontName=font_bold,
-        fontSize=16,
-        spaceAfter=8,
-        alignment=1,
-        textColor=colors.HexColor('#1a1a1a')
-    )
+    title_style = ParagraphStyle('Title', fontName=font_bold, fontSize=16, spaceAfter=8, alignment=1, textColor=colors.HexColor('#1a1a1a'))
+    subtitle_style = ParagraphStyle('Subtitle', fontName=font_regular, fontSize=10, spaceAfter=12, alignment=1, textColor=colors.grey)
+    section_style = ParagraphStyle('Section', fontName=font_bold, fontSize=13, spaceBefore=16, spaceAfter=8, textColor=colors.HexColor('#2c5aa0'))
+    company_style = ParagraphStyle('Company', fontName=font_bold, fontSize=10, spaceBefore=10, spaceAfter=2, textColor=colors.HexColor('#333333'))
+    summary_style = ParagraphStyle('Summary', fontName=font_regular, fontSize=9, spaceAfter=2, leading=12, leftIndent=10)
+    tag_style = ParagraphStyle('Tags', fontName=font_regular, fontSize=8, spaceAfter=8, leftIndent=10)
+    error_style = ParagraphStyle('Error', fontName=font_regular, fontSize=8, spaceAfter=2, textColor=colors.HexColor('#666666'))
     
-    subtitle_style = ParagraphStyle(
-        'Subtitle',
-        fontName=font_regular,
-        fontSize=10,
-        spaceAfter=12,
-        alignment=1,
-        textColor=colors.grey
-    )
-    
-    section_style = ParagraphStyle(
-        'Section',
-        fontName=font_bold,
-        fontSize=13,
-        spaceBefore=16,
-        spaceAfter=8,
-        textColor=colors.HexColor('#2c5aa0')
-    )
-    
-    company_style = ParagraphStyle(
-        'Company',
-        fontName=font_bold,
-        fontSize=10,
-        spaceBefore=10,
-        spaceAfter=2,
-        textColor=colors.HexColor('#333333')
-    )
-    
-    summary_style = ParagraphStyle(
-        'Summary',
-        fontName=font_regular,
-        fontSize=9,
-        spaceAfter=2,
-        leading=12,
-        leftIndent=10
-    )
-    
-    tag_style = ParagraphStyle(
-        'Tags',
-        fontName=font_regular,
-        fontSize=8,
-        spaceAfter=8,
-        leftIndent=10
-    )
-    
-    error_style = ParagraphStyle(
-        'Error',
-        fontName=font_regular,
-        fontSize=8,
-        spaceAfter=2,
-        textColor=colors.HexColor('#666666')
-    )
-    
-    # Контент
     content = []
     
     # Заголовок
@@ -705,58 +541,60 @@ def generate_pdf_report(
     content.append(Paragraph(f"Дата: {report_date}", subtitle_style))
     
     # Статистика
-    total_changes = sum(len(items) for items in categorized_changes.values())
+    total_changes = sum(len(items) for cat, items in categorized_changes.items() if cat != CATEGORY_UNREADABLE)
     total_errors = sum(len(items) for items in errors_by_type.values())
     
     stats_text = f"📊 Проверено: {total_checked} | ✅ Изменения: {total_changes} | ⚠️ Ошибки: {total_errors}"
     content.append(Paragraph(stats_text, subtitle_style))
     content.append(Spacer(1, 10))
     
-    # Секция: Продукты и услуги
-    if categorized_changes.get(CATEGORY_PRODUCTS):
-        content.append(Paragraph("🏷️ ПРОДУКТЫ И УСЛУГИ", section_style))
-        for i, item in enumerate(categorized_changes[CATEGORY_PRODUCTS], 1):
-            content.extend(format_change_item(i, item, company_style, summary_style, tag_style, font_regular))
+    # Секции по категориям
+    sections = [
+        (CATEGORY_PRODUCTS, "🏷️ ПРОДУКТЫ И УСЛУГИ"),
+        (CATEGORY_PRICES, "💰 ЦЕНЫ И АКЦИИ"),
+        (CATEGORY_NEWS, "📰 НОВОСТИ"),
+    ]
     
-    # Секция: Цены и акции
-    if categorized_changes.get(CATEGORY_PRICES):
-        content.append(Paragraph("💰 ЦЕНЫ И АКЦИИ", section_style))
-        for i, item in enumerate(categorized_changes[CATEGORY_PRICES], 1):
-            content.extend(format_change_item(i, item, company_style, summary_style, tag_style, font_regular))
+    for category, title in sections:
+        if categorized_changes.get(category):
+            content.append(Paragraph(title, section_style))
+            for i, item in enumerate(categorized_changes[category], 1):
+                name = item.get('competitor', 'Неизвестно')
+                url = item.get('url', '')
+                summary = item.get('summary', '')
+                tags = item.get('tags', [])
+                
+                if url:
+                    company_text = f"{i}. <b>{name}</b> — <a href='{url}' color='blue'>{url}</a>"
+                else:
+                    company_text = f"{i}. <b>{name}</b>"
+                content.append(Paragraph(company_text, company_style))
+                content.append(Paragraph(summary, summary_style))
+                
+                if tags:
+                    tag_parts = [f"<font color='{TAGS.get(tag, {}).get('color', '#9E9E9E')}'><b>#{tag}</b></font>" for tag in tags]
+                    content.append(Paragraph(" ".join(tag_parts), tag_style))
     
-    # Секция: Новости
-    if categorized_changes.get(CATEGORY_NEWS):
-        content.append(Paragraph("📰 НОВОСТИ", section_style))
-        for i, item in enumerate(categorized_changes[CATEGORY_NEWS], 1):
-            content.extend(format_change_item(i, item, company_style, summary_style, tag_style, font_regular))
-    
-    # Секция: Технические (кратко)
+    # Технические (кратко)
     if categorized_changes.get(CATEGORY_TECHNICAL):
         content.append(Paragraph("🔧 ТЕХНИЧЕСКИЕ ИЗМЕНЕНИЯ", section_style))
         for item in categorized_changes[CATEGORY_TECHNICAL]:
             name = item.get('competitor', 'Неизвестно')
             url = item.get('url', '')
             summary = item.get('summary', '')[:100]
-            
-            if url:
-                text = f"• <b>{name}</b> — <a href='{url}' color='blue'>{url}</a>: {summary}"
-            else:
-                text = f"• <b>{name}</b>: {summary}"
+            text = f"• <b>{name}</b> — <a href='{url}' color='blue'>{url}</a>: {summary}" if url else f"• <b>{name}</b>: {summary}"
             content.append(Paragraph(text, error_style))
     
-    # Секция: Нечитаемый контент
+    # Нечитаемый контент
     if categorized_changes.get(CATEGORY_UNREADABLE):
         content.append(Paragraph("❓ НЕ УДАЛОСЬ ПРОЧИТАТЬ КОНТЕНТ", section_style))
         for item in categorized_changes[CATEGORY_UNREADABLE]:
             name = item.get('competitor', 'Неизвестно')
             url = item.get('url', '')
-            if url:
-                text = f"• <b>{name}</b> — <a href='{url}' color='blue'>{url}</a>"
-            else:
-                text = f"• <b>{name}</b>"
+            text = f"• <b>{name}</b> — <a href='{url}' color='blue'>{url}</a>" if url else f"• <b>{name}</b>"
             content.append(Paragraph(text, error_style))
     
-    # Секция: Ошибки по типам
+    # Ошибки
     if any(errors_by_type.values()):
         content.append(Paragraph("⚠️ НЕ УДАЛОСЬ ПРОВЕРИТЬ", section_style))
         
@@ -769,97 +607,47 @@ def generate_pdf_report(
         
         for error_type, label in error_labels.items():
             if errors_by_type.get(error_type):
-                items = errors_by_type[error_type]
-                names_with_links = []
-                for item in items:
-                    name = item.get('competitor', '')
-                    url = item.get('url', '')
-                    if url:
-                        names_with_links.append(f"<a href='{url}' color='blue'>{name}</a>")
-                    else:
-                        names_with_links.append(name)
-                
-                text = f"{label}: {', '.join(names_with_links)}"
-                content.append(Paragraph(text, error_style))
+                names = [f"<a href='{item.get('url', '')}' color='blue'>{item.get('competitor', '')}</a>" 
+                        if item.get('url') else item.get('competitor', '') 
+                        for item in errors_by_type[error_type]]
+                content.append(Paragraph(f"{label}: {', '.join(names)}", error_style))
     
-    # Генерация PDF
     doc.build(content)
-    print(f"✅ PDF отчёт создан: {filename}")
+    print(f"✅ PDF создан: {filename}")
     
     return filename
-
-
-def format_change_item(index: int, item: Dict, company_style, summary_style, tag_style, font_regular) -> List:
-    """Форматирует один элемент изменения для PDF"""
-    elements = []
-    
-    name = item.get('competitor', 'Неизвестно')
-    url = item.get('url', '')
-    summary = item.get('summary', '')
-    tags = item.get('tags', [])
-    
-    # Название компании с ссылкой
-    if url:
-        company_text = f"{index}. <b>{name}</b> — <a href='{url}' color='blue'>{url}</a>"
-    else:
-        company_text = f"{index}. <b>{name}</b>"
-    elements.append(Paragraph(company_text, company_style))
-    
-    # Описание
-    elements.append(Paragraph(summary, summary_style))
-    
-    # Теги с цветами
-    if tags:
-        tag_parts = []
-        for tag in tags:
-            tag_info = TAGS.get(tag, {"color": "#9E9E9E"})
-            color = tag_info["color"]
-            tag_parts.append(f"<font color='{color}'><b>#{tag}</b></font>")
-        elements.append(Paragraph(" ".join(tag_parts), tag_style))
-    
-    return elements
 
 
 print("✅ Функции генерации PDF загружены")
 
 # ============================================================================
-# ЧАСТЬ 7: Функции работы с Supabase
+# ЧАСТЬ 8: Функции работы с Supabase
 # ============================================================================
 
 def get_previous_hash(competitor_id: str) -> Optional[str]:
-    """Получает предыдущий хеш из последней записи сканирования"""
+    """Получает предыдущий хеш"""
     try:
         competitor = supabase.table('competitors').select('last_scan_id').eq('id', competitor_id).single().execute()
-
         if not competitor.data or not competitor.data.get('last_scan_id'):
             return None
-
+        
         last_scan_id = competitor.data['last_scan_id']
         scan_result = supabase.table('scan_results').select('last_hash').eq('id', last_scan_id).single().execute()
-
+        
         if scan_result.data:
             last_hash = scan_result.data.get('last_hash')
             if last_hash in ["PROTECTION_PAGE", "UNREADABLE_CONTENT", "ERROR"]:
                 return None
             return last_hash
         return None
-
     except Exception as e:
-        print(f"⚠️ Не удалось получить предыдущий хеш: {str(e)}")
         return None
 
 
-def create_scan_result(
-    scan_id: str,
-    scan_date: str,
-    competitor_id: str,
-    new_hash: str,
-    content_changed: bool,
-    raw_content: str = "",
-    llm_summary: str = "",
-    report_id: str = None
-) -> Optional[str]:
-    """Создает новую запись в таблице scan_results"""
+def create_scan_result(scan_id: str, scan_date: str, competitor_id: str, new_hash: str,
+                       content_changed: bool, raw_content: str = "", llm_summary: str = "",
+                       report_id: str = None) -> Optional[str]:
+    """Создает запись сканирования"""
     try:
         data = {
             'scan_id': scan_id,
@@ -871,94 +659,69 @@ def create_scan_result(
             'llm_summary': llm_summary if llm_summary else None,
             'report_id': report_id
         }
-
         result = supabase.table('scan_results').insert(data).execute()
-
-        if result.data and len(result.data) > 0:
-            return result.data[0]['id']
-        return None
-
+        return result.data[0]['id'] if result.data else None
     except Exception as e:
-        print(f"❌ Ошибка при создании записи scan_results: {str(e)}")
+        print(f"❌ Ошибка записи: {str(e)[:100]}")
         return None
 
 
 def update_competitor_last_scan(competitor_id: str, scan_result_id: str) -> bool:
-    """Обновляет ссылку на последнее сканирование в записи конкурента"""
+    """Обновляет last_scan_id"""
     try:
-        supabase.table('competitors').update({
-            'last_scan_id': scan_result_id
-        }).eq('id', competitor_id).execute()
+        supabase.table('competitors').update({'last_scan_id': scan_result_id}).eq('id', competitor_id).execute()
         return True
-    except Exception as e:
-        print(f"❌ Ошибка при обновлении last_scan_id: {str(e)}")
+    except:
         return False
 
 
 def create_summary_report(report_id: str, report_date: str) -> Optional[str]:
-    """Создает новую запись в таблице summary_reports"""
+    """Создает запись отчёта"""
     try:
-        data = {
-            'report_id': report_id,
-            'report_date': report_date,
-            'overall_llm_report': "Генерация отчета..."
-        }
-
+        data = {'report_id': report_id, 'report_date': report_date, 'overall_llm_report': "Генерация..."}
         result = supabase.table('summary_reports').insert(data).execute()
-
-        if result.data and len(result.data) > 0:
-            return result.data[0]['id']
-        return None
-
-    except Exception as e:
-        print(f"❌ Ошибка при создании summary_reports: {str(e)}")
+        return result.data[0]['id'] if result.data else None
+    except:
         return None
 
 
 def update_summary_report(report_id: str, overall_report: str) -> bool:
-    """Обновляет общий отчет в таблице summary_reports"""
+    """Обновляет отчёт"""
     try:
-        supabase.table('summary_reports').update({
-            'overall_llm_report': overall_report
-        }).eq('id', report_id).execute()
+        supabase.table('summary_reports').update({'overall_llm_report': overall_report}).eq('id', report_id).execute()
         return True
-    except Exception as e:
-        print(f"❌ Ошибка при обновлении overall_llm_report: {str(e)}")
+    except:
         return False
 
 
-print("✅ Функции работы с Supabase загружены")
+print("✅ Функции Supabase загружены")
 
 # ============================================================================
-# ЧАСТЬ 8: Основная логика мониторинга
+# ЧАСТЬ 9: Асинхронное сканирование конкурента
 # ============================================================================
 
-def scan_competitor(
+async def scan_competitor_async(
     competitor: Dict,
     report_id: str,
-    scan_date: str
+    scan_date: str,
+    http_session: aiohttp.ClientSession,
+    browser_context
 ) -> Optional[Dict[str, Any]]:
-    """Сканирует одного конкурента и создает запись в scan_results"""
+    """Асинхронное сканирование одного конкурента"""
+    
     competitor_id = competitor['id']
     competitor_name = competitor.get('name', 'Unknown')
     competitor_url = competitor.get('url', '')
 
-    print(f"\n🔍 Сканирование: {competitor_name}")
-    print(f"   URL: {competitor_url}")
+    print(f"🔍 {competitor_name}")
 
     previous_hash = get_previous_hash(competitor_id)
 
-    if previous_hash:
-        print(f"   🔑 Предыдущий хеш: {previous_hash[:16]}...")
-    else:
-        print(f"   🆕 Первое сканирование")
-
     # Загружаем контент
-    current_content, error_type = fetch_website_content(competitor_url)
+    current_content, error_type = await fetch_website_content_async(competitor_url, http_session, browser_context)
 
-    # Обработка ошибок загрузки
+    # Обработка ошибок
     if not current_content:
-        print(f"   ❌ Не удалось загрузить: {error_type}")
         return {
             'competitor': competitor_name,
             'url': competitor_url,
@@ -966,22 +729,10 @@ def scan_competitor(
             'is_error': True
         }
 
-    # Проверка на страницу защиты
+    # Проверка защиты
     if is_protection_page(current_content):
-        print(f"   ⚠️ Страница защиты (Cloudflare/Captcha)")
-        
         scan_id = generate_unique_id("scan_")
-        create_scan_result(
-            scan_id=scan_id,
-            scan_date=scan_date,
-            competitor_id=competitor_id,
-            new_hash="PROTECTION_PAGE",
-            content_changed=False,
-            raw_content="",
-            llm_summary="Защита Cloudflare/Captcha",
-            report_id=None
-        )
-        
+        create_scan_result(scan_id, scan_date, competitor_id, "PROTECTION_PAGE", False, "", "Защита Cloudflare", None)
         return {
             'competitor': competitor_name,
             'url': competitor_url,
@@ -989,36 +740,23 @@ def scan_competitor(
             'is_error': True
         }
 
-    # Проверка на нечитаемый контент
+    # Проверка читаемости
     if is_unreadable_content(current_content):
-        print(f"   ⚠️ Нечитаемый контент")
-        
         scan_id = generate_unique_id("scan_")
-        create_scan_result(
-            scan_id=scan_id,
-            scan_date=scan_date,
-            competitor_id=competitor_id,
-            new_hash="UNREADABLE_CONTENT",
-            content_changed=False,
-            raw_content="",
-            llm_summary="Нечитаемый контент",
-            report_id=None
-        )
-        
+        create_scan_result(scan_id, scan_date, competitor_id, "UNREADABLE_CONTENT", False, "", "Нечитаемый контент", None)
         return {
             'competitor': competitor_name,
             'url': competitor_url,
             'category': CATEGORY_UNREADABLE,
-            'summary': 'Контент сайта не удалось прочитать (возможно, бинарные данные или проблема с кодировкой)',
+            'summary': 'Контент не удалось прочитать',
             'tags': [],
             'is_error': False,
             'is_unreadable': True
         }
 
-    # Нормализуем контент и считаем хеш
+    # Хеш
     normalized_content = normalize_content_for_hash(current_content)
     new_hash = calculate_hash(normalized_content)
-    print(f"   ✅ Хеш: {new_hash[:16]}...")
 
     content_changed = (previous_hash is not None) and (new_hash != previous_hash)
 
@@ -1026,28 +764,22 @@ def scan_competitor(
     result_dict = None
 
     if content_changed:
-        print(f"   🔔 ИЗМЕНЕНИЯ ОБНАРУЖЕНЫ!")
-        print(f"   🤖 Анализ через LLM...")
+        print(f"   🔔 Изменения: {competitor_name}")
         
-        # Анализируем с категоризацией
-        analysis = analyze_changes_with_category(competitor_name, current_content)
+        # Анализ через LLM
+        analysis = await analyze_changes_with_category_async(competitor_name, current_content, http_session)
         
         if not analysis.get("is_meaningful", True):
-            # Если LLM считает контент бессмысленным
-            print(f"   ⚠️ LLM: контент не информативен")
             result_dict = {
                 'competitor': competitor_name,
                 'url': competitor_url,
                 'category': CATEGORY_UNREADABLE,
-                'summary': 'Контент изменился, но не содержит полезной информации',
+                'summary': 'Контент изменился, но не информативен',
                 'tags': [],
                 'is_error': False,
                 'is_unreadable': True
             }
         else:
-            print(f"   📄 Категория: {analysis['category']}")
-            print(f"   🏷️ Теги: {analysis['tags']}")
-            
             result_dict = {
                 'competitor': competitor_name,
                 'url': competitor_url,
@@ -1060,37 +792,34 @@ def scan_competitor(
         
         llm_summary = analysis.get('summary', '')
     else:
-        print(f"   ✅ Изменений нет")
         llm_summary = ""
 
-    # Сохраняем результат
+    # Сохраняем
     scan_result_id = create_scan_result(
-        scan_id=scan_id,
-        scan_date=scan_date,
-        competitor_id=competitor_id,
-        new_hash=new_hash,
-        content_changed=content_changed,
-        raw_content=current_content if content_changed else "",
-        llm_summary=llm_summary,
-        report_id=report_id if content_changed else None
+        scan_id, scan_date, competitor_id, new_hash, content_changed,
+        current_content if content_changed else "", llm_summary,
+        report_id if content_changed else None
     )
 
     if scan_result_id:
-        print(f"   💾 Сохранено: {scan_id}")
         update_competitor_last_scan(competitor_id, scan_result_id)
 
     return result_dict
 
 
-print("✅ Основная логика мониторинга загружена")
+print("✅ Асинхронное сканирование загружено")
 
 # ============================================================================
-# ЧАСТЬ 9: Функция для запуска системы мониторинга
+# ЧАСТЬ 10: Главная функция с параллельным выполнением
 # ============================================================================
 
-def run_monitoring_system():
-    """Запускает систему мониторинга конкурентов"""
-    print("🚀 Запуск системы мониторинга конкурентов...")
+async def run_monitoring_async():
+    """Асинхронный мониторинг с параллельным выполнением"""
+    
+    print("🚀 Запуск параллельного мониторинга...")
+    start_time = time.time()
+    
+    init_semaphores()
     
     send_telegram_message("🚀 <b>Запуск мониторинга конкурентов</b>")
 
@@ -1099,92 +828,98 @@ def run_monitoring_system():
     summary_report_id = create_summary_report(report_id, current_date)
 
     if not summary_report_id:
-        print("❌ Не удалось создать отчет")
         send_telegram_message("❌ <b>Ошибка:</b> Не удалось создать отчет")
         return
-
-    print(f"📊 Отчет: {report_id}")
 
     # Получаем конкурентов
     try:
         competitors_response = supabase.table('competitors').select('*').execute()
         competitors = competitors_response.data
     except Exception as e:
-        print(f"❌ Ошибка: {str(e)}")
         send_telegram_message(f"❌ <b>Ошибка:</b> {str(e)[:200]}")
         return
 
     total_competitors = len(competitors)
     print(f"🌐 Конкурентов: {total_competitors}")
 
-    # Структуры для сбора результатов
+    # Результаты
     categorized_changes = {
-        CATEGORY_PRODUCTS: [],
-        CATEGORY_PRICES: [],
-        CATEGORY_NEWS: [],
-        CATEGORY_TECHNICAL: [],
-        CATEGORY_UNREADABLE: []
+        CATEGORY_PRODUCTS: [], CATEGORY_PRICES: [], CATEGORY_NEWS: [],
+        CATEGORY_TECHNICAL: [], CATEGORY_UNREADABLE: []
     }
+    errors_by_type = {"cloudflare": [], "недоступен": [], "таймаут": [], "другое": []}
+
+    # Создаём HTTP сессию и браузер
+    connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT_REQUESTS, ssl=False)
     
-    errors_by_type = {
-        "cloudflare": [],
-        "недоступен": [],
-        "таймаут": [],
-        "другое": []
-    }
+    async with aiohttp.ClientSession(connector=connector) as http_session:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            browser_context = await browser.new_context(
+                user_agent=USER_AGENT,
+                viewport={'width': 1920, 'height': 1080},
+                ignore_https_errors=True
+            )
+            
+            # Создаём задачи для всех конкурентов
+            tasks = [
+                scan_competitor_async(competitor, summary_report_id, current_date, http_session, browser_context)
+                for competitor in competitors
+            ]
+            
+            # Выполняем параллельно
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            await browser_context.close()
+            await browser.close()
 
-    # Сканируем
-    for competitor in competitors:
-        result = scan_competitor(competitor, summary_report_id, current_date)
-        
-        if result:
-            if result.get('is_error'):
-                # Классифицируем ошибку
-                error_type = result.get('error_type', 'другое')
-                if 'cloudflare' in error_type.lower():
-                    errors_by_type["cloudflare"].append(result)
-                elif error_type in ['нет_соединения', 'недоступен', 'страница_не_найдена', 'ошибка_сервера']:
-                    errors_by_type["недоступен"].append(result)
-                elif 'таймаут' in error_type:
-                    errors_by_type["таймаут"].append(result)
-                else:
-                    errors_by_type["другое"].append(result)
+    # Обрабатываем результаты
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        if not result:
+            continue
             
-            elif result.get('is_unreadable'):
-                categorized_changes[CATEGORY_UNREADABLE].append(result)
-            
+        if result.get('is_error'):
+            error_type = result.get('error_type', 'другое')
+            if 'cloudflare' in error_type.lower():
+                errors_by_type["cloudflare"].append(result)
+            elif error_type in ['нет_соединения', 'недоступен', 'страница_не_найдена', 'ошибка_сервера']:
+                errors_by_type["недоступен"].append(result)
+            elif 'таймаут' in error_type:
+                errors_by_type["таймаут"].append(result)
             else:
-                # Добавляем в соответствующую категорию
-                category = result.get('category', CATEGORY_TECHNICAL)
-                if category in categorized_changes:
-                    categorized_changes[category].append(result)
-                else:
-                    categorized_changes[CATEGORY_TECHNICAL].append(result)
-        
-        time.sleep(2)
+                errors_by_type["другое"].append(result)
+        elif result.get('is_unreadable'):
+            categorized_changes[CATEGORY_UNREADABLE].append(result)
+        else:
+            category = result.get('category', CATEGORY_TECHNICAL)
+            if category in categorized_changes:
+                categorized_changes[category].append(result)
+            else:
+                categorized_changes[CATEGORY_TECHNICAL].append(result)
 
-    # Обновляем отчёт в Supabase
+    # Время выполнения
+    elapsed_time = time.time() - start_time
+    print(f"⏱️ Время выполнения: {elapsed_time:.1f} сек")
+
+    # Обновляем отчёт
     total_changes = sum(len(items) for cat, items in categorized_changes.items() if cat != CATEGORY_UNREADABLE)
-    summary_text = f"Изменения: {total_changes} (продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}, цены: {len(categorized_changes[CATEGORY_PRICES])}, новости: {len(categorized_changes[CATEGORY_NEWS])})"
+    summary_text = f"Изменения: {total_changes}"
     update_summary_report(summary_report_id, summary_text)
 
     # Генерируем PDF
     print("📄 Генерация PDF...")
-    pdf_path = generate_pdf_report(
-        report_date=current_date,
-        total_checked=total_competitors,
-        categorized_changes=categorized_changes,
-        errors_by_type=errors_by_type
-    )
+    pdf_path = generate_pdf_report(current_date, total_competitors, categorized_changes, errors_by_type)
 
-    # Статистика для Telegram
-    total_changes = sum(len(items) for cat, items in categorized_changes.items() if cat != CATEGORY_UNREADABLE)
+    # Telegram
     total_errors = sum(len(items) for items in errors_by_type.values())
     unreadable_count = len(categorized_changes[CATEGORY_UNREADABLE])
     
     telegram_message = f"""📊 <b>Мониторинг завершён</b>
 
 📅 Дата: {current_date}
+⏱️ Время: {elapsed_time:.0f} сек
 🌐 Проверено: <b>{total_competitors}</b>
 
 ✅ <b>Изменения: {total_changes}</b>
@@ -1202,7 +937,6 @@ def run_monitoring_system():
 
     send_telegram_document(pdf_path, telegram_message)
     
-    # Удаляем временный файл
     try:
         os.remove(pdf_path)
     except:
@@ -1211,10 +945,15 @@ def run_monitoring_system():
     print("✅ Мониторинг завершён")
 
 
-print("✅ Функция run_monitoring_system загружена")
+def run_monitoring_system():
+    """Точка входа - запуск асинхронного мониторинга"""
+    asyncio.run(run_monitoring_async())
+
+
+print("✅ Главная функция загружена")
 
 # ============================================================================
-# ЧАСТЬ 10: ЗАПУСК СИСТЕМЫ
+# ЧАСТЬ 11: ЗАПУСК
 # ============================================================================
 
 if __name__ == "__main__":
