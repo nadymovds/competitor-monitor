@@ -49,7 +49,7 @@ LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # === ОБНОВЛЁННЫЕ ТАЙМАУТЫ И RETRY ===
 REQUEST_TIMEOUT = 45  # было 35
-PLAYWRIGHT_TIMEOUT = 50000  # было 35000
+PLAYWRIGHT_TIMEOUT = 60000  # было 35000, увеличено для медленных сайтов
 MAX_RETRIES = 3  # было 2
 RETRY_DELAYS = [2, 5, 10]  # прогрессивные задержки между попытками
 
@@ -79,7 +79,7 @@ def get_random_user_agent():
 USER_AGENT = USER_AGENTS[0]
 
 MAX_CONCURRENT_REQUESTS = 15
-MAX_CONCURRENT_BROWSER = 3
+MAX_CONCURRENT_BROWSER = 5  # увеличено с 3, т.к. браузер используется чаще
 MAX_CONCURRENT_LLM = 5
 
 CATEGORY_PRODUCTS = "products"
@@ -360,16 +360,34 @@ async def fetch_with_aiohttp(url: str, session: aiohttp.ClientSession) -> Tuple[
 
 
 async def render_with_browser(url: str, browser_context) -> Optional[str]:
-    """Рендеринг JavaScript-страниц через Playwright"""
+    """Рендеринг JavaScript-страниц через Playwright с улучшенной обработкой"""
     try:
         async with browser_semaphore:
             page = await browser_context.new_page()
             try:
-                # Блокируем тяжёлые ресурсы
-                await page.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,mp4,webm}", lambda route: route.abort())
+                # Блокируем тяжёлые ресурсы для ускорения
+                await page.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,mp4,webm,mp3,wav}", lambda route: route.abort())
                 
-                await page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until='networkidle')
-                await page.wait_for_timeout(2000)  # Даём больше времени на загрузку JS
+                # Пробуем разные стратегии загрузки
+                try:
+                    # Сначала пробуем networkidle (ждём когда всё загрузится)
+                    await page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until='networkidle')
+                except:
+                    # Если не получилось — пробуем domcontentloaded (быстрее)
+                    try:
+                        await page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until='domcontentloaded')
+                    except:
+                        await page.close()
+                        return None
+                
+                # Даём время на выполнение JavaScript
+                await page.wait_for_timeout(3000)
+                
+                # Пробуем дождаться появления контента
+                try:
+                    await page.wait_for_selector('body', timeout=5000)
+                except:
+                    pass
                 
                 html = await page.content()
                 soup = BeautifulSoup(html, 'lxml')
@@ -377,6 +395,7 @@ async def render_with_browser(url: str, browser_context) -> Optional[str]:
                 
                 await page.close()
                 return text if len(text) >= MIN_CONTENT_LENGTH else None
+                
             except Exception as e:
                 try:
                     await page.close()
@@ -388,7 +407,7 @@ async def render_with_browser(url: str, browser_context) -> Optional[str]:
 
 
 async def fetch_website_content_async(url: str, session: aiohttp.ClientSession, browser_context=None) -> Tuple[Optional[str], str]:
-    """Загрузка контента с фолбэком на браузер"""
+    """Загрузка контента с автоматическим фолбэком на браузер для проблемных сайтов"""
     
     # Сначала пробуем обычный HTTP
     content, error = await fetch_with_aiohttp(url, session)
@@ -396,10 +415,23 @@ async def fetch_website_content_async(url: str, session: aiohttp.ClientSession, 
     if content and len(content) >= MIN_CONTENT_LENGTH:
         return (content, "")
     
-    # Если не получилось или мало контента - пробуем браузер
-    if browser_context and (not content or error in ["мало_контента", "таймаут", "доступ_запрещён"]):
+    # Если есть браузер и возникла проблема — пробуем через Playwright
+    # Фолбэк для: таймаутов, мало контента, 403, cloudflare-подобных страниц
+    should_try_browser = (
+        browser_context and 
+        (not content or error in ["мало_контента", "таймаут", "доступ_запрещён"])
+    )
+    
+    # Также пробуем браузер если контент похож на защиту
+    if content and browser_context:
+        content_lower = content.lower()
+        if any(x in content_lower for x in ['cloudflare', 'ray id', 'checking your browser', 'ddos']):
+            should_try_browser = True
+    
+    if should_try_browser:
+        print(f"   🌐 Пробуем Playwright для: {url[:50]}...")
         browser_content = await render_with_browser(url, browser_context)
-        if browser_content:
+        if browser_content and len(browser_content) >= MIN_CONTENT_LENGTH:
             return (browser_content, "")
     
     return (content, error)
@@ -442,7 +474,7 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
     default_result = {
         "category": CATEGORY_TECHNICAL,
         "tags": [],
-        "summary": f"Зафиксированы изменения на сайте {competitor_name}.",
+        "summary": "",
         "is_meaningful": False
     }
     
@@ -478,19 +510,50 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         result["tags"] = valid_tags[:3]
         
         summary = result.get("summary", "")
-        if not summary or len(summary) < 30:
-            return default_result
         
+        # Очищаем summary от артефактов
         summary = re.sub(r'```.*', '', summary)
         summary = re.sub(r'\{.*', '', summary)
-        result["summary"] = summary.strip()
+        summary = summary.strip()
+        
+        # Проверяем на неинформативные ответы
+        uninformative_patterns = [
+            r'^обновлён\s*(контент|содержимое)?\s*сайт',
+            r'^контент\s*сайта\s*(был\s*)?(обновлён|изменён)',
+            r'^сайт\s*(был\s*)?(обновлён|изменён)',
+            r'^изменения\s*на\s*сайте',
+            r'^зафиксированы\s*изменения',
+            r'^обнаружены\s*изменения',
+            r'^технические\s*изменения',
+            r'^незначительные\s*изменения',
+        ]
+        
+        summary_lower = summary.lower()
+        is_uninformative = False
+        for pattern in uninformative_patterns:
+            if re.match(pattern, summary_lower):
+                is_uninformative = True
+                break
+        
+        # Также проверяем длину и конкретность
+        if not summary or len(summary) < 40:
+            is_uninformative = True
+        
+        # Если неинформативный ответ — помечаем как не значимый
+        if is_uninformative:
+            result["summary"] = summary if summary else f"Обновлён контент сайта {competitor_name}"
+            result["is_meaningful"] = False
+            result["category"] = CATEGORY_TECHNICAL
+            return result
+        
+        result["summary"] = summary
         result["is_meaningful"] = True
         
         return result
         
     except json.JSONDecodeError:
         summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', response)
-        if summary_match and len(summary_match.group(1)) > 30:
+        if summary_match and len(summary_match.group(1)) > 40:
             return {
                 "category": CATEGORY_TECHNICAL,
                 "tags": [],
@@ -501,36 +564,63 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
 
 
 async def analyze_changes_async(competitor_name: str, new_content: str, session: aiohttp.ClientSession) -> Dict[str, Any]:
-    prompt = f"""Ты анализируешь ИЗМЕНЕНИЯ на сайте компании "{competitor_name}".
-
-ВАЖНО: Не описывай что компания делает в целом! Опиши только что НОВОГО появилось или ИЗМЕНИЛОСЬ.
+    prompt = f"""Ты анализируешь ИЗМЕНЕНИЯ на сайте компании "{competitor_name}" в сфере ГЛОНАСС/GPS мониторинга транспорта.
 
 ТЕКУЩИЙ КОНТЕНТ САЙТА:
-{new_content[:2500]}
+{new_content[:3000]}
 
-ЗАДАЧА: Определи что ИЗМЕНИЛОСЬ и верни JSON:
+ЗАДАЧА: Найди что КОНКРЕТНО изменилось и верни JSON.
 
+КАТЕГОРИИ (выбери ОДНУ, приоритет сверху вниз):
+
+1. "products" — ВЫБИРАЙ ЭТУ если есть:
+   - Новый продукт, устройство, терминал, трекер, тахограф
+   - Новая услуга, сервис, функция, модуль, раздел сайта с функционалом
+   - Новое ПО, приложение, платформа, система
+   - Обновление существующего продукта с новыми возможностями
+   ПРИМЕРЫ: "Появился новый трекер X", "Запущен новый модуль мониторинга", "Добавлен раздел с новой услугой"
+
+2. "prices" — ВЫБИРАЙ ЭТУ если есть:
+   - Акция, скидка, распродажа, спецпредложение
+   - Изменение цен, новые тарифы
+   - Бесплатный период, бонусы
+   ПРИМЕРЫ: "Скидка 30% на терминалы", "Новые тарифы на мониторинг"
+
+3. "news" — ВЫБИРАЙ ЭТУ если есть:
+   - Новость, объявление, пресс-релиз
+   - Партнёрство, сотрудничество, интеграция
+   - Событие, конференция, выставка
+   - Изменения в законодательстве, сертификация
+   - Уход с рынка, закрытие, важное объявление
+   ПРИМЕРЫ: "Компания объявила о партнёрстве с X", "Wialon уходит с рынка РФ"
+
+4. "technical" — ВЫБИРАЙ ЭТУ ТОЛЬКО если:
+   - Изменился только дизайн сайта без нового функционала
+   - Изменилась только структура/навигация
+   - НЕТ ничего из категорий выше
+   ВАЖНО: Если появился новый раздел С ФУНКЦИОНАЛОМ — это "products", не "technical"!
+
+ФОРМАТ ОТВЕТА (только JSON):
 {{
     "category": "products|prices|news|technical",
     "tags": ["тег1", "тег2"],
-    "summary": "Что конкретно изменилось или появилось нового (3-4 предложения)"
+    "summary": "Конкретное описание: ЧТО появилось/изменилось, КАК называется, ДЛЯ ЧЕГО предназначено (2-3 предложения)"
 }}
 
-КАТЕГОРИИ:
-- "products" — НОВЫЕ продукты, услуги, оборудование
-- "prices" — НОВЫЕ акции, скидки, изменение цен
-- "news" — НОВОСТИ: события, объявления, партнёрства
-- "technical" — технические изменения сайта
+ТЕГИ (выбери 1-3 подходящих): новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, бесплатно, новость, важное, партнёрство, законодательство, wialon, глонасс
 
-ТЕГИ: новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, бесплатно, новость, важное, партнёрство, законодательство, wialon, глонасс
+ПРАВИЛА SUMMARY:
+✓ Пиши конкретно: "Появился терминал Omnicomm X5 с поддержкой 4G"
+✓ Указывай названия: "Запущен модуль «Пассажирские перевозки»"
+✓ Объясняй назначение: "для мониторинга пассажирского транспорта"
+✗ НЕ пиши общие фразы: "Обновлён контент сайта", "Компания предлагает услуги"
+✗ НЕ описывай что компания делает в целом
 
-ПРАВИЛА:
-- Пиши "Появился новый продукт X", "Запущена акция Y"
-- НЕ пиши "Компания предлагает...", "Система позволяет..."
+Если не можешь найти КОНКРЕТНОЕ изменение — верни category "technical" и в summary напиши что именно изменилось на сайте (структура, дизайн, тексты).
 
-Ответь ТОЛЬКО JSON."""
+Ответь ТОЛЬКО JSON без пояснений."""
 
-    response = await call_llm_async(prompt, session)
+    response = await call_llm_async(prompt, session, max_tokens=600)
     return parse_llm_json_response(response, competitor_name)
 
 print("✅ LLM анализ настроен")
@@ -574,7 +664,7 @@ def generate_pdf_report(
     total_changes = sum(len(v) for v in categorized_changes.values())
     total_ok = total_checked - len(failed_sites)
     
-    stats = f"📊 Проверено: {total_checked} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | ⚠️ Проблемы: {len(failed_sites)}"
+    stats = f"📊 Проверено: {total_checked} | ✅ Успешно: {total_ok} | 🔄 Важные изменения: {total_changes} | ⚠️ Проблемы: {len(failed_sites)}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
     
@@ -810,31 +900,29 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
         analysis = await analyze_changes_async(competitor_name, content, http_session)
         
         if analysis.get("is_meaningful"):
+            # Информативное изменение — добавляем в отчёт
             result = {
                 'competitor': competitor_name,
                 'url': competitor_url,
                 'category': analysis['category'],
                 'summary': analysis['summary'],
                 'tags': analysis['tags'],
-                'is_error': False
+                'is_error': False,
+                'is_meaningful': True
             }
             llm_summary = analysis['summary']
         else:
-            result = {
-                'competitor': competitor_name,
-                'url': competitor_url,
-                'category': CATEGORY_TECHNICAL,
-                'summary': "Обновлён контент сайта",
-                'tags': [],
-                'is_error': False
-            }
-            llm_summary = "Обновлён контент"
+            # Неинформативное изменение — НЕ добавляем в отчёт
+            # Но сохраняем в БД для отслеживания хеша
+            result = None  # Не включаем в categorized_changes
+            llm_summary = analysis.get('summary', 'Обновлён контент')
+            print(f"   ⏭️ Пропуск неинформативного изменения: {competitor_name}")
 
     scan_id = generate_unique_id("scan_")
     scan_result_id = create_scan_result(
         scan_id, scan_date, competitor_id, new_hash, content_changed,
         content if content_changed else "", llm_summary,
-        report_id if content_changed else None
+        report_id if content_changed and result else None
     )
     
     if scan_result_id:
@@ -906,7 +994,7 @@ async def run_monitoring_async():
         
         if result.get('is_error'):
             failed_sites.append(result)
-        else:
+        elif result.get('is_meaningful', True):  # Только информативные изменения
             category = result.get('category', CATEGORY_TECHNICAL)
             if category in categorized_changes:
                 categorized_changes[category].append(result)
@@ -957,7 +1045,7 @@ async def run_monitoring_async():
 
 ✅ <b>Успешно: {total_ok}</b> ({success_rate}%)
 
-🔄 <b>Изменения: {total_changes}</b>
+🔄 <b>Важные изменения: {total_changes}</b>
    🏷️ Продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}
    💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
