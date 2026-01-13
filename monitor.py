@@ -562,6 +562,8 @@ def generate_pdf_report(
         'summary': ParagraphStyle('Summary', fontName=font_regular, fontSize=9, spaceAfter=2, leading=12, leftIndent=10),
         'tags': ParagraphStyle('Tags', fontName=font_regular, fontSize=8, spaceAfter=8, leftIndent=10),
         'error': ParagraphStyle('Error', fontName=font_regular, fontSize=8, spaceAfter=2, textColor=colors.HexColor('#666666')),
+        'stats': ParagraphStyle('Stats', fontName=font_regular, fontSize=9, spaceAfter=4, leftIndent=10),
+        'stats_header': ParagraphStyle('StatsHeader', fontName=font_bold, fontSize=11, spaceBefore=12, spaceAfter=6, textColor=colors.HexColor('#333333')),
     }
     
     content = []
@@ -570,10 +572,55 @@ def generate_pdf_report(
     content.append(Paragraph(f"Дата: {report_date}", styles['subtitle']))
     
     total_changes = sum(len(v) for v in categorized_changes.values())
-    stats = f"📊 Проверено: {total_checked} | ✅ Изменения: {total_changes} | ⚠️ Проблемы: {len(failed_sites)}"
+    total_ok = total_checked - len(failed_sites)
+    
+    stats = f"📊 Проверено: {total_checked} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | ⚠️ Проблемы: {len(failed_sites)}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
     
+    # === СТАТИСТИКА ПО СТАТУСАМ ===
+    if failed_sites:
+        # Группируем ошибки по типам
+        by_reason = {}
+        for site in failed_sites:
+            reason = site.get('error_type', 'другое')
+            if reason not in by_reason:
+                by_reason[reason] = []
+            by_reason[reason].append(site)
+        
+        content.append(Paragraph("📈 СТАТИСТИКА ПО СТАТУСАМ", styles['stats_header']))
+        
+        # Успешные
+        success_rate = round(total_ok / total_checked * 100, 1) if total_checked > 0 else 0
+        content.append(Paragraph(f"✅ Успешно проверено: <b>{total_ok}</b> ({success_rate}%)", styles['stats']))
+        
+        # Группируем статистику
+        reason_labels = {
+            "cloudflare": ("🛡️ Защита Cloudflare", "#FF9800"),
+            "таймаут": ("⏱️ Таймаут", "#F44336"),
+            "нет_соединения": ("🔌 Нет соединения", "#9C27B0"),
+            "доступ_запрещён": ("🚫 Доступ запрещён", "#E91E63"),
+            "не_найден": ("❓ Страница не найдена (404)", "#607D8B"),
+            "ошибка_сервера": ("💥 Ошибка сервера (5xx)", "#795548"),
+            "нечитаемый": ("📄 Нечитаемый контент", "#9E9E9E"),
+            "мало_контента": ("📄 Мало контента", "#BDBDBD"),
+            "ошибка": ("⚠️ Другие ошибки", "#757575"),
+        }
+        
+        # Сортируем по количеству (от большего к меньшему)
+        sorted_reasons = sorted(by_reason.items(), key=lambda x: -len(x[1]))
+        
+        for reason, sites in sorted_reasons:
+            label, color = reason_labels.get(reason, (f"❓ {reason}", "#757575"))
+            percent = round(len(sites) / total_checked * 100, 1)
+            content.append(Paragraph(
+                f"<font color='{color}'>{label}: <b>{len(sites)}</b> ({percent}%)</font>", 
+                styles['stats']
+            ))
+        
+        content.append(Spacer(1, 10))
+    
+    # === ИЗМЕНЕНИЯ ПО КАТЕГОРИЯМ ===
     sections = [
         (CATEGORY_PRODUCTS, "🏷️ НОВЫЕ ПРОДУКТЫ И УСЛУГИ"),
         (CATEGORY_PRICES, "💰 ЦЕНЫ И АКЦИИ"),
@@ -607,6 +654,7 @@ def generate_pdf_report(
                 tag_parts = [f"<font color='{TAGS.get(tag, '#999')}'><b>#{tag}</b></font>" for tag in tags]
                 content.append(Paragraph(" ".join(tag_parts), styles['tags']))
     
+    # === ДЕТАЛИ ПРОБЛЕМНЫХ САЙТОВ ===
     if failed_sites:
         content.append(Paragraph("⚠️ НЕ УДАЛОСЬ ПРОВЕРИТЬ", styles['section']))
         
@@ -628,7 +676,10 @@ def generate_pdf_report(
             "мало_контента": "📄 Мало контента",
         }
         
-        for reason, sites in by_reason.items():
+        # Сортируем по количеству
+        sorted_reasons = sorted(by_reason.items(), key=lambda x: -len(x[1]))
+        
+        for reason, sites in sorted_reasons:
             label = reason_labels.get(reason, f"❓ {reason}")
             names = []
             for site in sites:
@@ -868,19 +919,52 @@ async def run_monitoring_async():
 
     pdf_path = generate_pdf_report(current_date, total_competitors, categorized_changes, failed_sites)
 
+    # Группируем ошибки по типам для статистики
+    errors_by_type = {}
+    for site in failed_sites:
+        error_type = site.get('error_type', 'другое')
+        errors_by_type[error_type] = errors_by_type.get(error_type, 0) + 1
+    
+    # Формируем строку статистики ошибок
+    error_stats_lines = []
+    error_labels = {
+        "таймаут": "⏱️ Таймаут",
+        "нет_соединения": "🔌 Нет соединения", 
+        "cloudflare": "🛡️ Cloudflare",
+        "доступ_запрещён": "🚫 Запрещён",
+        "не_найден": "❓ Не найден",
+        "ошибка_сервера": "💥 Сервер",
+        "нечитаемый": "📄 Нечитаемый",
+        "мало_контента": "📄 Мало контента",
+    }
+    
+    # Сортируем по количеству
+    sorted_errors = sorted(errors_by_type.items(), key=lambda x: -x[1])
+    for error_type, count in sorted_errors:
+        label = error_labels.get(error_type, error_type)
+        error_stats_lines.append(f"   {label}: {count}")
+    
+    error_stats_text = "\n".join(error_stats_lines) if error_stats_lines else "   Нет данных"
+
+    total_ok = total_competitors - len(failed_sites)
+    success_rate = round(total_ok / total_competitors * 100, 1) if total_competitors > 0 else 0
+
     msg = f"""📊 <b>Мониторинг завершён</b>
 
 📅 Дата: {current_date}
 ⏱️ Время: {elapsed:.0f} сек
 🌐 Проверено: <b>{total_competitors}</b>
 
-✅ <b>Изменения: {total_changes}</b>
+✅ <b>Успешно: {total_ok}</b> ({success_rate}%)
+
+🔄 <b>Изменения: {total_changes}</b>
    🏷️ Продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}
    💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
    🔧 Технические: {len(categorized_changes[CATEGORY_TECHNICAL])}
 
-⚠️ <b>Не удалось проверить: {len(failed_sites)}</b>
+⚠️ <b>Проблемы: {len(failed_sites)}</b>
+{error_stats_text}
 
 📎 Подробный отчёт во вложении"""
 
