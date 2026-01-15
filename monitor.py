@@ -49,26 +49,21 @@ LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # === ТАЙМАУТЫ И RETRY ===
 REQUEST_TIMEOUT = 45
-PLAYWRIGHT_TIMEOUT = 45000  # 45 секунд для Playwright
+PLAYWRIGHT_TIMEOUT = 45000
 MAX_RETRIES = 3
 RETRY_DELAYS = [2, 5, 10]
 
 MIN_CONTENT_LENGTH = 200
 
 # === СТРАТЕГИЯ ЗАГРУЗКИ ===
-# Playwright как основной метод для максимальной совместимости
-USE_PLAYWRIGHT_FIRST = True  # Новая опция!
+USE_PLAYWRIGHT_FIRST = True
 
 # === РОТАЦИЯ USER-AGENT ===
 USER_AGENTS = [
-    # Chrome Windows (самый популярный)
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    # Chrome Mac
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    # Firefox Windows
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-    # Edge
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
 ]
 
@@ -78,12 +73,11 @@ def get_random_user_agent():
 USER_AGENT = USER_AGENTS[0]
 
 MAX_CONCURRENT_REQUESTS = 15
-MAX_CONCURRENT_BROWSER = 8  # Увеличено — основная нагрузка на браузер
+MAX_CONCURRENT_BROWSER = 8
 MAX_CONCURRENT_LLM = 5
 
-# Задержка между запросами (анти-детект)
-MIN_REQUEST_DELAY = 0.5  # секунд
-MAX_REQUEST_DELAY = 2.0  # секунд
+MIN_REQUEST_DELAY = 0.3
+MAX_REQUEST_DELAY = 1.0
 
 CATEGORY_PRODUCTS = "products"
 CATEGORY_PRICES = "prices"
@@ -229,19 +223,13 @@ def is_content_insufficient(content: str) -> bool:
                 return True
     return False
 
-async def random_delay():
-    """Случайная задержка между запросами для имитации человека"""
-    delay = random.uniform(MIN_REQUEST_DELAY, MAX_REQUEST_DELAY)
-    await asyncio.sleep(delay)
-
 print("✅ Утилиты загружены")
 
 # ============================================================================
-# ЗАГРУЗКА КОНТЕНТА — УЛУЧШЕННАЯ ВЕРСИЯ
+# ЗАГРУЗКА КОНТЕНТА
 # ============================================================================
 
 def get_headers_for_url(url: str, attempt: int = 0) -> dict:
-    """Генерирует заголовки с ротацией User-Agent и Referer"""
     user_agent = USER_AGENTS[attempt % len(USER_AGENTS)] if attempt > 0 else get_random_user_agent()
     
     from urllib.parse import urlparse
@@ -270,7 +258,7 @@ def get_headers_for_url(url: str, attempt: int = 0) -> dict:
 
 
 async def fetch_with_aiohttp(url: str, session: aiohttp.ClientSession) -> Tuple[Optional[str], str]:
-    """Асинхронная загрузка через aiohttp (быстрый метод для простых сайтов)"""
+    """Асинхронная загрузка через aiohttp"""
     
     last_error = "ошибка"
     
@@ -364,8 +352,8 @@ async def fetch_with_aiohttp(url: str, session: aiohttp.ClientSession) -> Tuple[
 
 async def render_with_browser_stealth(url: str, browser_context, attempt: int = 0) -> Tuple[Optional[str], str]:
     """
-    Рендеринг через Playwright с stealth-техниками и retry логикой.
-    Это основной метод для надёжного получения контента.
+    Рендеринг через Playwright со stealth-техниками.
+    ИСПРАВЛЕНО: убрана агрессивная блокировка ресурсов.
     """
     try:
         async with browser_semaphore:
@@ -373,29 +361,11 @@ async def render_with_browser_stealth(url: str, browser_context, attempt: int = 
             
             try:
                 # === STEALTH НАСТРОЙКИ ===
-                # Удаляем признаки автоматизации
                 await page.add_init_script("""
-                    // Удаляем webdriver флаг
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                    
-                    // Подменяем plugins
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5]
-                    });
-                    
-                    // Подменяем languages
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['ru-RU', 'ru', 'en-US', 'en']
-                    });
-                    
-                    // Chrome runtime
-                    window.chrome = {
-                        runtime: {}
-                    };
-                    
-                    // Permissions
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                    window.chrome = { runtime: {} };
                     const originalQuery = window.navigator.permissions.query;
                     window.navigator.permissions.query = (parameters) => (
                         parameters.name === 'notifications' ?
@@ -404,41 +374,39 @@ async def render_with_browser_stealth(url: str, browser_context, attempt: int = 
                     );
                 """)
                 
-                # Блокируем тяжёлые ресурсы для ускорения
-                await page.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,ttf,mp4,webm,mp3,wav,avi}", 
-                               lambda route: route.abort())
-                
-                # Также блокируем аналитику и рекламу
+                # === МЯГКАЯ блокировка только тяжёлых медиа (НЕ блокируем CSS и шрифты!) ===
+                await page.route("**/*.{mp4,webm,mp3,wav,avi,mov,flv}", lambda route: route.abort())
+                # Блокируем только аналитику
                 await page.route("**/*google-analytics*", lambda route: route.abort())
                 await page.route("**/*googletagmanager*", lambda route: route.abort())
-                await page.route("**/*facebook*", lambda route: route.abort())
-                await page.route("**/*yandex*metrika*", lambda route: route.abort())
+                await page.route("**/*mc.yandex*", lambda route: route.abort())
                 
-                # Случайная задержка перед запросом
-                await asyncio.sleep(random.uniform(0.3, 1.0))
+                # Случайная задержка
+                await asyncio.sleep(random.uniform(0.2, 0.5))
                 
-                # Пробуем загрузить страницу
-                load_error = None
+                # Пробуем загрузить страницу с разными стратегиями
+                load_success = False
                 for wait_strategy in ['domcontentloaded', 'load', 'networkidle']:
                     try:
                         await page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until=wait_strategy)
-                        load_error = None
+                        load_success = True
                         break
                     except Exception as e:
-                        load_error = str(e)
-                        if 'timeout' in str(e).lower():
-                            continue
-                        break
+                        if 'timeout' not in str(e).lower():
+                            break
+                        continue
                 
-                if load_error and 'timeout' in load_error.lower():
+                if not load_success:
                     await page.close()
                     return (None, "таймаут")
                 
                 # Ждём загрузку динамического контента
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(2500)
                 
-                # Пробуем прокрутить страницу (активирует lazy-load)
+                # Скролл для активации lazy-load
                 try:
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
+                    await page.wait_for_timeout(500)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
                     await page.wait_for_timeout(500)
                 except:
@@ -480,48 +448,35 @@ async def render_with_browser_stealth(url: str, browser_context, attempt: int = 
 async def fetch_website_content_async(url: str, session: aiohttp.ClientSession, browser_context=None) -> Tuple[Optional[str], str]:
     """
     Загрузка контента с умным выбором метода.
-    
-    Стратегия:
-    1. Сначала пробуем Playwright (надёжнее, обходит защиты)
-    2. Если Playwright недоступен — используем aiohttp
-    3. Retry логика на каждом уровне
     """
     
-    # === СТРАТЕГИЯ 1: Playwright первый (рекомендуется) ===
     if USE_PLAYWRIGHT_FIRST and browser_context:
         # Пробуем Playwright с retry
-        for attempt in range(2):  # 2 попытки для Playwright
+        for attempt in range(2):
             content, error = await render_with_browser_stealth(url, browser_context, attempt)
             
             if content and len(content) >= MIN_CONTENT_LENGTH:
-                # Проверяем на защиту
                 if not is_protection_page(content):
                     return (content, "")
             
-            # Если таймаут или нет соединения — повторяем
             if error in ["таймаут", "нет_соединения"] and attempt < 1:
                 await asyncio.sleep(RETRY_DELAYS[0])
                 continue
             
-            # Если Cloudflare или другая защита — выходим
             if content and is_protection_page(content):
                 return (None, "cloudflare")
             
-            # Если ошибка не таймаут — пробуем aiohttp как fallback
             break
         
-        # Fallback на aiohttp если Playwright не помог
+        # Fallback на aiohttp
         if error and error not in ["cloudflare", "доступ_запрещён"]:
             aio_content, aio_error = await fetch_with_aiohttp(url, session)
             if aio_content and len(aio_content) >= MIN_CONTENT_LENGTH:
                 if not is_protection_page(aio_content):
                     return (aio_content, "")
-            # Возвращаем исходную ошибку от Playwright
-            return (content, error)
         
         return (content, error)
     
-    # === СТРАТЕГИЯ 2: aiohttp первый (старая логика) ===
     else:
         content, error = await fetch_with_aiohttp(url, session)
         
@@ -529,7 +484,6 @@ async def fetch_website_content_async(url: str, session: aiohttp.ClientSession, 
             if not is_protection_page(content):
                 return (content, "")
         
-        # Фолбэк на Playwright
         should_try_browser = (
             browser_context and 
             (not content or error in ["мало_контента", "таймаут", "доступ_запрещён"])
@@ -550,7 +504,7 @@ async def fetch_website_content_async(url: str, session: aiohttp.ClientSession, 
         return (content, error)
 
 
-print("✅ Загрузка контента настроена (Playwright-first режим)")
+print("✅ Загрузка контента настроена")
 
 # ============================================================================
 # LLM АНАЛИЗ
@@ -624,7 +578,6 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         result["tags"] = valid_tags[:3]
         
         summary = result.get("summary", "")
-        
         summary = re.sub(r'```.*', '', summary)
         summary = re.sub(r'\{.*', '', summary)
         summary = summary.strip()
@@ -688,27 +641,21 @@ async def analyze_changes_async(competitor_name: str, new_content: str, session:
    - Новая услуга, сервис, функция, модуль, раздел сайта с функционалом
    - Новое ПО, приложение, платформа, система
    - Обновление существующего продукта с новыми возможностями
-   ПРИМЕРЫ: "Появился новый трекер X", "Запущен новый модуль мониторинга", "Добавлен раздел с новой услугой"
 
 2. "prices" — ВЫБИРАЙ ЭТУ если есть:
    - Акция, скидка, распродажа, спецпредложение
    - Изменение цен, новые тарифы
    - Бесплатный период, бонусы
-   ПРИМЕРЫ: "Скидка 30% на терминалы", "Новые тарифы на мониторинг"
 
 3. "news" — ВЫБИРАЙ ЭТУ если есть:
    - Новость, объявление, пресс-релиз
    - Партнёрство, сотрудничество, интеграция
    - Событие, конференция, выставка
    - Изменения в законодательстве, сертификация
-   - Уход с рынка, закрытие, важное объявление
-   ПРИМЕРЫ: "Компания объявила о партнёрстве с X", "Wialon уходит с рынка РФ"
 
 4. "technical" — ВЫБИРАЙ ЭТУ ТОЛЬКО если:
    - Изменился только дизайн сайта без нового функционала
    - Изменилась только структура/навигация
-   - НЕТ ничего из категорий выше
-   ВАЖНО: Если появился новый раздел С ФУНКЦИОНАЛОМ — это "products", не "technical"!
 
 ФОРМАТ ОТВЕТА (только JSON):
 {{
@@ -717,16 +664,7 @@ async def analyze_changes_async(competitor_name: str, new_content: str, session:
     "summary": "Конкретное описание: ЧТО появилось/изменилось, КАК называется, ДЛЯ ЧЕГО предназначено (2-3 предложения)"
 }}
 
-ТЕГИ (выбери 1-3 подходящих): новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, бесплатно, новость, важное, партнёрство, законодательство, wialon, глонасс
-
-ПРАВИЛА SUMMARY:
-✓ Пиши конкретно: "Появился терминал Omnicomm X5 с поддержкой 4G"
-✓ Указывай названия: "Запущен модуль «Пассажирские перевозки»"
-✓ Объясняй назначение: "для мониторинга пассажирского транспорта"
-✗ НЕ пиши общие фразы: "Обновлён контент сайта", "Компания предлагает услуги"
-✗ НЕ описывай что компания делает в целом
-
-Если не можешь найти КОНКРЕТНОЕ изменение — верни category "technical" и в summary напиши что именно изменилось на сайте (структура, дизайн, тексты).
+ТЕГИ: новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, бесплатно, новость, важное, партнёрство, законодательство, wialon, глонасс
 
 Ответь ТОЛЬКО JSON без пояснений."""
 
@@ -736,7 +674,7 @@ async def analyze_changes_async(competitor_name: str, new_content: str, session:
 print("✅ LLM анализ настроен")
 
 # ============================================================================
-# PDF ГЕНЕРАЦИЯ
+# PDF ГЕНЕРАЦИЯ — ИСПРАВЛЕННАЯ С КЛИКАБЕЛЬНЫМИ ССЫЛКАМИ
 # ============================================================================
 
 def generate_pdf_report(
@@ -808,41 +746,47 @@ def generate_pdf_report(
         for reason, sites in sorted_reasons:
             label, color = reason_labels.get(reason, (reason, "#757575"))
             pct = round(len(sites) / total_checked * 100, 1)
-            content.append(Paragraph(f"{label}: <b>{len(sites)}</b> ({pct}%)", styles['stats']))
+            content.append(Paragraph(f"<font color='{color}'>{label}: <b>{len(sites)}</b> ({pct}%)</font>", styles['stats']))
     
     content.append(Spacer(1, 10))
     
-    # === ПРОДУКТЫ ===
-    if categorized_changes[CATEGORY_PRODUCTS]:
-        content.append(Paragraph("🏷️ НОВЫЕ ПРОДУКТЫ И УСЛУГИ", styles['section']))
-        for i, item in enumerate(categorized_changes[CATEGORY_PRODUCTS], 1):
-            content.append(Paragraph(f"{i}. {item['competitor']} — {item['url']}", styles['company']))
-            content.append(Paragraph(item['summary'], styles['summary']))
-            if item.get('tags'):
-                tags_str = ' '.join([f"#{t}" for t in item['tags']])
-                content.append(Paragraph(tags_str, styles['tags']))
+    # === ИЗМЕНЕНИЯ ПО КАТЕГОРИЯМ (с кликабельными ссылками) ===
+    sections = [
+        (CATEGORY_PRODUCTS, "🏷️ НОВЫЕ ПРОДУКТЫ И УСЛУГИ"),
+        (CATEGORY_PRICES, "💰 ЦЕНЫ И АКЦИИ"),
+        (CATEGORY_NEWS, "📰 НОВОСТИ"),
+    ]
     
-    # === ЦЕНЫ ===
-    if categorized_changes[CATEGORY_PRICES]:
-        content.append(Paragraph("💰 ЦЕНЫ И АКЦИИ", styles['section']))
-        for i, item in enumerate(categorized_changes[CATEGORY_PRICES], 1):
-            content.append(Paragraph(f"{i}. {item['competitor']} — {item['url']}", styles['company']))
-            content.append(Paragraph(item['summary'], styles['summary']))
-            if item.get('tags'):
-                tags_str = ' '.join([f"#{t}" for t in item['tags']])
-                content.append(Paragraph(tags_str, styles['tags']))
+    for category, title in sections:
+        items = categorized_changes.get(category, [])
+        if not items:
+            continue
+            
+        content.append(Paragraph(title, styles['section']))
+        
+        for i, item in enumerate(items, 1):
+            name = item.get('competitor', '')
+            url = item.get('url', '')
+            summary = item.get('summary', '')
+            tags = item.get('tags', [])
+            
+            # === КЛИКАБЕЛЬНАЯ ССЫЛКА ===
+            if url:
+                # Добавляем https:// если нет
+                full_url = url if url.startswith('http') else f'https://{url}'
+                company_text = f"{i}. <b>{name}</b> — <a href='{full_url}' color='blue'>{full_url}</a>"
+            else:
+                company_text = f"{i}. <b>{name}</b>"
+            content.append(Paragraph(company_text, styles['company']))
+            
+            if summary:
+                content.append(Paragraph(summary, styles['summary']))
+            
+            if tags:
+                tag_parts = [f"<font color='{TAGS.get(tag, '#999')}'><b>#{tag}</b></font>" for tag in tags]
+                content.append(Paragraph(" ".join(tag_parts), styles['tags']))
     
-    # === НОВОСТИ ===
-    if categorized_changes[CATEGORY_NEWS]:
-        content.append(Paragraph("📰 НОВОСТИ", styles['section']))
-        for i, item in enumerate(categorized_changes[CATEGORY_NEWS], 1):
-            content.append(Paragraph(f"{i}. {item['competitor']} — {item['url']}", styles['company']))
-            content.append(Paragraph(item['summary'], styles['summary']))
-            if item.get('tags'):
-                tags_str = ' '.join([f"#{t}" for t in item['tags']])
-                content.append(Paragraph(tags_str, styles['tags']))
-    
-    # === ПРОБЛЕМЫ ===
+    # === ПРОБЛЕМНЫЕ САЙТЫ (ПОЛНЫЙ СПИСОК с кликабельными ссылками) ===
     if failed_sites:
         content.append(Paragraph("⚠️ НЕ УДАЛОСЬ ПРОВЕРИТЬ", styles['section']))
         
@@ -854,26 +798,29 @@ def generate_pdf_report(
             by_reason[reason].append(site)
         
         reason_labels = {
+            "cloudflare": "🛡️ Защита Cloudflare",
             "таймаут": "⏱️ Таймаут",
             "нет_соединения": "🔌 Нет соединения",
-            "cloudflare": "🛡️ Защита Cloudflare",
             "доступ_запрещён": "🚫 Доступ запрещён",
             "не_найден": "❓ Страница не найдена",
             "ошибка_сервера": "💥 Ошибка сервера",
             "нечитаемый": "📄 Нечитаемый контент",
             "мало_контента": "📄 Мало контента",
-            "ошибка": "⚠️ ошибка",
         }
         
         sorted_reasons = sorted(by_reason.items(), key=lambda x: -len(x[1]))
+        
         for reason, sites in sorted_reasons:
-            label = reason_labels.get(reason, reason)
+            label = reason_labels.get(reason, f"❓ {reason}")
+            
+            # === ПОЛНЫЙ СПИСОК БЕЗ ОГРАНИЧЕНИЙ (все сайты с кликабельными ссылками) ===
             names = []
             for site in sites:
                 name = site.get('competitor', 'Неизвестный')
-                if len(names) >= 10:
-                    names.append(f"... и ещё {len(sites) - 10}")
-                    break
+                url = site.get('url', '')
+                if url:
+                    full_url = url if url.startswith('http') else f'https://{url}'
+                    names.append(f"<a href='{full_url}' color='blue'>{name}</a>")
                 else:
                     names.append(name)
             
@@ -1075,7 +1022,6 @@ async def run_monitoring_async():
     
     async with aiohttp.ClientSession(connector=connector) as http_session:
         async with async_playwright() as p:
-            # Запуск браузера со stealth-настройками
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -1085,7 +1031,7 @@ async def run_monitoring_async():
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
                     '--window-size=1920,1080',
-                    '--disable-blink-features=AutomationControlled',  # Скрываем автоматизацию
+                    '--disable-blink-features=AutomationControlled',
                 ]
             )
             
@@ -1095,7 +1041,6 @@ async def run_monitoring_async():
                 ignore_https_errors=True,
                 locale='ru-RU',
                 timezone_id='Europe/Moscow',
-                # Дополнительные stealth параметры
                 extra_http_headers={
                     'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
                 }
@@ -1139,13 +1084,11 @@ async def run_monitoring_async():
 
     pdf_path = generate_pdf_report(current_date, total_competitors, categorized_changes, failed_sites)
 
-    # Группируем ошибки по типам для статистики
     errors_by_type = {}
     for site in failed_sites:
         error_type = site.get('error_type', 'другое')
         errors_by_type[error_type] = errors_by_type.get(error_type, 0) + 1
     
-    # Формируем строку статистики ошибок
     error_stats_lines = []
     error_labels = {
         "таймаут": "⏱️ Таймаут",
@@ -1158,7 +1101,6 @@ async def run_monitoring_async():
         "мало_контента": "📄 Мало контента",
     }
     
-    # Сортируем по количеству
     sorted_errors = sorted(errors_by_type.items(), key=lambda x: -x[1])
     for error_type, count in sorted_errors:
         label = error_labels.get(error_type, error_type)
