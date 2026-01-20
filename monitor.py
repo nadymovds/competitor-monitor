@@ -14,7 +14,7 @@ import re
 import aiohttp
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
@@ -76,8 +76,9 @@ MAX_CONCURRENT_REQUESTS = 15
 MAX_CONCURRENT_BROWSER = 8
 MAX_CONCURRENT_LLM = 5
 
-MIN_REQUEST_DELAY = 0.3
-MAX_REQUEST_DELAY = 1.0
+# Batch-обработка для стабильности
+BATCH_SIZE = 50
+BATCH_DELAY = 3  # секунд между батчами
 
 CATEGORY_PRODUCTS = "products"
 CATEGORY_PRICES = "prices"
@@ -578,10 +579,40 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         result["tags"] = valid_tags[:3]
         
         summary = result.get("summary", "")
+
+        # Очищаем summary от артефактов
         summary = re.sub(r'```.*', '', summary)
         summary = re.sub(r'\{.*', '', summary)
         summary = summary.strip()
-        
+
+        # Проверка на мусорные символы (если более 10% непечатных — отклоняем)
+        non_printable = sum(1 for c in summary if ord(c) < 32 or ord(c) > 65535)
+        if summary and non_printable > len(summary) * 0.1:
+            result["is_meaningful"] = False
+            result["summary"] = "Ошибка анализа контента"
+            result["category"] = CATEGORY_TECHNICAL
+            return result
+
+        # Удаляем нерусские/неанглийские символы (оставляем кириллицу, латиницу, цифры, пунктуацию)
+        summary = re.sub(r'[^\w\s\d\.,!?;:\-—–()«»"\'№%₽/\\@#&*+=%°]', '', summary, flags=re.UNICODE)
+
+        # Исправляем известные ошибки LLM
+        typo_fixes = {
+            'болееную': 'более полную',
+            'болееная': 'более полная',
+            'ảnh hưởng': '',
+        }
+        for typo, fix in typo_fixes.items():
+            summary = summary.replace(typo, fix)
+
+        # Убираем двойные пробелы
+        summary = ' '.join(summary.split())
+
+        # Ограничиваем длину
+        if len(summary) > 500:
+            summary = summary[:497] + '...'
+
+        # Проверяем на неинформативные ответы
         uninformative_patterns = [
             r'^обновлён\s*(контент|содержимое)?\s*сайт',
             r'^контент\s*сайта\s*(был\s*)?(обновлён|изменён)',
@@ -608,10 +639,23 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
             result["is_meaningful"] = False
             result["category"] = CATEGORY_TECHNICAL
             return result
-        
+
+        # Проверка релевантности
+        relevant_keywords = ['транспорт', 'мониторинг', 'глонасс', 'gps', 'трекер',
+                             'тахограф', 'топлив', 'автопарк', 'навигац', 'телематик',
+                             'датчик', 'wialon', 'слежен', 'контрол']
+
+        has_relevant = any(kw in summary_lower for kw in relevant_keywords)
+
+        if not has_relevant:
+            result["summary"] = summary
+            result["is_meaningful"] = False
+            print(f"   ⚠️ Нерелевантный контент: {summary[:50]}...")
+            return result
+
         result["summary"] = summary
         result["is_meaningful"] = True
-        
+
         return result
         
     except json.JSONDecodeError:
@@ -627,46 +671,38 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
 
 
 async def analyze_changes_async(competitor_name: str, new_content: str, session: aiohttp.ClientSession) -> Dict[str, Any]:
-    prompt = f"""Ты анализируешь ИЗМЕНЕНИЯ на сайте компании "{competitor_name}" в сфере ГЛОНАСС/GPS мониторинга транспорта.
+    prompt = f"""Ты анализируешь сайт компании "{competitor_name}" в сфере ГЛОНАСС/GPS мониторинга транспорта.
 
-ТЕКУЩИЙ КОНТЕНТ САЙТА:
+ВАЖНЫЕ ПРАВИЛА:
+- Отвечай ТОЛЬКО на русском языке
+- Не выдумывай информацию — описывай только то, что явно есть на сайте
+- Если контент нечитаемый или непонятно что изменилось — верни is_meaningful: false
+
+КОНТЕНТ САЙТА:
 {new_content[:3000]}
 
-ЗАДАЧА: Найди что КОНКРЕТНО изменилось и верни JSON.
+ЗАДАЧА: Определи категорию и опиши что представлено на сайте.
 
-КАТЕГОРИИ (выбери ОДНУ, приоритет сверху вниз):
+КАТЕГОРИИ (выбери ОДНУ):
+1. "products" — новый продукт, устройство, трекер, тахограф, услуга, сервис, ПО, платформа
+2. "prices" — акция, скидка, спецпредложение, изменение цен, бесплатный период
+3. "news" — новость, партнёрство, событие, изменения в законодательстве
+4. "technical" — только дизайн/структура сайта без нового контента
 
-1. "products" — ВЫБИРАЙ ЭТУ если есть:
-   - Новый продукт, устройство, терминал, трекер, тахограф
-   - Новая услуга, сервис, функция, модуль, раздел сайта с функционалом
-   - Новое ПО, приложение, платформа, система
-   - Обновление существующего продукта с новыми возможностями
-
-2. "prices" — ВЫБИРАЙ ЭТУ если есть:
-   - Акция, скидка, распродажа, спецпредложение
-   - Изменение цен, новые тарифы
-   - Бесплатный период, бонусы
-
-3. "news" — ВЫБИРАЙ ЭТУ если есть:
-   - Новость, объявление, пресс-релиз
-   - Партнёрство, сотрудничество, интеграция
-   - Событие, конференция, выставка
-   - Изменения в законодательстве, сертификация
-
-4. "technical" — ВЫБИРАЙ ЭТУ ТОЛЬКО если:
-   - Изменился только дизайн сайта без нового функционала
-   - Изменилась только структура/навигация
-
-ФОРМАТ ОТВЕТА (только JSON):
+ФОРМАТ ОТВЕТА (только JSON, без пояснений):
 {{
     "category": "products|prices|news|technical",
     "tags": ["тег1", "тег2"],
-    "summary": "Конкретное описание: ЧТО появилось/изменилось, КАК называется, ДЛЯ ЧЕГО предназначено (2-3 предложения)"
+    "summary": "Конкретное описание: ЧТО появилось, КАК называется, ДЛЯ ЧЕГО предназначено. 2-3 предложения.",
+    "is_meaningful": true
 }}
 
 ТЕГИ: новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, бесплатно, новость, важное, партнёрство, законодательство, wialon, глонасс
 
-Ответь ТОЛЬКО JSON без пояснений."""
+ПЕРЕД ОТВЕТОМ ПРОВЕРЬ:
+- summary на русском языке?
+- summary содержит конкретику (название, цену, дату)?
+- Если нет конкретики — верни is_meaningful: false"""
 
     response = await call_llm_async(prompt, session, max_tokens=600)
     return parse_llm_json_response(response, competitor_name)
@@ -681,7 +717,8 @@ def generate_pdf_report(
     report_date: str,
     total_checked: int,
     categorized_changes: Dict[str, List[Dict]],
-    failed_sites: List[Dict]
+    failed_sites: List[Dict],
+    duplicates_count: int = 0
 ) -> str:
     filename = f"/tmp/competitor_report_{report_date}.pdf"
     
@@ -712,7 +749,7 @@ def generate_pdf_report(
     total_changes = sum(len(v) for v in categorized_changes.values())
     total_ok = total_checked - len(failed_sites)
     
-    stats = f"📊 Проверено: {total_checked} | ✅ Успешно: {total_ok} | 🔄 Важные изменения: {total_changes} | ⚠️ Проблемы: {len(failed_sites)}"
+    stats = f"📊 Проверено: {total_checked} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | 🔁 Дубликаты: {duplicates_count} | ⚠️ Проблемы: {len(failed_sites)}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
     
@@ -726,10 +763,16 @@ def generate_pdf_report(
             by_reason[reason].append(site)
         
         content.append(Paragraph("📈 СТАТИСТИКА ПО СТАТУСАМ", styles['stats_header']))
-        
+
+        # Успешные
         success_rate = round(total_ok / total_checked * 100, 1) if total_checked > 0 else 0
         content.append(Paragraph(f"✅ Успешно проверено: <b>{total_ok}</b> ({success_rate}%)", styles['stats']))
-        
+
+        # Дубликаты
+        if duplicates_count > 0:
+            content.append(Paragraph(f"🔁 Пропущено дубликатов: <b>{duplicates_count}</b>", styles['stats']))
+
+        # Группируем статистику
         reason_labels = {
             "cloudflare": ("🛡️ Защита Cloudflare", "#FF9800"),
             "таймаут": ("⏱️ Таймаут", "#F44336"),
@@ -855,7 +898,7 @@ def create_scan_result(scan_id, scan_date, competitor_id, new_hash, content_chan
         data = {
             'scan_id': scan_id, 'scan_date': scan_date, 'competitor_id': competitor_id,
             'last_hash': new_hash, 'content_changed': content_changed,
-            'raw_change_data': raw_content[:50000] if raw_content else None,
+            'raw_change_data': raw_content[:5000] if raw_content else None,
             'llm_summary': llm_summary or None, 'report_id': report_id
         }
         result = supabase.table('scan_results').insert(data).execute()
@@ -893,6 +936,117 @@ def update_summary_report_with_stats(report_id: str, total_sites: int, successfu
     except Exception as e:
         print(f"⚠️ Ошибка обновления статистики: {e}")
 
+def normalize_summary_for_hash(summary: str) -> str:
+    """Нормализует summary для вычисления хеша: lowercase, strip, убрать двойные пробелы"""
+    normalized = summary.lower().strip()
+    normalized = ' '.join(normalized.split())
+    return normalized
+
+
+def check_duplicate_change(competitor_id: str, summary: str) -> bool:
+    """
+    Проверяет, есть ли дубликат изменения за последние 14 дней.
+    Возвращает True если дубликат найден, False если нет.
+    """
+    try:
+        normalized_summary = normalize_summary_for_hash(summary)
+        summary_hash = hashlib.sha256(normalized_summary.encode('utf-8')).hexdigest()
+
+        # Проверяем наличие записи с таким же хешем за последние 14 дней
+        fourteen_days_ago = (datetime.now() - timedelta(days=14)).isoformat()
+
+        result = supabase.table('changes').select('id').eq(
+            'competitor_id', competitor_id
+        ).eq(
+            'summary_hash', summary_hash
+        ).gt(
+            'detected_at', fourteen_days_ago
+        ).limit(1).execute()
+
+        return bool(result.data)
+    except Exception as e:
+        print(f"   ⚠️ Ошибка check_duplicate: {str(e)[:80]}")
+        return False
+
+
+def save_change(competitor_id: str, category: str, summary: str, tags: List[str], report_id: str) -> bool:
+    """
+    Сохраняет изменение в таблицу changes.
+    Возвращает True если вставлено, False если дубликат.
+    """
+    try:
+        normalized_summary = normalize_summary_for_hash(summary)
+        summary_hash = hashlib.sha256(normalized_summary.encode('utf-8')).hexdigest()
+
+        data = {
+            'competitor_id': competitor_id,
+            'detected_at': datetime.now().isoformat(),
+            'category': category,
+            'summary': summary,
+            'tags': tags,
+            'summary_hash': summary_hash,
+            'report_id': report_id
+        }
+
+        result = supabase.table('changes').insert(data).execute()
+        return bool(result.data)
+
+    except Exception as e:
+        # Проверяем на конфликт уникальности (код 23505 в PostgreSQL)
+        error_str = str(e).lower()
+        if 'duplicate' in error_str or '23505' in error_str or 'unique' in error_str:
+            return False
+        # Другая ошибка — логируем, но не падаем
+        print(f"   ⚠️ Ошибка save_change: {str(e)[:100]}")
+        return False
+
+# ============================================================================
+# COMPETITOR HEALTH TRACKING
+# ============================================================================
+
+def update_competitor_health_success(competitor_id: str):
+    """Обновляет health при успешном сканировании: сбрасывает счётчик ошибок"""
+    try:
+        data = {
+            'competitor_id': competitor_id,
+            'consecutive_failures': 0,
+            'last_success_at': datetime.now().isoformat(),
+            'last_error_type': None
+        }
+        supabase.table('competitor_health').upsert(data, on_conflict='competitor_id').execute()
+    except Exception as e:
+        print(f"   ⚠️ Ошибка update_health_success: {str(e)[:80]}")
+
+
+def update_competitor_health_failure(competitor_id: str, error_type: str):
+    """Обновляет health при ошибке: инкрементирует счётчик ошибок"""
+    try:
+        # Сначала получаем текущее значение
+        existing = supabase.table('competitor_health').select('consecutive_failures').eq('competitor_id', competitor_id).execute()
+
+        current_failures = 0
+        if existing.data:
+            current_failures = existing.data[0].get('consecutive_failures', 0) or 0
+
+        data = {
+            'competitor_id': competitor_id,
+            'consecutive_failures': current_failures + 1,
+            'last_error_type': error_type
+        }
+        supabase.table('competitor_health').upsert(data, on_conflict='competitor_id').execute()
+    except Exception as e:
+        print(f"   ⚠️ Ошибка update_health_failure: {str(e)[:80]}")
+
+
+def get_competitor_health(competitor_id: str) -> Optional[Dict]:
+    """Получает данные о здоровье конкурента"""
+    try:
+        result = supabase.table('competitor_health').select('*').eq('competitor_id', competitor_id).execute()
+        return result.data[0] if result.data else None
+    except:
+        return None
+
+
 print("✅ Supabase настроен")
 
 # ============================================================================
@@ -912,6 +1066,7 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     content, error_type = await fetch_website_content_async(competitor_url, http_session, browser_context)
 
     if not content:
+        update_competitor_health_failure(competitor_id, error_type or 'ошибка')
         return {
             'competitor': competitor_name,
             'url': competitor_url,
@@ -922,6 +1077,7 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     if is_protection_page(content):
         scan_id = generate_unique_id("scan_")
         create_scan_result(scan_id, scan_date, competitor_id, "PROTECTION_PAGE", False)
+        update_competitor_health_failure(competitor_id, 'cloudflare')
         return {
             'competitor': competitor_name,
             'url': competitor_url,
@@ -932,6 +1088,7 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     if is_unreadable_content(content):
         scan_id = generate_unique_id("scan_")
         create_scan_result(scan_id, scan_date, competitor_id, "UNREADABLE", False)
+        update_competitor_health_failure(competitor_id, 'нечитаемый')
         return {
             'competitor': competitor_name,
             'url': competitor_url,
@@ -949,20 +1106,42 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
 
     if content_changed:
         print(f"   🔔 Изменения: {competitor_name}")
-        
+
         analysis = await analyze_changes_async(competitor_name, content, http_session)
-        
+
         if analysis.get("is_meaningful"):
-            result = {
-                'competitor': competitor_name,
-                'url': competitor_url,
-                'category': analysis['category'],
-                'summary': analysis['summary'],
-                'tags': analysis['tags'],
-                'is_error': False,
-                'is_meaningful': True
-            }
             llm_summary = analysis['summary']
+
+            # Проверяем дубликат ПЕРЕД добавлением в отчёт
+            is_duplicate = check_duplicate_change(competitor_id, analysis['summary'])
+
+            if is_duplicate:
+                # Дубликат — не добавляем в отчёт
+                print(f"   ⏭️ Дубликат: {competitor_name}")
+                result = {
+                    'competitor': competitor_name,
+                    'url': competitor_url,
+                    'is_error': False,
+                    'is_duplicate': True
+                }
+            else:
+                # Новое изменение — сохраняем и добавляем в отчёт
+                save_change(
+                    competitor_id=competitor_id,
+                    category=analysis['category'],
+                    summary=analysis['summary'],
+                    tags=analysis['tags'],
+                    report_id=report_id
+                )
+                result = {
+                    'competitor': competitor_name,
+                    'url': competitor_url,
+                    'category': analysis['category'],
+                    'summary': analysis['summary'],
+                    'tags': analysis['tags'],
+                    'is_error': False,
+                    'is_meaningful': True
+                }
         else:
             result = None
             llm_summary = analysis.get('summary', 'Обновлён контент')
@@ -977,6 +1156,9 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     
     if scan_result_id:
         update_competitor_last_scan(competitor_id, scan_result_id)
+
+    # Успешное сканирование — обновляем health
+    update_competitor_health_success(competitor_id)
 
     return result
 
@@ -1017,6 +1199,7 @@ async def run_monitoring_async():
         CATEGORY_TECHNICAL: []
     }
     failed_sites = []
+    duplicates_count = 0
 
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT_REQUESTS, ssl=False)
     
@@ -1046,11 +1229,28 @@ async def run_monitoring_async():
                 }
             )
             
-            tasks = [
-                scan_competitor_async(c, summary_report_id, current_date, http_session, browser_context)
-                for c in competitors
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Batch-обработка для стабильности
+            results = []
+            total_batches = (len(competitors) + BATCH_SIZE - 1) // BATCH_SIZE
+
+            for batch_idx in range(total_batches):
+                start_idx = batch_idx * BATCH_SIZE
+                end_idx = min(start_idx + BATCH_SIZE, len(competitors))
+                batch = competitors[start_idx:end_idx]
+
+                tasks = [
+                    scan_competitor_async(c, summary_report_id, current_date, http_session, browser_context)
+                    for c in batch
+                ]
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                results.extend(batch_results)
+
+                processed = end_idx
+                print(f"📦 Батч {batch_idx + 1}/{total_batches}: обработано {processed}/{total_competitors}")
+
+                # Пауза между батчами (кроме последнего)
+                if batch_idx < total_batches - 1:
+                    await asyncio.sleep(BATCH_DELAY)
             
             await browser_context.close()
             await browser.close()
@@ -1058,10 +1258,12 @@ async def run_monitoring_async():
     for result in results:
         if isinstance(result, Exception) or not result:
             continue
-        
+
         if result.get('is_error'):
             failed_sites.append(result)
-        elif result.get('is_meaningful', True):
+        elif result.get('is_duplicate'):
+            duplicates_count += 1
+        elif result.get('is_meaningful', True):  # Только информативные изменения
             category = result.get('category', CATEGORY_TECHNICAL)
             if category in categorized_changes:
                 categorized_changes[category].append(result)
@@ -1082,7 +1284,7 @@ async def run_monitoring_async():
         duration_seconds=elapsed
     )
 
-    pdf_path = generate_pdf_report(current_date, total_competitors, categorized_changes, failed_sites)
+    pdf_path = generate_pdf_report(current_date, total_competitors, categorized_changes, failed_sites, duplicates_count)
 
     errors_by_type = {}
     for site in failed_sites:
@@ -1123,6 +1325,8 @@ async def run_monitoring_async():
    💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
    🔧 Технические: {len(categorized_changes[CATEGORY_TECHNICAL])}
+
+🔁 <b>Пропущено дубликатов: {duplicates_count}</b>
 
 ⚠️ <b>Проблемы: {len(failed_sites)}</b>
 {error_stats_text}
