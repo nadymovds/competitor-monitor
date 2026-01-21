@@ -81,3 +81,63 @@ export async function upsertUser(telegramUser) {
   if (error) throw error
   return data
 }
+
+// === Функции для редактирования конкурентов (admin) ===
+
+export async function updateCompetitor(competitorId, updates) {
+  const { data, error } = await supabase
+    .from('competitors')
+    .update(updates)
+    .eq('id', competitorId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function addCompetitorToGroup(competitorId, groupId) {
+  const { data, error } = await supabase
+    .from('competitor_groups')
+    .insert({ competitor_id: competitorId, group_id: groupId })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function removeCompetitorFromGroup(competitorId, groupId) {
+  const { error } = await supabase
+    .from('competitor_groups')
+    .delete()
+    .eq('competitor_id', competitorId)
+    .eq('group_id', groupId)
+  if (error) throw error
+}
+
+export async function createGroup(name, color) {
+  // Получаем максимальный sort_order
+  const { data: maxData } = await supabase
+    .from('groups')
+    .select('sort_order')
+    .order('sort_order', { ascending: false })
+    .limit(1)
+
+  const nextOrder = (maxData?.[0]?.sort_order ?? 0) + 1
+
+  const { data, error } = await supabase
+    .from('groups')
+    .insert({ name, color, sort_order: nextOrder })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function getCompetitorGroups(competitorId) {
+  const { data, error } = await supabase
+    .from('competitor_groups')
+    .select('group_id, groups(id, name, color)')
+    .eq('competitor_id', competitorId)
+  if (error) throw error
+  return data.map(cg => cg.groups)
+}
