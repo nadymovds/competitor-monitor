@@ -1,1 +1,13 @@
+# Ignore generated and dependency files
+
+# Docs
+CLAUDE.md
+
+# Node / build
+webapp/node_modules/
+webapp/dist/
+
+# Python
+__pycache__/
+*.pyc
 CLAUDE.md
