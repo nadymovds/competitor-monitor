@@ -949,19 +949,13 @@ def check_duplicate_change(competitor_id: str, summary: str) -> bool:
     Возвращает True если дубликат найден, False если нет.
     """
     try:
-        normalized_summary = normalize_summary_for_hash(summary)
-        summary_hash = hashlib.sha256(normalized_summary.encode('utf-8')).hexdigest()
+        # Здесь теперь ожидаем уже готовый content_hash (sha256 от нормализованного контента)
+        content_hash = summary
 
-        # Проверяем наличие записи с таким же хешем за последние 14 дней
+        # Проверяем наличие записи с таким же content_hash за последние 14 дней
         fourteen_days_ago = (datetime.now() - timedelta(days=14)).isoformat()
 
-        result = supabase.table('changes').select('id').eq(
-            'competitor_id', competitor_id
-        ).eq(
-            'summary_hash', summary_hash
-        ).gt(
-            'detected_at', fourteen_days_ago
-        ).limit(1).execute()
+        result = supabase.table('changes').select('id').eq('competitor_id', competitor_id).eq('content_hash', content_hash).gt('detected_at', fourteen_days_ago).limit(1).execute()
 
         return bool(result.data)
     except Exception as e:
@@ -969,22 +963,19 @@ def check_duplicate_change(competitor_id: str, summary: str) -> bool:
         return False
 
 
-def save_change(competitor_id: str, category: str, summary: str, tags: List[str], report_id: str) -> bool:
+def save_change(competitor_id: str, category: str, summary: str, tags: List[str], report_id: str, content_hash: str) -> bool:
     """
-    Сохраняет изменение в таблицу changes.
-    Возвращает True если вставлено, False если дубликат.
+    Сохраняет изменение в таблицу changes используя content_hash для дедупликации.
+    Возвращает True если вставлено, False если дубликат или ошибка.
     """
     try:
-        normalized_summary = normalize_summary_for_hash(summary)
-        summary_hash = hashlib.sha256(normalized_summary.encode('utf-8')).hexdigest()
-
         data = {
             'competitor_id': competitor_id,
             'detected_at': datetime.now().isoformat(),
             'category': category,
             'summary': summary,
             'tags': tags,
-            'summary_hash': summary_hash,
+            'content_hash': content_hash,
             'report_id': report_id
         }
 
@@ -1098,50 +1089,51 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
 
     normalized = normalize_content_for_hash(content)
     new_hash = calculate_hash(normalized)
-    
+
     content_changed = previous_hash and new_hash != previous_hash
 
     result = None
     llm_summary = ""
 
-    if content_changed:
-        print(f"   🔔 Изменения: {competitor_name}")
+    # Новая логика дедупликации: проверяем content_hash (sha256 от нормализованного контента)
+    content_hash = new_hash
+    is_content_duplicate = check_duplicate_change(competitor_id, content_hash)
 
+    if is_content_duplicate:
+        print(f"   ⏭️ Дубликат по контенту: {competitor_name}")
+        result = {
+            'competitor': competitor_name,
+            'url': competitor_url,
+            'is_error': False,
+            'is_duplicate': True
+        }
+    else:
+        # Нет дубликата — вызываем LLM для анализа
+        print(f"   🔔 Изменения (новый контент): {competitor_name}")
         analysis = await analyze_changes_async(competitor_name, content, http_session)
 
         if analysis.get("is_meaningful"):
             llm_summary = analysis['summary']
 
-            # Проверяем дубликат ПЕРЕД добавлением в отчёт
-            is_duplicate = check_duplicate_change(competitor_id, analysis['summary'])
+            # Сохраняем изменение с content_hash
+            save_change(
+                competitor_id=competitor_id,
+                category=analysis['category'],
+                summary=analysis['summary'],
+                tags=analysis['tags'],
+                report_id=report_id,
+                content_hash=content_hash
+            )
 
-            if is_duplicate:
-                # Дубликат — не добавляем в отчёт
-                print(f"   ⏭️ Дубликат: {competitor_name}")
-                result = {
-                    'competitor': competitor_name,
-                    'url': competitor_url,
-                    'is_error': False,
-                    'is_duplicate': True
-                }
-            else:
-                # Новое изменение — сохраняем и добавляем в отчёт
-                save_change(
-                    competitor_id=competitor_id,
-                    category=analysis['category'],
-                    summary=analysis['summary'],
-                    tags=analysis['tags'],
-                    report_id=report_id
-                )
-                result = {
-                    'competitor': competitor_name,
-                    'url': competitor_url,
-                    'category': analysis['category'],
-                    'summary': analysis['summary'],
-                    'tags': analysis['tags'],
-                    'is_error': False,
-                    'is_meaningful': True
-                }
+            result = {
+                'competitor': competitor_name,
+                'url': competitor_url,
+                'category': analysis['category'],
+                'summary': analysis['summary'],
+                'tags': analysis['tags'],
+                'is_error': False,
+                'is_meaningful': True
+            }
         else:
             result = None
             llm_summary = analysis.get('summary', 'Обновлён контент')
