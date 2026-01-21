@@ -141,3 +141,30 @@ export async function getCompetitorGroups(competitorId) {
   if (error) throw error
   return data.map(cg => cg.groups)
 }
+
+export async function updateGroup(groupId, updates) {
+  const { data, error } = await supabase
+    .from('groups')
+    .update(updates)
+    .eq('id', groupId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteGroup(groupId) {
+  // Сначала удаляем связи с конкурентами
+  const { error: linkError } = await supabase
+    .from('competitor_groups')
+    .delete()
+    .eq('group_id', groupId)
+  if (linkError) throw linkError
+
+  // Затем удаляем саму группу
+  const { error } = await supabase
+    .from('groups')
+    .delete()
+    .eq('id', groupId)
+  if (error) throw error
+}

@@ -20,6 +20,10 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupColor, setNewGroupColor] = useState('#3b82f6')
 
+  // Фильтры
+  const [filterGroupIds, setFilterGroupIds] = useState([])
+  const [statusFilter, setStatusFilter] = useState('all') // 'all' | 'active' | 'inactive'
+
   const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
@@ -51,10 +55,47 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
   }, [selectedCompetitor, cameFromMonitoring, editMode])
 
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return competitors
-    const q = searchQuery.toLowerCase()
-    return competitors.filter(c => c.name.toLowerCase().includes(q) || c.url.toLowerCase().includes(q))
-  }, [competitors, searchQuery])
+    let result = competitors
+
+    // Фильтр по поиску
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(c => c.name.toLowerCase().includes(q) || c.url.toLowerCase().includes(q))
+    }
+
+    // Фильтр по группам
+    if (filterGroupIds.length > 0) {
+      result = result.filter(c =>
+        c.groups?.some(g => filterGroupIds.includes(g.id))
+      )
+    }
+
+    // Фильтр по статусу сканирования
+    if (statusFilter === 'active') {
+      result = result.filter(c => c.is_active !== false)
+    } else if (statusFilter === 'inactive') {
+      result = result.filter(c => c.is_active === false)
+    }
+
+    return result
+  }, [competitors, searchQuery, filterGroupIds, statusFilter])
+
+  const hasActiveFilters = filterGroupIds.length > 0 || statusFilter !== 'all'
+
+  const clearFilters = () => {
+    hapticFeedback('light')
+    setFilterGroupIds([])
+    setStatusFilter('all')
+  }
+
+  const toggleGroupFilter = (groupId) => {
+    hapticFeedback('light')
+    setFilterGroupIds(prev =>
+      prev.includes(groupId)
+        ? prev.filter(id => id !== groupId)
+        : [...prev, groupId]
+    )
+  }
 
   const handleSelect = async (c) => {
     hapticFeedback('light')
@@ -562,6 +603,90 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
         {searchQuery && (
           <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}>
             ✕
+          </button>
+        )}
+      </div>
+
+      {/* Фильтры */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Фильтр по статусу */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[
+            { value: 'all', label: 'Все' },
+            { value: 'active', label: 'Активные' },
+            { value: 'inactive', label: 'Отключённые' }
+          ].map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => { hapticFeedback('light'); setStatusFilter(opt.value) }}
+              style={{
+                padding: '6px 12px',
+                fontSize: 13,
+                borderRadius: 8,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: statusFilter === opt.value ? '#3b82f6' : '#1a1a24',
+                color: statusFilter === opt.value ? '#fff' : '#9ca3af',
+                transition: 'all 0.2s'
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Фильтр по группам */}
+        {groups.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {groups.map(g => {
+              const isSelected = filterGroupIds.includes(g.id)
+              return (
+                <button
+                  key={g.id}
+                  onClick={() => toggleGroupFilter(g.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '5px 10px',
+                    fontSize: 12,
+                    borderRadius: 6,
+                    border: isSelected ? `1px solid ${g.color}` : '1px solid transparent',
+                    cursor: 'pointer',
+                    backgroundColor: isSelected ? g.color + '30' : '#1a1a24',
+                    color: isSelected ? g.color : '#9ca3af',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <span style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: g.color
+                  }} />
+                  {g.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Кнопка сброса фильтров */}
+        {hasActiveFilters && (
+          <button
+            onClick={clearFilters}
+            style={{
+              alignSelf: 'flex-start',
+              padding: '4px 10px',
+              fontSize: 12,
+              borderRadius: 6,
+              border: 'none',
+              cursor: 'pointer',
+              backgroundColor: '#ef444420',
+              color: '#ef4444'
+            }}
+          >
+            ✕ Сбросить фильтры
           </button>
         )}
       </div>
