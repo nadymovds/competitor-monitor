@@ -50,3 +50,8 @@ export function showAlert(message) {
   alert(message)
   return Promise.resolve()
 }
+
+export function showConfirm(message) {
+  if (tg?.showConfirm) return new Promise(r => tg.showConfirm(message, r))
+  return Promise.resolve(window.confirm(message))
+}
