@@ -349,6 +349,13 @@ function ChangeCard({ change, onNavigate }) {
         </span>
       </div>
       
+      {/* Показываем URL где произошло изменение */}
+      {change.scanned_url && (
+        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
+          🔗 {change.scanned_url}
+        </div>
+      )}
+
       <div style={{ fontSize: 13, color: '#d1d5db', lineHeight: 1.5 }}>
         {summary}
       </div>

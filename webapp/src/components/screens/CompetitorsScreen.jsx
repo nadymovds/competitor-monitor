@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { getCompetitors, getCompetitorWithHistory, updateCompetitor, addCompetitorToGroup, removeCompetitorFromGroup, createGroup } from '../../services/supabase'
+import { getCompetitors, getCompetitorWithHistory, updateCompetitor, addCompetitorToGroup, removeCompetitorFromGroup, createGroup, addCompetitorUrl, updateCompetitorUrl, deleteCompetitorUrl } from '../../services/supabase'
 import { openLink, hapticFeedback, showBackButton, hideBackButton, showAlert } from '../../services/telegram'
 
 export default function CompetitorsScreen({ user, groups: initialGroups, selectedCompetitorId, cameFromMonitoring, onBackToMonitoring, onClearSelection }) {
@@ -12,7 +12,8 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 
   // Редактирование
   const [editMode, setEditMode] = useState(false)
-  const [editData, setEditData] = useState({ url: '', description: '', is_active: true })
+  const [editData, setEditData] = useState({ description: '', is_active: true })
+  const [editUrls, setEditUrls] = useState([])
   const [saving, setSaving] = useState(false)
   const [groups, setGroups] = useState(initialGroups || [])
   const [competitorGroups, setCompetitorGroups] = useState([])
@@ -126,29 +127,84 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
   const handleStartEdit = () => {
     hapticFeedback('light')
     setEditData({
-      url: selectedCompetitor.url || '',
       description: details?.description || selectedCompetitor.description || '',
       is_active: selectedCompetitor.is_active !== false
     })
+    setEditUrls(details?.urls || selectedCompetitor?.urls || [])
     setEditMode(true)
+  }
+
+  const MAX_URLS_PER_COMPETITOR = 5
+
+  const handleAddUrl = () => {
+    hapticFeedback('light')
+    const activeUrls = editUrls.filter(u => !u.isDeleted)
+    if (activeUrls.length >= MAX_URLS_PER_COMPETITOR) {
+      showAlert(`Максимум ${MAX_URLS_PER_COMPETITOR} URL на конкурента`)
+      return
+    }
+    setEditUrls(prev => [...prev, { url: '', label: '', is_active: true, isNew: true }])
+  }
+
+  const handleUpdateUrl = (index, field, value) => {
+    setEditUrls(prev => prev.map((u, i) => i === index ? { ...u, [field]: value } : u))
+  }
+
+  const handleDeleteUrl = (index) => {
+    hapticFeedback('light')
+    const url = editUrls[index]
+    if (url.id && !url.isNew) {
+      setEditUrls(prev => prev.map((u, i) => i === index ? { ...u, isDeleted: true } : u))
+    } else {
+      setEditUrls(prev => prev.filter((_, i) => i !== index))
+    }
+  }
+
+  const handleToggleUrlActive = (index) => {
+    hapticFeedback('light')
+    setEditUrls(prev => prev.map((u, i) => i === index ? { ...u, is_active: !u.is_active } : u))
   }
 
   const handleSave = async () => {
     hapticFeedback('light')
     setSaving(true)
     try {
+      // Сохраняем основные данные конкурента
       await updateCompetitor(selectedCompetitor.id, {
-        url: editData.url,
         description: editData.description,
         is_active: editData.is_active
       })
 
+      // Обрабатываем URL
+      const savedUrls = []
+      for (const url of editUrls) {
+        if (url.isDeleted && url.id) {
+          await deleteCompetitorUrl(url.id)
+        } else if (url.isNew && url.url) {
+          const saved = await addCompetitorUrl(selectedCompetitor.id, url.url, url.label || null)
+          savedUrls.push(saved)
+        } else if (url.id && !url.isNew && !url.isDeleted) {
+          const saved = await updateCompetitorUrl(url.id, {
+            url: url.url,
+            label: url.label || null,
+            is_active: url.is_active
+          })
+          savedUrls.push(saved)
+        }
+      }
+
+      // Собираем финальный список URL
+      const finalUrls = editUrls
+        .filter(u => !u.isDeleted)
+        .map(u => u.isNew ? savedUrls.find(s => s.url === u.url) || u : u)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+
       // Обновляем локальное состояние
-      setSelectedCompetitor(prev => ({ ...prev, url: editData.url, description: editData.description, is_active: editData.is_active }))
-      setDetails(prev => prev ? { ...prev, description: editData.description } : prev)
+      setSelectedCompetitor(prev => ({ ...prev, description: editData.description, is_active: editData.is_active, urls: finalUrls }))
+      setDetails(prev => prev ? { ...prev, description: editData.description, urls: finalUrls } : prev)
       setCompetitors(prev => prev.map(c =>
         c.id === selectedCompetitor.id
-          ? { ...c, url: editData.url, description: editData.description, is_active: editData.is_active }
+          ? { ...c, description: editData.description, is_active: editData.is_active, urls: finalUrls }
           : c
       ))
 
@@ -258,24 +314,101 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
           <div style={{ fontSize: 22, fontWeight: 700 }}>Редактирование</div>
           <div style={{ fontSize: 14, color: '#9ca3af' }}>{selectedCompetitor.name}</div>
 
-          {/* URL */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: 14, color: '#9ca3af' }}>URL сайта</label>
-            <input
-              type="text"
-              value={editData.url}
-              onChange={e => setEditData(prev => ({ ...prev, url: e.target.value }))}
-              placeholder="example.com"
+          {/* URLs */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <label style={{ fontSize: 14, color: '#9ca3af' }}>URL сайтов</label>
+
+            {editUrls.filter(u => !u.isDeleted).map((u, index) => {
+              const actualIndex = editUrls.findIndex(eu => eu === u)
+              return (
+                <div key={u.id || index} style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  padding: 12,
+                  backgroundColor: '#252532',
+                  borderRadius: 8
+                }}>
+                  <input
+                    type="text"
+                    value={u.label || ''}
+                    onChange={e => handleUpdateUrl(actualIndex, 'label', e.target.value)}
+                    placeholder="Метка"
+                    style={{
+                      width: 70,
+                      padding: '8px 10px',
+                      backgroundColor: '#1a1a24',
+                      border: '1px solid #2a2a3a',
+                      borderRadius: 6,
+                      color: '#fff',
+                      fontSize: 13,
+                      outline: 'none'
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={u.url}
+                    onChange={e => handleUpdateUrl(actualIndex, 'url', e.target.value)}
+                    placeholder="example.com"
+                    style={{
+                      flex: 1,
+                      padding: '8px 10px',
+                      backgroundColor: '#1a1a24',
+                      border: '1px solid #2a2a3a',
+                      borderRadius: 6,
+                      color: '#fff',
+                      fontSize: 13,
+                      outline: 'none'
+                    }}
+                  />
+                  <button
+                    onClick={() => handleToggleUrlActive(actualIndex)}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 6,
+                      border: 'none',
+                      backgroundColor: u.is_active !== false ? '#22c55e20' : '#ef444420',
+                      color: u.is_active !== false ? '#22c55e' : '#ef4444',
+                      cursor: 'pointer',
+                      fontSize: 14
+                    }}
+                  >
+                    {u.is_active !== false ? '✓' : '✗'}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteUrl(actualIndex)}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 6,
+                      border: 'none',
+                      backgroundColor: '#ef444420',
+                      color: '#ef4444',
+                      cursor: 'pointer',
+                      fontSize: 14
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
+              )
+            })}
+
+            <button
+              onClick={handleAddUrl}
               style={{
-                padding: '12px 16px',
-                backgroundColor: '#1a1a24',
-                border: '1px solid #2a2a3a',
-                borderRadius: 10,
-                color: '#fff',
-                fontSize: 15,
-                outline: 'none'
+                padding: '10px 16px',
+                backgroundColor: '#252532',
+                border: '1px dashed #3b82f6',
+                borderRadius: 8,
+                color: '#3b82f6',
+                fontSize: 14,
+                cursor: 'pointer'
               }}
-            />
+            >
+              + Добавить URL
+            </button>
           </div>
 
           {/* Описание */}
@@ -507,9 +640,38 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
           )}
         </div>
 
-        <button onClick={() => openLink(`https://${selectedCompetitor.url}`)} style={{ fontSize: 14, color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
-          🌐 {selectedCompetitor.url}
-        </button>
+        {/* URLs */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(details?.urls || selectedCompetitor?.urls || []).length > 0 ? (
+            (details?.urls || selectedCompetitor?.urls || []).map(u => (
+              <button
+                key={u.id}
+                onClick={() => openLink(`https://${u.url}`)}
+                style={{
+                  fontSize: 14,
+                  color: '#3b82f6',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                🌐 {u.label && <span style={{ color: '#9ca3af' }}>[{u.label}]</span>} {u.url}
+                {u.is_active === false && (
+                  <span style={{ fontSize: 10, color: '#ef4444', backgroundColor: '#ef444420', padding: '2px 6px', borderRadius: 4 }}>откл.</span>
+                )}
+              </button>
+            ))
+          ) : selectedCompetitor.url ? (
+            <button onClick={() => openLink(`https://${selectedCompetitor.url}`)} style={{ fontSize: 14, color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+              🌐 {selectedCompetitor.url}
+            </button>
+          ) : null}
+        </div>
 
         {(details?.description || selectedCompetitor.description) && (
           <div style={{ fontSize: 14, color: '#9ca3af', padding: 12, backgroundColor: '#1a1a24', borderRadius: 8 }}>
@@ -554,7 +716,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                 return (
                   <div key={i} style={{ padding: 12, backgroundColor: '#1a1a24', borderRadius: 10, borderLeft: `3px solid ${typeColors[category] || '#3b82f6'}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, color: '#6b7280' }}>{formatDate(h.scan_date)}</span>
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>{formatDate(h.detected_at || h.scan_date)}</span>
                       <span style={{
                         fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4,
                         backgroundColor: (typeColors[category] || '#6b7280') + '20',
@@ -563,6 +725,21 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                         {typeLabels[category] || category}
                       </span>
                     </div>
+
+                    {/* Показываем URL где произошло изменение */}
+                    {(h.scanned_url || h.competitor_urls?.url) && (
+                      <div style={{
+                        fontSize: 11,
+                        color: '#3b82f6',
+                        marginBottom: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}>
+                        🔗 {h.competitor_urls?.label && `[${h.competitor_urls.label}] `}
+                        {h.scanned_url || h.competitor_urls?.url}
+                      </div>
+                    )}
 
                     <div style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.5 }}>
                       {h.parsed.summary}
@@ -714,7 +891,19 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                 </div>
                 <span style={{ color: '#6b7280' }}>→</span>
               </div>
-              <div style={{ fontSize: 13, color: '#3b82f6' }}>{c.url}</div>
+              <div style={{ fontSize: 13, color: '#3b82f6' }}>
+                {c.urls?.length > 0 ? (
+                  c.urls.slice(0, 2).map((u, i) => (
+                    <div key={u.id || i}>
+                      {u.label && <span style={{ color: '#6b7280' }}>{u.label}: </span>}
+                      {u.url}
+                      {c.urls.length > 2 && i === 1 && <span style={{ color: '#6b7280' }}> (+{c.urls.length - 2})</span>}
+                    </div>
+                  ))
+                ) : (
+                  c.url
+                )}
+              </div>
               {c.description && <div style={{ fontSize: 13, color: '#9ca3af' }}>{c.description}</div>}
               {c.groups?.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>

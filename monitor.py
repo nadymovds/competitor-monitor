@@ -742,7 +742,8 @@ print("✅ LLM анализ настроен")
 
 def generate_pdf_report(
     report_date: str,
-    total_checked: int,
+    total_competitors: int,
+    total_urls: int,
     categorized_changes: Dict[str, List[Dict]],
     failed_sites: List[Dict],
     duplicates_count: int = 0,
@@ -775,9 +776,9 @@ def generate_pdf_report(
     content.append(Paragraph(f"Дата: {report_date}", styles['subtitle']))
     
     total_changes = sum(len(v) for v in categorized_changes.values())
-    total_ok = total_checked - len(failed_sites)
-    
-    stats = f"📊 Проверено: {total_checked} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | 🔁 Дубликаты: {duplicates_count} | 🆕 Первые: {first_scans_count} | ⚠️ Проблемы: {len(failed_sites)}"
+    total_ok = total_urls - len(failed_sites)
+
+    stats = f"📊 Конкурентов: {total_competitors} | 🔗 URL: {total_urls} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | 🔁 Дубликаты: {duplicates_count} | 🆕 Первые: {first_scans_count} | ⚠️ Проблемы: {len(failed_sites)}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
     
@@ -793,7 +794,7 @@ def generate_pdf_report(
         content.append(Paragraph("📈 СТАТИСТИКА ПО СТАТУСАМ", styles['stats_header']))
 
         # Успешные
-        success_rate = round(total_ok / total_checked * 100, 1) if total_checked > 0 else 0
+        success_rate = round(total_ok / total_urls * 100, 1) if total_urls > 0 else 0
         content.append(Paragraph(f"✅ Успешно проверено: <b>{total_ok}</b> ({success_rate}%)", styles['stats']))
 
         # Дубликаты
@@ -820,7 +821,7 @@ def generate_pdf_report(
         sorted_reasons = sorted(by_reason.items(), key=lambda x: -len(x[1]))
         for reason, sites in sorted_reasons:
             label, color = reason_labels.get(reason, (reason, "#757575"))
-            pct = round(len(sites) / total_checked * 100, 1)
+            pct = round(len(sites) / total_urls * 100, 1) if total_urls > 0 else 0
             content.append(Paragraph(f"<font color='{color}'>{label}: <b>{len(sites)}</b> ({pct}%)</font>", styles['stats']))
     
     content.append(Spacer(1, 10))
@@ -836,11 +837,12 @@ def generate_pdf_report(
         items = categorized_changes.get(category, [])
         if not items:
             continue
-            
+
         content.append(Paragraph(title, styles['section']))
-        
+
         for i, item in enumerate(items, 1):
-            name = item.get('competitor', '')
+            # Используем display_name если доступен (включает label URL)
+            name = item.get('display_name') or item.get('competitor', '')
             url = item.get('url', '')
             summary = item.get('summary', '')
             tags = item.get('tags', [])
@@ -891,7 +893,8 @@ def generate_pdf_report(
             # === ПОЛНЫЙ СПИСОК БЕЗ ОГРАНИЧЕНИЙ (все сайты с кликабельными ссылками) ===
             names = []
             for site in sites:
-                name = site.get('competitor', 'Неизвестный')
+                # Используем display_name если доступен (включает label URL)
+                name = site.get('display_name') or site.get('competitor', 'Неизвестный')
                 url = site.get('url', '')
                 if url:
                     full_url = url if url.startswith('http') else f'https://{url}'
@@ -1114,26 +1117,197 @@ def save_current_content(competitor_id: str, content: str, content_hash: str) ->
 print("✅ Supabase настроен")
 
 # ============================================================================
-# СКАНИРОВАНИЕ КОНКУРЕНТА
+# URL CONTENT (для сравнения старой и новой версий по URL)
 # ============================================================================
 
-async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str,
-                                http_session: aiohttp.ClientSession, browser_context) -> Dict[str, Any]:
+def get_previous_content_for_url(url_id: str) -> Optional[str]:
+    """
+    Возвращает предыдущий сохранённый контент для конкретного URL.
+    Если записи нет — возвращает None (первое сканирование).
+    """
+    try:
+        result = supabase.table('url_content').select('content_text').eq('url_id', url_id).execute()
+        if result.data:
+            return result.data[0].get('content_text')
+        return None
+    except Exception as e:
+        print(f"   ⚠️ Ошибка get_previous_content_for_url: {str(e)[:80]}")
+        return None
+
+
+def save_current_content_for_url(url_id: str, content: str, content_hash: str) -> bool:
+    """
+    Сохраняет текущий контент в таблицу url_content (upsert).
+    Контент обрезается до MAX_STORED_CONTENT_LENGTH символов.
+    """
+    try:
+        data = {
+            'url_id': url_id,
+            'content_text': content[:MAX_STORED_CONTENT_LENGTH],
+            'content_hash': content_hash,
+            'updated_at': datetime.now().isoformat()
+        }
+        supabase.table('url_content').upsert(data, on_conflict='url_id').execute()
+        return True
+    except Exception as e:
+        print(f"   ⚠️ Ошибка save_current_content_for_url: {str(e)[:80]}")
+        return False
+
+
+# ============================================================================
+# URL HEALTH TRACKING
+# ============================================================================
+
+def update_url_health_success(url_id: str):
+    """Обновляет health при успешном сканировании URL: сбрасывает счётчик ошибок"""
+    try:
+        data = {
+            'url_id': url_id,
+            'consecutive_failures': 0,
+            'last_success_at': datetime.now().isoformat(),
+            'last_error_type': None
+        }
+        supabase.table('url_health').upsert(data, on_conflict='url_id').execute()
+    except Exception as e:
+        print(f"   ⚠️ Ошибка update_url_health_success: {str(e)[:80]}")
+
+
+def update_url_health_failure(url_id: str, error_type: str):
+    """Обновляет health при ошибке сканирования URL: инкрементирует счётчик ошибок"""
+    try:
+        # Сначала получаем текущее значение
+        existing = supabase.table('url_health').select('consecutive_failures').eq('url_id', url_id).execute()
+
+        current_failures = 0
+        if existing.data:
+            current_failures = existing.data[0].get('consecutive_failures', 0) or 0
+
+        data = {
+            'url_id': url_id,
+            'consecutive_failures': current_failures + 1,
+            'last_error_type': error_type
+        }
+        supabase.table('url_health').upsert(data, on_conflict='url_id').execute()
+    except Exception as e:
+        print(f"   ⚠️ Ошибка update_url_health_failure: {str(e)[:80]}")
+
+
+# ============================================================================
+# DUPLICATE CHECK AND SAVE CHANGE (с поддержкой url_id)
+# ============================================================================
+
+def check_duplicate_change_for_url(competitor_id: str, content_hash: str, url_id: str = None) -> bool:
+    """
+    Проверяет, есть ли дубликат изменения за последние 14 дней для конкретного URL.
+    Возвращает True если дубликат найден, False если нет.
+    """
+    try:
+        fourteen_days_ago = (datetime.now() - timedelta(days=14)).isoformat()
+
+        query = supabase.table('changes').select('id').eq('competitor_id', competitor_id).eq('content_hash', content_hash)
+
+        if url_id:
+            query = query.eq('url_id', url_id)
+
+        query = query.gt('detected_at', fourteen_days_ago).limit(1)
+        result = query.execute()
+
+        return bool(result.data)
+    except Exception as e:
+        print(f"   ⚠️ Ошибка check_duplicate_for_url: {str(e)[:80]}")
+        return False
+
+
+def save_change_for_url(
+    competitor_id: str,
+    category: str,
+    summary: str,
+    tags: List[str],
+    report_id: str,
+    content_hash: str,
+    url_id: str = None,
+    scanned_url: str = None
+) -> bool:
+    """
+    Сохраняет изменение в таблицу changes с привязкой к URL.
+    Возвращает True если вставлено, False если дубликат или ошибка.
+    """
+    try:
+        data = {
+            'competitor_id': competitor_id,
+            'detected_at': datetime.now().isoformat(),
+            'category': category,
+            'summary': summary,
+            'tags': tags,
+            'content_hash': content_hash,
+            'report_id': report_id,
+            'url_id': url_id,
+            'scanned_url': scanned_url
+        }
+
+        result = supabase.table('changes').insert(data).execute()
+        return bool(result.data)
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if 'duplicate' in error_str or '23505' in error_str or 'unique' in error_str:
+            return False
+        print(f"   ⚠️ Ошибка save_change_for_url: {str(e)[:100]}")
+        return False
+
+
+print("✅ URL функции настроены")
+
+# ============================================================================
+# СКАНИРОВАНИЕ URL
+# ============================================================================
+
+async def scan_url_async(
+    competitor: Dict,
+    url_info: Dict,
+    report_id: str,
+    scan_date: str,
+    http_session: aiohttp.ClientSession,
+    browser_context
+) -> Dict[str, Any]:
+    """
+    Сканирует один URL конкурента.
+
+    Args:
+        competitor: Данные конкурента {id, name, ...}
+        url_info: Данные URL {id, url, label, is_active}
+        report_id: ID отчёта
+        scan_date: Дата сканирования
+        http_session: HTTP сессия aiohttp
+        browser_context: Контекст браузера Playwright
+    """
     competitor_id = competitor['id']
     competitor_name = competitor.get('name', 'Unknown')
-    competitor_url = competitor.get('url', '')
 
-    print(f"🔍 {competitor_name}")
+    url_id = url_info.get('id')
+    url = url_info.get('url', '')
+    label = url_info.get('label', '')
+
+    # Формируем отображаемое имя
+    display_name = f"{competitor_name} [{label}]" if label else competitor_name
+
+    print(f"🔍 {display_name}: {url}")
 
     previous_hash = get_previous_hash(competitor_id)
 
-    content, error_type = await fetch_website_content_async(competitor_url, http_session, browser_context)
+    content, error_type = await fetch_website_content_async(url, http_session, browser_context)
 
     if not content:
-        update_competitor_health_failure(competitor_id, error_type or 'ошибка')
+        if url_id:
+            update_url_health_failure(url_id, error_type or 'ошибка')
+        else:
+            update_competitor_health_failure(competitor_id, error_type or 'ошибка')
         return {
             'competitor': competitor_name,
-            'url': competitor_url,
+            'display_name': display_name,
+            'url': url,
+            'url_id': url_id,
+            'label': label,
             'error_type': error_type or 'ошибка',
             'is_error': True
         }
@@ -1141,10 +1315,16 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     if is_protection_page(content):
         scan_id = generate_unique_id("scan_")
         create_scan_result(scan_id, scan_date, competitor_id, "PROTECTION_PAGE", False)
-        update_competitor_health_failure(competitor_id, 'cloudflare')
+        if url_id:
+            update_url_health_failure(url_id, 'cloudflare')
+        else:
+            update_competitor_health_failure(competitor_id, 'cloudflare')
         return {
             'competitor': competitor_name,
-            'url': competitor_url,
+            'display_name': display_name,
+            'url': url,
+            'url_id': url_id,
+            'label': label,
             'error_type': 'cloudflare',
             'is_error': True
         }
@@ -1152,10 +1332,16 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     if is_unreadable_content(content):
         scan_id = generate_unique_id("scan_")
         create_scan_result(scan_id, scan_date, competitor_id, "UNREADABLE", False)
-        update_competitor_health_failure(competitor_id, 'нечитаемый')
+        if url_id:
+            update_url_health_failure(url_id, 'нечитаемый')
+        else:
+            update_competitor_health_failure(competitor_id, 'нечитаемый')
         return {
             'competitor': competitor_name,
-            'url': competitor_url,
+            'display_name': display_name,
+            'url': url,
+            'url_id': url_id,
+            'label': label,
             'error_type': 'нечитаемый',
             'is_error': True
         }
@@ -1168,53 +1354,83 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
     result = None
     llm_summary = ""
 
-    # Получаем предыдущий контент для сравнения
-    previous_content = get_previous_content(competitor_id)
+    # Получаем предыдущий контент для сравнения (по URL или по конкуренту)
+    if url_id:
+        previous_content = get_previous_content_for_url(url_id)
+    else:
+        previous_content = get_previous_content(competitor_id)
 
-    # Дедупликация по content_hash
+    # Дедупликация по content_hash (с учётом URL)
     content_hash = new_hash
-    is_content_duplicate = check_duplicate_change(competitor_id, content_hash)
+    if url_id:
+        is_content_duplicate = check_duplicate_change_for_url(competitor_id, content_hash, url_id)
+    else:
+        is_content_duplicate = check_duplicate_change(competitor_id, content_hash)
 
     if is_content_duplicate:
-        print(f"   ⏭️ Дубликат по контенту: {competitor_name}")
+        print(f"   ⏭️ Дубликат по контенту: {display_name}")
         result = {
             'competitor': competitor_name,
-            'url': competitor_url,
+            'display_name': display_name,
+            'url': url,
+            'url_id': url_id,
+            'label': label,
             'is_error': False,
             'is_duplicate': True
         }
     elif previous_content is None:
         # Первое сканирование — сохраняем контент, но не регистрируем изменения
-        print(f"   🆕 Первое сканирование: {competitor_name}")
-        save_current_content(competitor_id, content, content_hash)
-        llm_summary = f"Первое сканирование сайта {competitor_name}"
+        print(f"   🆕 Первое сканирование: {display_name}")
+        if url_id:
+            save_current_content_for_url(url_id, content, content_hash)
+        else:
+            save_current_content(competitor_id, content, content_hash)
+        llm_summary = f"Первое сканирование {display_name}"
         result = {
             'competitor': competitor_name,
-            'url': competitor_url,
+            'display_name': display_name,
+            'url': url,
+            'url_id': url_id,
+            'label': label,
             'is_error': False,
             'is_first_scan': True
         }
     else:
         # Есть предыдущий контент — сравниваем через LLM
-        print(f"   🔔 Сравнение версий: {competitor_name}")
+        print(f"   🔔 Сравнение версий: {display_name}")
         analysis = await analyze_changes_async(competitor_name, content, http_session, previous_content)
 
         if analysis.get("is_meaningful"):
             llm_summary = analysis['summary']
 
-            # Сохраняем изменение с content_hash
-            save_change(
-                competitor_id=competitor_id,
-                category=analysis['category'],
-                summary=analysis['summary'],
-                tags=analysis['tags'],
-                report_id=report_id,
-                content_hash=content_hash
-            )
+            # Сохраняем изменение с привязкой к URL
+            if url_id:
+                save_change_for_url(
+                    competitor_id=competitor_id,
+                    category=analysis['category'],
+                    summary=analysis['summary'],
+                    tags=analysis['tags'],
+                    report_id=report_id,
+                    content_hash=content_hash,
+                    url_id=url_id,
+                    scanned_url=url
+                )
+            else:
+                save_change(
+                    competitor_id=competitor_id,
+                    category=analysis['category'],
+                    summary=analysis['summary'],
+                    tags=analysis['tags'],
+                    report_id=report_id,
+                    content_hash=content_hash
+                )
 
             result = {
                 'competitor': competitor_name,
-                'url': competitor_url,
+                'display_name': display_name,
+                'url': url,
+                'url_id': url_id,
+                'label': label,
                 'category': analysis['category'],
                 'summary': analysis['summary'],
                 'tags': analysis['tags'],
@@ -1224,10 +1440,13 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
         else:
             result = None
             llm_summary = analysis.get('summary', 'Нет важных изменений')
-            print(f"   ⏭️ Нет важных изменений: {competitor_name}")
+            print(f"   ⏭️ Нет важных изменений: {display_name}")
 
         # Обновляем сохранённый контент после анализа
-        save_current_content(competitor_id, content, content_hash)
+        if url_id:
+            save_current_content_for_url(url_id, content, content_hash)
+        else:
+            save_current_content(competitor_id, content, content_hash)
 
     scan_id = generate_unique_id("scan_")
     scan_result_id = create_scan_result(
@@ -1240,7 +1459,10 @@ async def scan_competitor_async(competitor: Dict, report_id: str, scan_date: str
         update_competitor_last_scan(competitor_id, scan_result_id)
 
     # Успешное сканирование — обновляем health
-    update_competitor_health_success(competitor_id)
+    if url_id:
+        update_url_health_success(url_id)
+    else:
+        update_competitor_health_success(competitor_id)
 
     return result
 
@@ -1266,13 +1488,41 @@ async def run_monitoring_async():
         return
 
     try:
-        competitors = supabase.table('competitors').select('*').execute().data
+        # Загружаем конкурентов вместе с их URL
+        competitors = supabase.table('competitors').select(
+            '*, competitor_urls(id, url, label, is_active, sort_order)'
+        ).eq('is_active', True).execute().data
     except Exception as e:
         send_telegram_message(f"❌ Ошибка: {str(e)[:200]}")
         return
 
     total_competitors = len(competitors)
-    print(f"🌐 Конкурентов: {total_competitors}")
+
+    # Собираем все URL для сканирования
+    scan_tasks_list = []
+    for competitor in competitors:
+        urls = competitor.get('competitor_urls', [])
+
+        if urls:
+            # Сортируем по sort_order и фильтруем активные
+            active_urls = [u for u in urls if u.get('is_active', True)]
+            active_urls.sort(key=lambda x: x.get('sort_order', 0))
+
+            for url_info in active_urls:
+                scan_tasks_list.append((competitor, url_info))
+        else:
+            # Fallback на старое поле url если новых URL нет
+            if competitor.get('url'):
+                fallback_url_info = {
+                    'id': None,
+                    'url': competitor['url'],
+                    'label': 'Главная',
+                    'is_active': True
+                }
+                scan_tasks_list.append((competitor, fallback_url_info))
+
+    total_urls = len(scan_tasks_list)
+    print(f"🌐 Конкурентов: {total_competitors}, URL для проверки: {total_urls}")
 
     categorized_changes = {
         CATEGORY_PRODUCTS: [],
@@ -1285,7 +1535,7 @@ async def run_monitoring_async():
     first_scans_count = 0
 
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT_REQUESTS, ssl=False)
-    
+
     async with aiohttp.ClientSession(connector=connector) as http_session:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -1300,7 +1550,7 @@ async def run_monitoring_async():
                     '--disable-blink-features=AutomationControlled',
                 ]
             )
-            
+
             browser_context = await browser.new_context(
                 user_agent=get_random_user_agent(),
                 viewport={'width': 1920, 'height': 1080},
@@ -1311,30 +1561,30 @@ async def run_monitoring_async():
                     'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
                 }
             )
-            
+
             # Batch-обработка для стабильности
             results = []
-            total_batches = (len(competitors) + BATCH_SIZE - 1) // BATCH_SIZE
+            total_batches = (len(scan_tasks_list) + BATCH_SIZE - 1) // BATCH_SIZE
 
             for batch_idx in range(total_batches):
                 start_idx = batch_idx * BATCH_SIZE
-                end_idx = min(start_idx + BATCH_SIZE, len(competitors))
-                batch = competitors[start_idx:end_idx]
+                end_idx = min(start_idx + BATCH_SIZE, len(scan_tasks_list))
+                batch = scan_tasks_list[start_idx:end_idx]
 
                 tasks = [
-                    scan_competitor_async(c, summary_report_id, current_date, http_session, browser_context)
-                    for c in batch
+                    scan_url_async(comp, url_info, summary_report_id, current_date, http_session, browser_context)
+                    for comp, url_info in batch
                 ]
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
                 results.extend(batch_results)
 
                 processed = end_idx
-                print(f"📦 Батч {batch_idx + 1}/{total_batches}: обработано {processed}/{total_competitors}")
+                print(f"📦 Батч {batch_idx + 1}/{total_batches}: обработано {processed}/{total_urls}")
 
                 # Пауза между батчами (кроме последнего)
                 if batch_idx < total_batches - 1:
                     await asyncio.sleep(BATCH_DELAY)
-            
+
             await browser_context.close()
             await browser.close()
 
@@ -1357,29 +1607,29 @@ async def run_monitoring_async():
     print(f"⏱️ Время: {elapsed} сек")
 
     total_changes = sum(len(v) for v in categorized_changes.values())
-    total_ok = total_competitors - len(failed_sites)
-    
+    total_ok = total_urls - len(failed_sites)
+
     # === СОХРАНЯЕМ СТАТИСТИКУ В БД ===
     update_summary_report_with_stats(
         summary_report_id,
-        total_sites=total_competitors,
+        total_sites=total_urls,
         successful_sites=total_ok,
         changes_count=total_changes,
         problems_count=len(failed_sites),
         duration_seconds=elapsed
     )
 
-    pdf_path = generate_pdf_report(current_date, total_competitors, categorized_changes, failed_sites, duplicates_count, first_scans_count)
+    pdf_path = generate_pdf_report(current_date, total_competitors, total_urls, categorized_changes, failed_sites, duplicates_count, first_scans_count)
 
     errors_by_type = {}
     for site in failed_sites:
         error_type = site.get('error_type', 'другое')
         errors_by_type[error_type] = errors_by_type.get(error_type, 0) + 1
-    
+
     error_stats_lines = []
     error_labels = {
         "таймаут": "⏱️ Таймаут",
-        "нет_соединения": "🔌 Нет соединения", 
+        "нет_соединения": "🔌 Нет соединения",
         "cloudflare": "🛡️ Cloudflare",
         "доступ_запрещён": "🚫 Запрещён",
         "не_найден": "❓ Не найден",
@@ -1387,21 +1637,22 @@ async def run_monitoring_async():
         "нечитаемый": "📄 Нечитаемый",
         "мало_контента": "📄 Мало контента",
     }
-    
+
     sorted_errors = sorted(errors_by_type.items(), key=lambda x: -x[1])
     for error_type, count in sorted_errors:
         label = error_labels.get(error_type, error_type)
         error_stats_lines.append(f"   {label}: {count}")
-    
+
     error_stats_text = "\n".join(error_stats_lines) if error_stats_lines else "   Нет данных"
 
-    success_rate = round(total_ok / total_competitors * 100, 1) if total_competitors > 0 else 0
+    success_rate = round(total_ok / total_urls * 100, 1) if total_urls > 0 else 0
 
     msg = f"""📊 <b>Мониторинг завершён</b>
 
 📅 Дата: {current_date}
 ⏱️ Время: {elapsed} сек
-🌐 Проверено: <b>{total_competitors}</b>
+🌐 Конкурентов: <b>{total_competitors}</b>
+🔗 URL проверено: <b>{total_urls}</b>
 
 ✅ <b>Успешно: {total_ok}</b> ({success_rate}%)
 
@@ -1418,6 +1669,18 @@ async def run_monitoring_async():
 {error_stats_text}
 
 📎 Подробный отчёт во вложении"""
+
+    # Добавляем краткий список изменений если их не много
+    if total_changes > 0 and total_changes <= 5:
+        changes_text = "\n\n📋 <b>Изменения:</b>"
+        for cat in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS]:
+            for item in categorized_changes.get(cat, []):
+                name = item.get('display_name') or item.get('competitor', '')
+                summary = item.get('summary', '')[:100]
+                if len(item.get('summary', '')) > 100:
+                    summary += '...'
+                changes_text += f"\n• <b>{name}</b>: {summary}"
+        msg += changes_text
 
     send_telegram_document(pdf_path, msg)
     

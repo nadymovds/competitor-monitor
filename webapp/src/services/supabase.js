@@ -14,7 +14,11 @@ export async function getGroups() {
 export async function getCompetitors(filters = {}) {
   let query = supabase
     .from('competitors')
-    .select(`*, competitor_groups(group_id, groups(id, name, color))`)
+    .select(`
+      *,
+      competitor_groups(group_id, groups(id, name, color)),
+      competitor_urls(id, url, label, is_active, sort_order)
+    `)
     .eq('is_active', true)
     .order('name')
 
@@ -24,17 +28,44 @@ export async function getCompetitors(filters = {}) {
 
   const { data, error } = await query
   if (error) throw error
-  
+
   return data.map(c => ({
     ...c,
-    groups: c.competitor_groups?.map(cg => cg.groups) || []
+    groups: c.competitor_groups?.map(cg => cg.groups) || [],
+    urls: (c.competitor_urls || []).sort((a, b) => a.sort_order - b.sort_order)
   }))
 }
 
 export async function getCompetitorWithHistory(competitorId) {
-  const { data, error } = await supabase.rpc('get_competitor_with_groups', { p_competitor_id: competitorId })
-  if (error) throw error
-  return data?.[0] || null
+  // Получаем конкурента с URLs
+  const { data: competitor, error: compError } = await supabase
+    .from('competitors')
+    .select(`
+      *,
+      competitor_groups(group_id, groups(id, name, color)),
+      competitor_urls(id, url, label, is_active, sort_order)
+    `)
+    .eq('id', competitorId)
+    .single()
+
+  if (compError) throw compError
+
+  // Получаем историю изменений с URL
+  const { data: changes, error: changesError } = await supabase
+    .from('changes')
+    .select('*, competitor_urls(url, label)')
+    .eq('competitor_id', competitorId)
+    .order('detected_at', { ascending: false })
+    .limit(50)
+
+  if (changesError) throw changesError
+
+  return {
+    ...competitor,
+    groups: competitor.competitor_groups?.map(cg => cg.groups) || [],
+    urls: (competitor.competitor_urls || []).sort((a, b) => a.sort_order - b.sort_order),
+    changes_history: changes || []
+  }
 }
 
 export async function getScanReports(limit = 10) {
@@ -166,5 +197,45 @@ export async function deleteGroup(groupId) {
     .from('groups')
     .delete()
     .eq('id', groupId)
+  if (error) throw error
+}
+
+// === Функции для управления URL конкурентов ===
+
+export async function addCompetitorUrl(competitorId, url, label = null) {
+  const { data: maxOrder } = await supabase
+    .from('competitor_urls')
+    .select('sort_order')
+    .eq('competitor_id', competitorId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+
+  const nextOrder = (maxOrder?.[0]?.sort_order ?? 0) + 1
+
+  const { data, error } = await supabase
+    .from('competitor_urls')
+    .insert({ competitor_id: competitorId, url, label, sort_order: nextOrder })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateCompetitorUrl(urlId, updates) {
+  const { data, error } = await supabase
+    .from('competitor_urls')
+    .update(updates)
+    .eq('id', urlId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteCompetitorUrl(urlId) {
+  const { error } = await supabase
+    .from('competitor_urls')
+    .delete()
+    .eq('id', urlId)
   if (error) throw error
 }
