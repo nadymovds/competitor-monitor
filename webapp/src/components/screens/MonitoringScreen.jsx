@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { getScanReports, supabase } from '../../services/supabase'
 import { openLink, hapticFeedback } from '../../services/telegram'
 
@@ -36,55 +36,39 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
   // Загрузка изменений для конкретного отчёта
   const loadReportChanges = async (reportId) => {
     if (reportChanges[reportId]) return // Уже загружено
-    
+
     try {
       const { data, error } = await supabase
-        .from('scan_results')
+        .from('changes')
         .select(`
           *,
-          competitors (id, name, url, competitor_groups(group_id, groups(id, name, color)))
+          competitors (id, name, url, competitor_groups(group_id, groups(id, name, color))),
+          competitor_urls (url, label)
         `)
         .eq('report_id', reportId)
-        .eq('content_changed', true)
-      
+        .neq('category', 'technical')
+        .order('detected_at', { ascending: false })
+
       if (error) throw error
-      
+
       // Преобразуем данные
       const changes = data.map(item => ({
-        ...item,
+        id: item.id,
         competitor_id: item.competitors?.id,
         competitor_name: item.competitors?.name,
         competitor_url: item.competitors?.url,
-        groups: item.competitors?.competitor_groups?.map(cg => cg.groups) || [],
-        parsed_summary: parseLlmSummary(item.llm_summary)
+        scanned_url: item.scanned_url || item.competitor_urls?.url,
+        url_label: item.competitor_urls?.label,
+        category: item.category,
+        summary: item.summary,
+        tags: item.tags || [],
+        detected_at: item.detected_at,
+        groups: item.competitors?.competitor_groups?.map(cg => cg.groups) || []
       }))
-      
+
       setReportChanges(prev => ({ ...prev, [reportId]: changes }))
     } catch (err) {
       console.error('Load changes error:', err)
-    }
-  }
-
-  // Парсинг llm_summary (может быть JSON или текст)
-  const parseLlmSummary = (summary) => {
-    if (!summary) return { summary: '', category: null, tags: [] }
-    
-    // Убираем markdown код-блоки если есть
-    let cleaned = summary.trim()
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '')
-    }
-    
-    try {
-      const parsed = JSON.parse(cleaned)
-      return {
-        summary: parsed.summary || parsed.description || cleaned,
-        category: parsed.category || null,
-        tags: parsed.tags || []
-      }
-    } catch {
-      // Если не JSON — возвращаем как есть
-      return { summary: summary, category: null, tags: [] }
     }
   }
 
@@ -109,10 +93,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     }
 
     if (activeCategory !== 'all') {
-      result = result.filter(c => {
-        const category = c.parsed_summary?.category || c.change_type
-        return category === activeCategory
-      })
+      result = result.filter(c => c.category === activeCategory)
     }
 
     return result
@@ -121,15 +102,14 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
   // Подсчёт по категориям для текущего отчёта
   const getCategoryCounts = (reportId) => {
     const changes = reportChanges[reportId] || []
-    const filtered = selectedGroups.length > 0 
+    const filtered = selectedGroups.length > 0
       ? changes.filter(c => (c.groups || []).some(g => selectedGroups.includes(g.id)))
       : changes
 
     return {
       all: filtered.length,
-      products: filtered.filter(c => (c.parsed_summary?.category || c.change_type) === 'products').length,
-      news: filtered.filter(c => (c.parsed_summary?.category || c.change_type) === 'news').length,
-      technical: filtered.filter(c => (c.parsed_summary?.category || c.change_type) === 'technical').length
+      products: filtered.filter(c => c.category === 'products').length,
+      news: filtered.filter(c => c.category === 'news').length
     }
   }
 
@@ -241,8 +221,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                       {[
                         { id: 'all', label: 'Все' },
                         { id: 'products', label: 'Продукты' },
-                        { id: 'news', label: 'Новости' },
-                        { id: 'technical', label: 'Тех.' }
+                        { id: 'news', label: 'Новости' }
                       ].map(cat => (
                         <button 
                           key={cat.id} 
@@ -302,19 +281,17 @@ function ChangeCard({ change, onNavigate }) {
   const typeColors = {
     products: '#22c55e',
     news: '#f59e0b',
-    technical: '#6b7280',
     prices: '#ef4444'
   }
   const typeLabels = {
     products: 'Продукт',
     news: 'Новость',
-    technical: 'Тех.',
     prices: 'Цена'
   }
 
-  const category = change.parsed_summary?.category || change.change_type || 'technical'
-  const summary = change.parsed_summary?.summary || change.llm_summary || 'Нет описания'
-  const tags = change.parsed_summary?.tags || change.tags || []
+  const category = change.category || 'news'
+  const summary = change.summary || 'Нет описания'
+  const tags = change.tags || []
 
   return (
     <div style={{ backgroundColor: '#252532', borderRadius: 10, padding: 12 }}>

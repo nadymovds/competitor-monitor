@@ -9,6 +9,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
   const [selectedCompetitor, setSelectedCompetitor] = useState(null)
   const [details, setDetails] = useState(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
+  const [visibleChangesCount, setVisibleChangesCount] = useState(5)
 
   // Редактирование
   const [editMode, setEditMode] = useState(false)
@@ -102,6 +103,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
     hapticFeedback('light')
     setSelectedCompetitor(c)
     setEditMode(false)
+    setVisibleChangesCount(5)
     setDetailsLoading(true)
     try {
       const d = await getCompetitorWithHistory(c.id)
@@ -291,10 +293,14 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 
   if (selectedCompetitor) {
     const rawHistory = details?.changes_history || []
-    const history = (Array.isArray(rawHistory) ? rawHistory : []).map(h => ({
-      ...h,
-      parsed: parseLlmSummary(h.summary)
-    }))
+    const history = (Array.isArray(rawHistory) ? rawHistory : [])
+      .filter(h => h.category !== 'technical')
+      .map(h => ({
+        ...h,
+        parsed: parseLlmSummary(h.summary)
+      }))
+    const visibleHistory = history.slice(0, visibleChangesCount)
+    const hasMoreChanges = history.length > visibleChangesCount
 
     // Режим редактирования
     if (editMode && isAdmin) {
@@ -698,20 +704,18 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
             <div style={{ color: '#6b7280', textAlign: 'center', padding: 24 }}>Изменений пока не обнаружено</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {history.map((h, i) => {
+              {visibleHistory.map((h, i) => {
                 const typeColors = {
                   products: '#22c55e',
                   news: '#f59e0b',
-                  technical: '#6b7280',
                   prices: '#ef4444'
                 }
                 const typeLabels = {
                   products: 'Продукт',
                   news: 'Новость',
-                  technical: 'Тех.',
                   prices: 'Цена'
                 }
-                const category = h.parsed.category || h.change_type || 'technical'
+                const category = h.parsed.category || h.change_type || 'news'
 
                 return (
                   <div key={i} style={{ padding: 12, backgroundColor: '#1a1a24', borderRadius: 10, borderLeft: `3px solid ${typeColors[category] || '#3b82f6'}` }}>
@@ -757,6 +761,27 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                   </div>
                 )
               })}
+
+              {hasMoreChanges && (
+                <button
+                  onClick={() => {
+                    hapticFeedback('light')
+                    setVisibleChangesCount(prev => prev + 5)
+                  }}
+                  style={{
+                    padding: '12px 16px',
+                    backgroundColor: '#252532',
+                    border: 'none',
+                    borderRadius: 10,
+                    color: '#3b82f6',
+                    fontSize: 14,
+                    cursor: 'pointer',
+                    width: '100%'
+                  }}
+                >
+                  Показать ещё ({history.length - visibleChangesCount})
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -891,13 +916,15 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                 </div>
                 <span style={{ color: '#6b7280' }}>→</span>
               </div>
-              <div style={{ fontSize: 13, color: '#3b82f6' }}>
+              <div style={{ fontSize: 13, color: '#3b82f6', display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {c.urls?.length > 0 ? (
-                  c.urls.slice(0, 2).map((u, i) => (
-                    <div key={u.id || i}>
-                      {u.label && <span style={{ color: '#6b7280' }}>{u.label}: </span>}
-                      {u.url}
-                      {c.urls.length > 2 && i === 1 && <span style={{ color: '#6b7280' }}> (+{c.urls.length - 2})</span>}
+                  c.urls.map((u, i) => (
+                    <div key={u.id || i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {u.label && <span style={{ color: '#6b7280', fontSize: 11 }}>[{u.label}]</span>}
+                      <span style={{ opacity: u.is_active === false ? 0.5 : 1 }}>{u.url}</span>
+                      {u.is_active === false && (
+                        <span style={{ fontSize: 9, color: '#ef4444', backgroundColor: '#ef444420', padding: '1px 4px', borderRadius: 3 }}>откл</span>
+                      )}
                     </div>
                   ))
                 ) : (
