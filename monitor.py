@@ -178,13 +178,13 @@ def send_app_button(chat_id: str = None) -> bool:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         keyboard = {
             "inline_keyboard": [[{
-                "text": "📊 Открыть Competitor Monitor",
-                "web_app": {"url": "https://nadymovds.github.io/competitor-monitor/"}
+                "text": "📊 Открыть бота",
+                "url": "https://t.me/skai_compit_bot"
             }]]
         }
         requests.post(url, json={
-            "chat_id": target_chat_id, 
-            "text": "🔗 <b>Competitor Monitor</b>\n\nНажмите кнопку ниже, чтобы открыть приложение для мониторинга конкурентов.", 
+            "chat_id": target_chat_id,
+            "text": "🔗 <b>Competitor Monitor</b>\n\nОткройте бота и нажмите кнопку меню слева от поля ввода.",
             "parse_mode": "HTML",
             "reply_markup": keyboard
         }, timeout=30)
