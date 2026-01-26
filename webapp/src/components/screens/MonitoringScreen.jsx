@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getScanReports, supabase } from '../../services/supabase'
 import { openLink, hapticFeedback } from '../../services/telegram'
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
 
 export default function MonitoringScreen({ user, groups, onNavigateToCompetitor }) {
   const [reports, setReports] = useState([])
@@ -125,47 +123,6 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     setSelectedGroups([]) 
   }
 
-  // Генерация PDF отчета
-  const generatePDF = async (reportId) => {
-    hapticFeedback('light')
-    try {
-      const reportElement = document.getElementById(`report-${reportId}`)
-      if (!reportElement) return
-
-      const canvas = await html2canvas(reportElement, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#1a1a24'
-      })
-
-      const imgData = canvas.toDataURL('image/png')
-      const pdf = new jsPDF('p', 'mm', 'a4')
-
-      const imgWidth = 210
-      const pageHeight = 295
-      const imgHeight = (canvas.height * imgWidth) / canvas.width
-      let heightLeft = imgHeight
-
-      let position = 0
-
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-      heightLeft -= pageHeight
-
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight
-        pdf.addPage()
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-        heightLeft -= pageHeight
-      }
-
-      pdf.save(`report-${formatDate(reports.find(r => r.id === reportId)?.report_date)}.pdf`)
-    } catch (error) {
-      console.error('Error generating PDF:', error)
-      alert('Ошибка при генерации PDF')
-    }
-  }
-
   if (loading) return <div style={{ padding: 20, textAlign: 'center', color: '#6b7280' }}>Загрузка...</div>
 
   return (
@@ -213,7 +170,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
             const categoryCounts = getCategoryCounts(report.id)
             
             return (
-              <div id={`report-${report.id}`} key={report.id} style={{ backgroundColor: '#1a1a24', borderRadius: 12, overflow: 'hidden' }}>
+              <div key={report.id} style={{ backgroundColor: '#1a1a24', borderRadius: 12, overflow: 'hidden' }}>
                 {/* Заголовок отчёта (кликабельный) */}
                 <button 
                   onClick={() => toggleReport(report.id)}
@@ -232,21 +189,6 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                           {Math.floor(report.duration_seconds / 60)}м {report.duration_seconds % 60}с
                         </span>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); generatePDF(report.id) }}
-                        style={{
-                          fontSize: 12,
-                          color: '#3b82f6',
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '4px 8px',
-                          borderRadius: 4,
-                          backgroundColor: '#3b82f620'
-                        }}
-                      >
-                        📄 PDF
-                      </button>
                       <span style={{ 
                         fontSize: 18, color: '#6b7280', 
                         transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)', 
