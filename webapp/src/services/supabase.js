@@ -98,6 +98,28 @@ export async function getUserByTelegramId(telegramId) {
   return data
 }
 
+export async function checkUserAccess(telegramUser) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('telegram_id', telegramUser.id)
+    .single()
+
+  if (error && error.code === 'PGRST116') {
+    // Пользователь не найден в БД - доступ запрещён
+    return { allowed: false, user: null }
+  }
+  if (error) throw error
+
+  // Пользователь найден - обновляем last_seen_at
+  await supabase
+    .from('users')
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq('telegram_id', telegramUser.id)
+
+  return { allowed: true, user: data }
+}
+
 export async function upsertUser(telegramUser) {
   const { data, error } = await supabase
     .from('users')

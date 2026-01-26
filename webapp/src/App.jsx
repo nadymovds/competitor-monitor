@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { getTelegramUser } from './services/telegram'
-import { upsertUser, getGroups } from './services/supabase'
+import { checkUserAccess, getGroups } from './services/supabase'
 import MonitoringScreen from './components/screens/MonitoringScreen'
 import CompetitorsScreen from './components/screens/CompetitorsScreen'
 import SettingsScreen from './components/screens/SettingsScreen'
@@ -12,6 +12,7 @@ export default function App() {
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [accessDenied, setAccessDenied] = useState(false)
   const [selectedCompetitorId, setSelectedCompetitorId] = useState(null)
   const [cameFromMonitoring, setCameFromMonitoring] = useState(false)
 
@@ -20,10 +21,16 @@ export default function App() {
       try {
         setLoading(true)
         const telegramUser = getTelegramUser()
-        if (telegramUser) {
-          const dbUser = await upsertUser(telegramUser)
-          setUser(dbUser)
+        if (!telegramUser) {
+          setAccessDenied(true)
+          return
         }
+        const { allowed, user: dbUser } = await checkUserAccess(telegramUser)
+        if (!allowed) {
+          setAccessDenied(true)
+          return
+        }
+        setUser(dbUser)
         const groupsData = await getGroups()
         setGroups(groupsData)
       } catch (err) {
@@ -61,6 +68,20 @@ export default function App() {
       <div style={styles.loadingContainer}>
         <div style={styles.spinner} />
         <div style={styles.loadingText}>Загрузка...</div>
+      </div>
+    )
+  }
+
+  if (accessDenied) {
+    return (
+      <div style={styles.errorContainer}>
+        <div style={{ fontSize: 48 }}>🔒</div>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>Доступ запрещён</div>
+        <div style={{ fontSize: 14, color: '#6b7280', textAlign: 'center' }}>
+          У вас нет доступа к этому приложению.
+          <br />
+          Обратитесь к администратору.
+        </div>
       </div>
     )
   }
