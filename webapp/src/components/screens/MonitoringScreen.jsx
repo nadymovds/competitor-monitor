@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getScanReports, supabase } from '../../services/supabase'
 import { openLink, hapticFeedback } from '../../services/telegram'
-import { generateReportPDF } from '../../services/pdfGenerator'
 
 export default function MonitoringScreen({ user, groups, onNavigateToCompetitor }) {
   const [reports, setReports] = useState([])
@@ -119,49 +118,9 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     setSelectedGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]) 
   }
   
-  const resetFilters = () => {
+  const resetFilters = () => { 
     hapticFeedback('light')
-    setSelectedGroups([])
-  }
-
-  // Генерация и скачивание PDF
-  const handleDownloadPDF = async (report, e) => {
-    e.stopPropagation() // Чтобы не срабатывал toggle отчёта
-    hapticFeedback('medium')
-
-    // Загружаем изменения если ещё не загружены
-    let changes = reportChanges[report.id]
-    if (!changes) {
-      try {
-        const { data, error } = await supabase
-          .from('changes')
-          .select(`
-            *,
-            competitors (id, name, url),
-            competitor_urls (url, label)
-          `)
-          .eq('report_id', report.id)
-          .neq('category', 'technical')
-          .order('detected_at', { ascending: false })
-
-        if (error) throw error
-
-        changes = data.map(item => ({
-          competitor_name: item.competitors?.name,
-          competitor_url: item.competitors?.url,
-          scanned_url: item.scanned_url || item.competitor_urls?.url,
-          url_label: item.competitor_urls?.label,
-          category: item.category,
-          summary: item.summary,
-          tags: item.tags || []
-        }))
-      } catch (err) {
-        console.error('Failed to load changes for PDF:', err)
-        return
-      }
-    }
-
-    generateReportPDF(report, changes)
+    setSelectedGroups([]) 
   }
 
   if (loading) return <div style={{ padding: 20, textAlign: 'center', color: '#6b7280' }}>Загрузка...</div>
@@ -230,24 +189,10 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                           {Math.floor(report.duration_seconds / 60)}м {report.duration_seconds % 60}с
                         </span>
                       )}
-                      <button
-                        onClick={(e) => handleDownloadPDF(report, e)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: 4,
-                          cursor: 'pointer',
-                          fontSize: 16,
-                          opacity: 0.7
-                        }}
-                        title="Скачать PDF"
-                      >
-                        📄
-                      </button>
-                      <span style={{
-                        fontSize: 18, color: '#6b7280',
-                        transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)',
-                        transition: 'transform 0.2s'
+                      <span style={{ 
+                        fontSize: 18, color: '#6b7280', 
+                        transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)', 
+                        transition: 'transform 0.2s' 
                       }}>
                         ▼
                       </span>
