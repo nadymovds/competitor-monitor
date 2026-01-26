@@ -43,6 +43,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
 
 LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -139,23 +140,54 @@ print("✅ Конфигурация загружена")
 # ============================================================================
 
 def send_telegram_message(message: str) -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    success = False
+    chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
+    for chat_id in chat_ids:
+        if chat_id:
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=30)
+                success = True
+            except:
+                pass
+    return success
+
+def send_telegram_document(file_path: str, caption: str = "") -> bool:
+    success = False
+    chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
+    for chat_id in chat_ids:
+        if chat_id:
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+                with open(file_path, 'rb') as f:
+                    requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}, 
+                                 files={'document': f}, timeout=60)
+                success = True
+            except:
+                pass
+    return success
+
+def send_app_button(chat_id: str = None) -> bool:
+    """Отправляет кнопку для открытия Mini App"""
+    if not TELEGRAM_BOT_TOKEN:
+        return False
+    target_chat_id = chat_id or TELEGRAM_GROUP_CHAT_ID
+    if not target_chat_id:
         return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=30)
-        return True
-    except:
-        return False
-
-def send_telegram_document(file_path: str, caption: str = "") -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
-        with open(file_path, 'rb') as f:
-            requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'HTML'}, 
-                         files={'document': f}, timeout=60)
+        keyboard = {
+            "inline_keyboard": [[{
+                "text": "📊 Открыть Competitor Monitor",
+                "web_app": {"url": "https://nadymovds.github.io/competitor-monitor/"}
+            }]]
+        }
+        requests.post(url, json={
+            "chat_id": target_chat_id, 
+            "text": "🔗 <b>Competitor Monitor</b>\n\nНажмите кнопку ниже, чтобы открыть приложение для мониторинга конкурентов.", 
+            "parse_mode": "HTML",
+            "reply_markup": keyboard
+        }, timeout=30)
         return True
     except:
         return False
