@@ -327,12 +327,12 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
         )}
       </Section>
 
-      <Section title="Уведомления">
+      {false && <Section title="Уведомления">
         <Row label="Об изменениях" desc="Получать уведомления о новых изменениях" toggle enabled onToggle={soon} />
         <Row label="Об ошибках" desc="Получать уведомления о проблемах сканирования" toggle enabled={false} onToggle={soon} border />
-      </Section>
+      </Section>}
 
-      {isAdmin && (
+      {false && isAdmin && (
         <Section title="Расписание сканирования">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px' }}>
             <span style={{ fontSize: 15, color: '#fff' }}>Автосканирование</span>

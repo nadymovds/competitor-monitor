@@ -3,6 +3,9 @@
 # Docs
 CLAUDE.md
 
+# Tasks (local planning)
+tasks/
+
 # Node / build
 webapp/node_modules/
 webapp/dist/
@@ -10,4 +13,3 @@ webapp/dist/
 # Python
 __pycache__/
 *.pyc
-CLAUDE.md
