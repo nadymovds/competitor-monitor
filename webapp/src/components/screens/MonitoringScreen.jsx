@@ -308,7 +308,7 @@ function ChangeCard({ change, onNavigate }) {
             {change.competitor_name || 'Неизвестный'}
           </button>
           <button 
-            onClick={() => openLink(`https://${change.competitor_url}`)}
+            onClick={() => openLink(ensureProtocol(change.competitor_url))}
             style={{ 
               display: 'block', fontSize: 11, color: '#3b82f6', background: 'none', 
               border: 'none', padding: 0, marginTop: 2, cursor: 'pointer' 
@@ -363,4 +363,10 @@ function ChangeCard({ change, onNavigate }) {
 function formatDate(d) {
   if (!d) return ''
   return new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function ensureProtocol(url) {
+  if (!url) return url
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  return `https://${url}`
 }

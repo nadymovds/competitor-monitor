@@ -652,7 +652,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
             (details?.urls || selectedCompetitor?.urls || []).map(u => (
               <button
                 key={u.id}
-                onClick={() => openLink(`https://${u.url}`)}
+                onClick={() => openLink(ensureProtocol(u.url))}
                 style={{
                   fontSize: 14,
                   color: '#3b82f6',
@@ -673,7 +673,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
               </button>
             ))
           ) : selectedCompetitor.url ? (
-            <button onClick={() => openLink(`https://${selectedCompetitor.url}`)} style={{ fontSize: 14, color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+            <button onClick={() => openLink(ensureProtocol(selectedCompetitor.url))} style={{ fontSize: 14, color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
               🌐 {selectedCompetitor.url}
             </button>
           ) : null}
@@ -953,4 +953,10 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 function formatDate(d) {
   if (!d) return ''
   return new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function ensureProtocol(url) {
+  if (!url) return url
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  return `https://${url}`
 }
