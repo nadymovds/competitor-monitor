@@ -208,8 +208,8 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                       subvalue={report.total_sites ? `${Math.round((report.successful_sites / report.total_sites) * 100)}%` : null}
                       color="#22c55e" 
                     />
-                    <StatBox label="Изменений" value={report.changes_count || changes.length} color="#3b82f6" />
-                    <StatBox label="Проблем" value={report.problems_count || 0} color="#ef4444" />
+                    <StatBox label="Изменений" value={reportChanges[report.id] ? changes.length : (report.changes_count || 0)} color="#3b82f6" />
+                    <StatBox label="Неуспешно" value={report.problems_count || 0} color="#ef4444" />
                   </div>
                 </button>
 

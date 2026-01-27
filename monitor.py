@@ -806,8 +806,8 @@ def generate_pdf_report(
     
     content.append(Paragraph("Отчёт мониторинга конкурентов", styles['title']))
     content.append(Paragraph(f"Дата: {report_date}", styles['subtitle']))
-    
-    total_changes = sum(len(v) for v in categorized_changes.values())
+
+    total_changes = sum(len(v) for k, v in categorized_changes.items() if k != CATEGORY_TECHNICAL)
     total_ok = total_urls - len(failed_sites)
 
     stats = f"📊 Конкурентов: {total_competitors} | 🔗 URL: {total_urls} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | 🔁 Дубликаты: {duplicates_count} | 🆕 Первые: {first_scans_count} | ⚠️ Проблемы: {len(failed_sites)}"
@@ -1638,7 +1638,7 @@ async def run_monitoring_async():
     elapsed = int(time.time() - start_time)
     print(f"⏱️ Время: {elapsed} сек")
 
-    total_changes = sum(len(v) for v in categorized_changes.values())
+    total_changes = sum(len(v) for k, v in categorized_changes.items() if k != CATEGORY_TECHNICAL)
     total_ok = total_urls - len(failed_sites)
 
     # === СОХРАНЯЕМ СТАТИСТИКУ В БД ===
@@ -1692,27 +1692,14 @@ async def run_monitoring_async():
    🏷️ Продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}
    💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
-   🔧 Технические: {len(categorized_changes[CATEGORY_TECHNICAL])}
 
 🔁 <b>Пропущено дубликатов: {duplicates_count}</b>
 🆕 <b>Первых сканирований: {first_scans_count}</b>
 
-⚠️ <b>Проблемы: {len(failed_sites)}</b>
+⚠️ <b>Неуспешно: {len(failed_sites)}</b>
 {error_stats_text}
 
 📎 Подробный отчёт во вложении"""
-
-    # Добавляем краткий список изменений если их не много
-    if total_changes > 0 and total_changes <= 5:
-        changes_text = "\n\n📋 <b>Изменения:</b>"
-        for cat in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS]:
-            for item in categorized_changes.get(cat, []):
-                name = item.get('display_name') or item.get('competitor', '')
-                summary = item.get('summary', '')[:100]
-                if len(item.get('summary', '')) > 100:
-                    summary += '...'
-                changes_text += f"\n• <b>{name}</b>: {summary}"
-        msg += changes_text
 
     send_telegram_document(pdf_path, msg)
     
