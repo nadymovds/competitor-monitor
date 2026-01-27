@@ -7,6 +7,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
   const [loading, setLoading] = useState(true)
   const [expandedReportId, setExpandedReportId] = useState(null)
   const [reportChanges, setReportChanges] = useState({})
+  const [reportCounts, setReportCounts] = useState({}) // Счётчики изменений без technical
   const [selectedGroups, setSelectedGroups] = useState([])
   const [activeCategory, setActiveCategory] = useState('all')
 
@@ -17,9 +18,25 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
         setLoading(true)
         const reportsData = await getScanReports(10)
         setReports(reportsData)
-        
-        // Автоматически раскрываем последний отчёт
+
+        // Загружаем счётчики изменений для всех отчётов (без technical)
         if (reportsData.length > 0) {
+          const reportIds = reportsData.map(r => r.id)
+          const { data: countsData } = await supabase
+            .from('changes')
+            .select('report_id')
+            .in('report_id', reportIds)
+            .neq('category', 'technical')
+
+          // Подсчитываем количество изменений по report_id
+          const counts = {}
+          reportIds.forEach(id => counts[id] = 0)
+          countsData?.forEach(item => {
+            counts[item.report_id] = (counts[item.report_id] || 0) + 1
+          })
+          setReportCounts(counts)
+
+          // Автоматически раскрываем последний отчёт
           const lastReport = reportsData[0]
           setExpandedReportId(lastReport.id)
           loadReportChanges(lastReport.id)
@@ -165,7 +182,6 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
         ) : (
           reports.map(report => {
             const isExpanded = expandedReportId === report.id
-            const changes = reportChanges[report.id] || []
             const filteredChanges = getFilteredChanges(report.id)
             const categoryCounts = getCategoryCounts(report.id)
             
@@ -208,7 +224,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                       subvalue={report.total_sites ? `${Math.round((report.successful_sites / report.total_sites) * 100)}%` : null}
                       color="#22c55e" 
                     />
-                    <StatBox label="Изменений" value={reportChanges[report.id] ? changes.length : (report.changes_count || 0)} color="#3b82f6" />
+                    <StatBox label="Изменений" value={reportCounts[report.id] ?? 0} color="#3b82f6" />
                     <StatBox label="Неуспешно" value={report.problems_count || 0} color="#ef4444" />
                   </div>
                 </button>
