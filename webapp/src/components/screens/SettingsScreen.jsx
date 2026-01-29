@@ -1,6 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { hapticFeedback, showAlert, showConfirm } from '../../services/telegram'
 import { createGroup, updateGroup, deleteGroup } from '../../services/supabase'
+import {
+  getNewsCategories, getAllNewsChannels,
+  createCategory, updateCategory, toggleCategoryVisibility, deleteCategory as deleteCategoryApi,
+  createChannel, updateChannel, deleteChannel as deleteChannelApi
+} from '../../services/news'
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
@@ -14,8 +19,44 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   const [editColor, setEditColor] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // News categories state
+  const [categories, setCategories] = useState([])
+  const [editingCategory, setEditingCategory] = useState(null)
+  const [showNewCategoryForm, setShowNewCategoryForm] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [newCatColor, setNewCatColor] = useState('#3b82f6')
+  const [newCatDescription, setNewCatDescription] = useState('')
+  const [editCatName, setEditCatName] = useState('')
+  const [editCatColor, setEditCatColor] = useState('')
+  const [editCatDescription, setEditCatDescription] = useState('')
+
+  // News channels state
+  const [channels, setChannels] = useState([])
+  const [editingChannel, setEditingChannel] = useState(null)
+  const [showNewChannelForm, setShowNewChannelForm] = useState(false)
+  const [newChUsername, setNewChUsername] = useState('')
+  const [newChTitle, setNewChTitle] = useState('')
+  const [editChUsername, setEditChUsername] = useState('')
+  const [editChTitle, setEditChTitle] = useState('')
+
   const isAdmin = user?.role === 'admin'
   const soon = () => { hapticFeedback('warning'); showAlert('Эта функция скоро будет доступна') }
+
+  useEffect(() => {
+    if (!isAdmin) return
+    async function loadNewsSettings() {
+      try {
+        const [cats, chs] = await Promise.all([getNewsCategories(), getAllNewsChannels()])
+        setCategories(cats)
+        setChannels(chs)
+      } catch (err) {
+        console.error('Error loading news settings:', err)
+      }
+    }
+    loadNewsSettings()
+  }, [isAdmin])
+
+  // --- Groups handlers ---
 
   const handleEditGroup = (group) => {
     hapticFeedback('light')
@@ -104,6 +145,222 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     }
   }
 
+  // --- News categories handlers ---
+
+  const handleToggleCategoryVisibility = async (cat) => {
+    hapticFeedback('light')
+    try {
+      const updated = await toggleCategoryVisibility(cat.id, !cat.is_visible)
+      setCategories(prev => prev.map(c => c.id === updated.id ? updated : c))
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error toggling category visibility:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка: ' + err.message)
+    }
+  }
+
+  const handleEditCategory = (cat) => {
+    hapticFeedback('light')
+    setEditingCategory(cat)
+    setEditCatName(cat.name)
+    setEditCatColor(cat.color)
+    setEditCatDescription(cat.description || '')
+  }
+
+  const handleCancelEditCategory = () => {
+    hapticFeedback('light')
+    setEditingCategory(null)
+    setEditCatName('')
+    setEditCatColor('')
+    setEditCatDescription('')
+  }
+
+  const handleSaveCategory = async () => {
+    if (!editCatName.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите название категории')
+      return
+    }
+
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const updated = await updateCategory(editingCategory.id, {
+        name: editCatName.trim(),
+        color: editCatColor,
+        description: editCatDescription.trim() || null
+      })
+      setCategories(prev => prev.map(c => c.id === updated.id ? updated : c))
+      setEditingCategory(null)
+      setEditCatName('')
+      setEditCatColor('')
+      setEditCatDescription('')
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error updating category:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка сохранения: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteCategory = async (cat) => {
+    hapticFeedback('warning')
+    const confirmed = await showConfirm(`Удалить категорию "${cat.name}"? Новости будут перенесены в категорию "Прочее".`)
+    if (!confirmed) return
+
+    setSaving(true)
+    try {
+      await deleteCategoryApi(cat.id)
+      setCategories(prev => prev.filter(c => c.id !== cat.id))
+      setEditingCategory(null)
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error deleting category:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка удаления: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateCategory = async () => {
+    if (!newCatName.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите название категории')
+      return
+    }
+
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const created = await createCategory({
+        name: newCatName.trim(),
+        color: newCatColor,
+        description: newCatDescription.trim() || null
+      })
+      setCategories(prev => [...prev, created])
+      setShowNewCategoryForm(false)
+      setNewCatName('')
+      setNewCatColor('#3b82f6')
+      setNewCatDescription('')
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error creating category:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // --- News channels handlers ---
+
+  const handleEditChannel = (ch) => {
+    hapticFeedback('light')
+    setEditingChannel(ch)
+    setEditChUsername(ch.username)
+    setEditChTitle(ch.title || '')
+  }
+
+  const handleCancelEditChannel = () => {
+    hapticFeedback('light')
+    setEditingChannel(null)
+    setEditChUsername('')
+    setEditChTitle('')
+  }
+
+  const handleSaveChannel = async () => {
+    if (!editChUsername.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите username канала')
+      return
+    }
+
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const updated = await updateChannel(editingChannel.id, {
+        username: editChUsername.trim(),
+        title: editChTitle.trim() || null
+      })
+      setChannels(prev => prev.map(c => c.id === updated.id ? updated : c))
+      setEditingChannel(null)
+      setEditChUsername('')
+      setEditChTitle('')
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error updating channel:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка сохранения: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteChannel = async (ch) => {
+    hapticFeedback('warning')
+    const confirmed = await showConfirm(`Удалить канал "@${ch.username}"? Все новости этого канала будут удалены.`)
+    if (!confirmed) return
+
+    setSaving(true)
+    try {
+      await deleteChannelApi(ch.id)
+      setChannels(prev => prev.filter(c => c.id !== ch.id))
+      setEditingChannel(null)
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error deleting channel:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка удаления: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateChannel = async () => {
+    if (!newChUsername.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите username канала')
+      return
+    }
+
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const created = await createChannel({
+        username: newChUsername.trim(),
+        title: newChTitle.trim() || null
+      })
+      setChannels(prev => [...prev, created])
+      setShowNewChannelForm(false)
+      setNewChUsername('')
+      setNewChTitle('')
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error creating channel:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleToggleChannelActive = async (ch) => {
+    hapticFeedback('light')
+    try {
+      const updated = await updateChannel(ch.id, { isActive: !ch.is_active })
+      setChannels(prev => prev.map(c => c.id === updated.id ? updated : c))
+      hapticFeedback('success')
+    } catch (err) {
+      console.error('Error toggling channel:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка: ' + err.message)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Настройки</h1>
@@ -131,88 +388,24 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
                     placeholder="Название группы"
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      fontSize: 15,
-                      backgroundColor: '#0d0d14',
-                      border: '1px solid #2a2a3a',
-                      borderRadius: 8,
-                      color: '#fff',
-                      outline: 'none'
-                    }}
+                    style={inputStyle}
                   />
 
                   <div>
                     <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Цвет</div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {COLORS.map(color => (
-                        <button
-                          key={color}
-                          onClick={() => { hapticFeedback('light'); setEditColor(color) }}
-                          style={{
-                            width: 32,
-                            height: 32,
-                            borderRadius: 8,
-                            backgroundColor: color,
-                            border: editColor === color ? '2px solid #fff' : '2px solid transparent',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                          }}
-                        />
+                        <ColorButton key={color} color={color} selected={editColor === color} onClick={() => { hapticFeedback('light'); setEditColor(color) }} />
                       ))}
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <button
-                      onClick={handleSaveGroup}
-                      disabled={saving}
-                      style={{
-                        flex: 1,
-                        padding: '10px 16px',
-                        fontSize: 14,
-                        fontWeight: 500,
-                        backgroundColor: '#3b82f6',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 8,
-                        cursor: saving ? 'not-allowed' : 'pointer',
-                        opacity: saving ? 0.6 : 1
-                      }}
-                    >
+                    <button onClick={handleSaveGroup} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
                       {saving ? 'Сохранение...' : 'Сохранить'}
                     </button>
-                    <button
-                      onClick={handleCancelEdit}
-                      disabled={saving}
-                      style={{
-                        padding: '10px 16px',
-                        fontSize: 14,
-                        backgroundColor: '#374151',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 8,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Отмена
-                    </button>
-                    <button
-                      onClick={() => handleDeleteGroup(g)}
-                      disabled={saving}
-                      style={{
-                        padding: '10px 16px',
-                        fontSize: 14,
-                        backgroundColor: '#ef444420',
-                        color: '#ef4444',
-                        border: 'none',
-                        borderRadius: 8,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Удалить
-                    </button>
+                    <button onClick={handleCancelEdit} disabled={saving} style={btnSecondary}>Отмена</button>
+                    <button onClick={() => handleDeleteGroup(g)} disabled={saving} style={btnDanger}>Удалить</button>
                   </div>
                 </div>
               </div>
@@ -245,71 +438,23 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
                 value={newGroupName}
                 onChange={(e) => setNewGroupName(e.target.value)}
                 placeholder="Название группы"
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  fontSize: 15,
-                  backgroundColor: '#0d0d14',
-                  border: '1px solid #2a2a3a',
-                  borderRadius: 8,
-                  color: '#fff',
-                  outline: 'none'
-                }}
+                style={inputStyle}
               />
 
               <div>
                 <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Цвет</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {COLORS.map(color => (
-                    <button
-                      key={color}
-                      onClick={() => { hapticFeedback('light'); setNewGroupColor(color) }}
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 8,
-                        backgroundColor: color,
-                        border: newGroupColor === color ? '2px solid #fff' : '2px solid transparent',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                      }}
-                    />
+                    <ColorButton key={color} color={color} selected={newGroupColor === color} onClick={() => { hapticFeedback('light'); setNewGroupColor(color) }} />
                   ))}
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <button
-                  onClick={handleCreateGroup}
-                  disabled={saving}
-                  style={{
-                    flex: 1,
-                    padding: '10px 16px',
-                    fontSize: 14,
-                    fontWeight: 500,
-                    backgroundColor: '#10b981',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 8,
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                    opacity: saving ? 0.6 : 1
-                  }}
-                >
+                <button onClick={handleCreateGroup} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
                   {saving ? 'Создание...' : 'Создать группу'}
                 </button>
-                <button
-                  onClick={() => { hapticFeedback('light'); setShowNewGroupForm(false); setNewGroupName(''); setNewGroupColor('#3b82f6') }}
-                  disabled={saving}
-                  style={{
-                    padding: '10px 16px',
-                    fontSize: 14,
-                    backgroundColor: '#374151',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 8,
-                    cursor: 'pointer'
-                  }}
-                >
+                <button onClick={() => { hapticFeedback('light'); setShowNewGroupForm(false); setNewGroupName(''); setNewGroupColor('#3b82f6') }} disabled={saving} style={btnSecondary}>
                   Отмена
                 </button>
               </div>
@@ -320,12 +465,240 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
         {isAdmin && !showNewGroupForm && (
           <button
             onClick={() => { hapticFeedback('light'); setShowNewGroupForm(true); setEditingGroup(null) }}
-            style={{ width: '100%', padding: 14, background: 'none', border: 'none', borderTop: '1px solid #2a2a3a', color: '#3b82f6', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
+            style={addBtnStyle}
           >
             + Добавить группу
           </button>
         )}
       </Section>
+
+      {/* Категории новостей — только для админов */}
+      {isAdmin && (
+        <Section title="Категории новостей" count={categories.length}>
+          {categories.map((cat, i) => (
+            <div key={cat.id}>
+              {editingCategory?.id === cat.id ? (
+                <div style={{ padding: 16, borderBottom: i < categories.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <input
+                      type="text"
+                      value={editCatName}
+                      onChange={(e) => setEditCatName(e.target.value)}
+                      placeholder="Название категории"
+                      style={inputStyle}
+                    />
+                    <input
+                      type="text"
+                      value={editCatDescription}
+                      onChange={(e) => setEditCatDescription(e.target.value)}
+                      placeholder="Описание (необязательно)"
+                      style={inputStyle}
+                    />
+
+                    <div>
+                      <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Цвет</div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {COLORS.map(color => (
+                          <ColorButton key={color} color={color} selected={editCatColor === color} onClick={() => { hapticFeedback('light'); setEditCatColor(color) }} />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <button onClick={handleSaveCategory} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                        {saving ? 'Сохранение...' : 'Сохранить'}
+                      </button>
+                      <button onClick={handleCancelEditCategory} disabled={saving} style={btnSecondary}>Отмена</button>
+                      <button onClick={() => handleDeleteCategory(cat)} disabled={saving} style={btnDanger}>Удалить</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: i < categories.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                    <button
+                      onClick={() => handleToggleCategoryVisibility(cat)}
+                      style={{
+                        width: 20, height: 20, borderRadius: 4, border: '2px solid ' + (cat.is_visible ? '#3b82f6' : '#4b5563'),
+                        backgroundColor: cat.is_visible ? '#3b82f6' : 'transparent',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, padding: 0
+                      }}
+                    >
+                      {cat.is_visible && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
+                    </button>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: cat.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 15, color: cat.is_visible ? '#fff' : '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                  </div>
+                  <button
+                    onClick={() => handleEditCategory(cat)}
+                    style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 16, cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    ✎
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {showNewCategoryForm && (
+            <div style={{ padding: 16, borderTop: categories.length > 0 ? '1px solid #2a2a3a' : 'none' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input
+                  type="text"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  placeholder="Название категории"
+                  style={inputStyle}
+                />
+                <input
+                  type="text"
+                  value={newCatDescription}
+                  onChange={(e) => setNewCatDescription(e.target.value)}
+                  placeholder="Описание (необязательно)"
+                  style={inputStyle}
+                />
+
+                <div>
+                  <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Цвет</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {COLORS.map(color => (
+                      <ColorButton key={color} color={color} selected={newCatColor === color} onClick={() => { hapticFeedback('light'); setNewCatColor(color) }} />
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={handleCreateCategory} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Создание...' : 'Создать категорию'}
+                  </button>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewCategoryForm(false); setNewCatName(''); setNewCatColor('#3b82f6'); setNewCatDescription('') }} disabled={saving} style={btnSecondary}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!showNewCategoryForm && (
+            <button
+              onClick={() => { hapticFeedback('light'); setShowNewCategoryForm(true); setEditingCategory(null) }}
+              style={addBtnStyle}
+            >
+              + Добавить категорию
+            </button>
+          )}
+        </Section>
+      )}
+
+      {/* Telegram-каналы — только для админов */}
+      {isAdmin && (
+        <Section title="Telegram-каналы" count={channels.length}>
+          {channels.map((ch, i) => (
+            <div key={ch.id}>
+              {editingChannel?.id === ch.id ? (
+                <div style={{ padding: 16, borderBottom: i < channels.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
+                      <input
+                        type="text"
+                        value={editChUsername}
+                        onChange={(e) => setEditChUsername(e.target.value.replace(/^@/, ''))}
+                        placeholder="username"
+                        style={{ ...inputStyle, paddingLeft: 28 }}
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={editChTitle}
+                      onChange={(e) => setEditChTitle(e.target.value)}
+                      placeholder="Название канала (необязательно)"
+                      style={inputStyle}
+                    />
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <button onClick={handleSaveChannel} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                        {saving ? 'Сохранение...' : 'Сохранить'}
+                      </button>
+                      <button onClick={handleCancelEditChannel} disabled={saving} style={btnSecondary}>Отмена</button>
+                      <button onClick={() => handleDeleteChannel(ch)} disabled={saving} style={btnDanger}>Удалить</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: i < channels.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                    <button
+                      onClick={() => handleToggleChannelActive(ch)}
+                      style={{
+                        width: 20, height: 20, borderRadius: 4, border: '2px solid ' + (ch.is_active ? '#10b981' : '#4b5563'),
+                        backgroundColor: ch.is_active ? '#10b981' : 'transparent',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, padding: 0
+                      }}
+                    >
+                      {ch.is_active && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
+                    </button>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>@{ch.username}</span>
+                      {ch.title && <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>{ch.title}</span>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleEditChannel(ch)}
+                    style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 16, cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    ✎
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {showNewChannelForm && (
+            <div style={{ padding: 16, borderTop: channels.length > 0 ? '1px solid #2a2a3a' : 'none' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
+                  <input
+                    type="text"
+                    value={newChUsername}
+                    onChange={(e) => setNewChUsername(e.target.value.replace(/^@/, ''))}
+                    placeholder="username"
+                    style={{ ...inputStyle, paddingLeft: 28 }}
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={newChTitle}
+                  onChange={(e) => setNewChTitle(e.target.value)}
+                  placeholder="Название канала (необязательно)"
+                  style={inputStyle}
+                />
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={handleCreateChannel} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Создание...' : 'Создать канал'}
+                  </button>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewChannelForm(false); setNewChUsername(''); setNewChTitle('') }} disabled={saving} style={btnSecondary}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!showNewChannelForm && (
+            <button
+              onClick={() => { hapticFeedback('light'); setShowNewChannelForm(true); setEditingChannel(null) }}
+              style={addBtnStyle}
+            >
+              + Добавить канал
+            </button>
+          )}
+        </Section>
+      )}
 
       {false && <Section title="Уведомления">
         <Row label="Об изменениях" desc="Получать уведомления о новых изменениях" toggle enabled onToggle={soon} />
@@ -348,6 +721,93 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
         <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 Competitor Monitor</div>
       </div>
     </div>
+  )
+}
+
+// --- Shared styles ---
+
+const inputStyle = {
+  width: '100%',
+  padding: '10px 12px',
+  fontSize: 15,
+  backgroundColor: '#0d0d14',
+  border: '1px solid #2a2a3a',
+  borderRadius: 8,
+  color: '#fff',
+  outline: 'none',
+  boxSizing: 'border-box'
+}
+
+const btnPrimary = {
+  flex: 1,
+  padding: '10px 16px',
+  fontSize: 14,
+  fontWeight: 500,
+  backgroundColor: '#3b82f6',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+}
+
+const btnSuccess = {
+  flex: 1,
+  padding: '10px 16px',
+  fontSize: 14,
+  fontWeight: 500,
+  backgroundColor: '#10b981',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+}
+
+const btnSecondary = {
+  padding: '10px 16px',
+  fontSize: 14,
+  backgroundColor: '#374151',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  cursor: 'pointer'
+}
+
+const btnDanger = {
+  padding: '10px 16px',
+  fontSize: 14,
+  backgroundColor: '#ef444420',
+  color: '#ef4444',
+  border: 'none',
+  borderRadius: 8,
+  cursor: 'pointer'
+}
+
+const addBtnStyle = {
+  width: '100%',
+  padding: 14,
+  background: 'none',
+  border: 'none',
+  borderTop: '1px solid #2a2a3a',
+  color: '#3b82f6',
+  fontSize: 14,
+  fontWeight: 500,
+  cursor: 'pointer'
+}
+
+// --- Shared components ---
+
+function ColorButton({ color, selected, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: color,
+        border: selected ? '2px solid #fff' : '2px solid transparent',
+        cursor: 'pointer',
+        transition: 'all 0.2s'
+      }}
+    />
   )
 }
 

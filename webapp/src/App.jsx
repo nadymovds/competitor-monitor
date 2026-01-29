@@ -4,6 +4,7 @@ import { checkUserAccess, getGroups } from './services/supabase'
 import MonitoringScreen from './components/screens/MonitoringScreen'
 import CompetitorsScreen from './components/screens/CompetitorsScreen'
 import SettingsScreen from './components/screens/SettingsScreen'
+import NewsScreen from './components/screens/NewsScreen'
 import BottomNav from './components/ui/BottomNav'
 
 export default function App() {
@@ -105,6 +106,8 @@ export default function App() {
         return <MonitoringScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitor} />
       case 'competitors':
         return <CompetitorsScreen user={user} groups={groups} selectedCompetitorId={selectedCompetitorId} cameFromMonitoring={cameFromMonitoring} onBackToMonitoring={handleBackFromCompetitor} onClearSelection={() => setSelectedCompetitorId(null)} />
+      case 'news':
+        return <NewsScreen user={user} />
       case 'settings':
         return <SettingsScreen user={user} groups={groups} />
       default:

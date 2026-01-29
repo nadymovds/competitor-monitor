@@ -1,0 +1,45 @@
+name: News Monitor
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'   # каждый понедельник в 10:00 МСК (07:00 UTC)
+  workflow_dispatch:
+    inputs:
+      period_days:
+        description: 'Период в днях'
+        required: false
+        default: '7'
+
+jobs:
+  monitor-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run news monitoring
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NEWS_PERIOD_DAYS: ${{ github.event.inputs.period_days || '7' }}
+        run: python news_monitor.py
