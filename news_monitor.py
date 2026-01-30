@@ -182,6 +182,36 @@ def extract_title(text: str) -> str:
         first_line = first_line[:97] + "..."
     return first_line
 
+
+def clean_text_for_pdf(text: str) -> str:
+    """Удаляет эмодзи и невидимые символы, не поддерживаемые шрифтом DejaVuSans в PDF."""
+    if not text:
+        return ""
+    result = []
+    for char in text:
+        cp = ord(char)
+        # Пропускаем символы за пределами BMP (эмодзи U+1F000+ и т.д.)
+        if cp > 0xFFFF:
+            continue
+        # Пропускаем вариационные селекторы (переключают символ в emoji-стиль)
+        if 0xFE00 <= cp <= 0xFE0F:
+            continue
+        # Пропускаем zero-width и bidi-символы
+        if cp in (0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF):
+            continue
+        if 0x202A <= cp <= 0x202E:
+            continue
+        result.append(char)
+    text = ''.join(result)
+    # Убираем лишние пробелы после удаления символов
+    text = re.sub(r'  +', ' ', text)
+    # Экранируем спецсимволы XML для ReportLab Paragraph
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+    return text.strip()
+
+
 # ============================================================================
 # ПАРСИНГ КАНАЛОВ (t.me/s/)
 # ============================================================================
@@ -698,17 +728,29 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
     period_str = f"{period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}"
     content.append(Paragraph(f"Период: {period_str}", styles['subtitle']))
 
+    # Очистка текста постов для PDF (удаление эмодзи, обработка пустых заголовков)
+    cleaned_posts = []
+    for post in posts:
+        p_title = clean_text_for_pdf(post.get('title', ''))
+        p_summary = clean_text_for_pdf(post.get('summary', ''))
+        if not p_title:
+            if p_summary:
+                p_title = p_summary[:100] + ('...' if len(p_summary) > 100 else '')
+            else:
+                continue
+        cleaned_posts.append({**post, 'title': p_title, 'summary': p_summary})
+
     # Статистика
-    total_posts = len(posts)
+    total_posts = len(cleaned_posts)
     stats = f"Каналов: {channels_count} | Новостей: {total_posts}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
 
-    for post_number, post in enumerate(posts, start=1):
-        title = post.get('title', 'Без заголовка')
-        summary = post.get('summary', '')
+    for post_number, post in enumerate(cleaned_posts, start=1):
+        title = post['title']
+        summary = post['summary']
         post_url = post.get('post_url', '')
-        channel_title = post.get('channel_title', '')
+        channel_title = clean_text_for_pdf(post.get('channel_title', ''))
         post_date = post.get('post_date', '')
         views = post.get('views_count', 0)
         category_tags = post.get('category_tags', [])
