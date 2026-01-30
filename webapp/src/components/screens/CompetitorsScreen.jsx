@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { getCompetitors, getCompetitorWithHistory, updateCompetitor, addCompetitorToGroup, removeCompetitorFromGroup, createGroup, addCompetitorUrl, updateCompetitorUrl, deleteCompetitorUrl } from '../../services/supabase'
 import { openLink, hapticFeedback, showBackButton, hideBackButton, showAlert } from '../../services/telegram'
+import ScrollToTopButton from '../ui/ScrollToTopButton'
 
 export default function CompetitorsScreen({ user, groups: initialGroups, selectedCompetitorId, cameFromMonitoring, onBackToMonitoring, onClearSelection }) {
   const [competitors, setCompetitors] = useState([])
@@ -946,6 +947,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
           {filtered.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>🔍 Ничего не найдено</div>}
         </div>
       )}
+      <ScrollToTopButton />
     </div>
   )
 }

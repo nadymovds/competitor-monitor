@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import CategoryBadge from './CategoryBadge'
 import { openLink, hapticFeedback } from '../../services/telegram'
 
@@ -18,9 +18,17 @@ function formatViews(count) {
 export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, onCategoryRemove }) {
   const [expanded, setExpanded] = useState(false)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
+  const [needsExpand, setNeedsExpand] = useState(false)
+  const textRef = useRef(null)
   const pickerRef = useRef(null)
 
-  const hasLongContent = post.content_text && post.content_text.length > 200
+  // Определяем, обрезается ли текст (overflow за 3 строки)
+  useLayoutEffect(() => {
+    const el = textRef.current
+    if (el && !expanded) {
+      setNeedsExpand(el.scrollHeight > el.clientHeight + 1)
+    }
+  })
 
   // Закрытие dropdown по клику вне области
   useEffect(() => {
@@ -39,7 +47,8 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
     setExpanded(!expanded)
   }
 
-  const handleOpen = () => {
+  const handleOpen = (e) => {
+    e.stopPropagation()
     if (post.post_url) {
       hapticFeedback('light')
       openLink(post.post_url)
@@ -68,94 +77,75 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
   if (post.post_date) metaParts.push(formatDate(post.post_date))
   const views = formatViews(post.views_count)
   if (views) metaParts.push(`${views} 👁`)
+  if (mediaIcons.length > 0) metaParts.push(mediaIcons.join(' '))
+
+  const title = post.title || 'Без заголовка'
+  const bodyText = post.content_text || post.summary || ''
 
   return (
     <div style={styles.card}>
-      {/* Заголовок + медиа */}
-      <div style={styles.header}>
-        <div style={styles.title}>{post.title || 'Без заголовка'}</div>
-        {mediaIcons.length > 0 && (
-          <div style={styles.mediaIcons}>{mediaIcons.join(' ')}</div>
-        )}
-      </div>
-
-      {/* Текст */}
-      <div style={styles.body}>
-        {post.summary && (
-          <div style={styles.summary}>{post.summary}</div>
-        )}
-
-        {hasLongContent && !expanded && (
-          <button onClick={handleToggleExpand} style={styles.toggleBtn}>
-            Показать полностью ▼
-          </button>
-        )}
-
-        {expanded && post.content_text && (
+      {/* Текст: заголовок + тело, кликабельный для expand/collapse */}
+      <div onClick={handleToggleExpand} style={{ cursor: 'pointer' }}>
+        {expanded ? (
+          <div style={styles.expandedText}>
+            <span style={styles.titleText}>{title}</span>
+            {bodyText && <>{'\n'}{bodyText}</>}
+          </div>
+        ) : (
           <>
-            <div style={styles.contentText}>{post.content_text}</div>
-            <button onClick={handleToggleExpand} style={styles.toggleBtn}>
-              Свернуть ▲
-            </button>
+            <div ref={textRef} style={styles.clampedText}>
+              <span style={styles.titleText}>{title}</span>
+              {bodyText && <>{'\n'}{bodyText}</>}
+            </div>
+            {needsExpand && (
+              <div style={styles.showMore}>Показать полностью</div>
+            )}
           </>
         )}
-
-        {!post.summary && !hasLongContent && post.content_text && (
-          <div style={styles.summary}>{post.content_text}</div>
-        )}
       </div>
 
-      {/* Мета + категории + действия */}
+      {/* Мета + категории + Оригинал */}
       <div style={styles.footer}>
         <div style={styles.meta}>{metaParts.join(' · ')}</div>
-
-        {post.categories.length > 0 && (
-          <div style={styles.categories}>
-            {post.categories.map(cat => (
-              <CategoryBadge
-                key={cat.id}
-                name={cat.name}
-                color={cat.color}
-                isManual={cat.is_manual}
-                onRemove={isAdmin ? () => onCategoryRemove(post.id, cat.id) : null}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Админ: добавление категории */}
-        {isAdmin && (
-          <div style={styles.pickerWrapper} ref={pickerRef}>
-            <button
-              onClick={() => { hapticFeedback('light'); setShowCategoryPicker(!showCategoryPicker) }}
-              style={styles.addCategoryBtn}
-            >
-              + Категория
+        <div style={styles.tagsRow}>
+          {post.categories.map(cat => (
+            <CategoryBadge
+              key={cat.id}
+              name={cat.name}
+              color={cat.color}
+              isManual={cat.is_manual}
+              onRemove={isAdmin ? () => onCategoryRemove(post.id, cat.id) : null}
+            />
+          ))}
+          {isAdmin && (
+            <div style={styles.pickerWrapper} ref={pickerRef}>
+              <button
+                onClick={(e) => { e.stopPropagation(); hapticFeedback('light'); setShowCategoryPicker(!showCategoryPicker) }}
+                style={styles.addCategoryBtn}
+              >
+                + Категория
+              </button>
+              {showCategoryPicker && availableCategories.length > 0 && (
+                <div style={styles.dropdown}>
+                  {availableCategories.map(cat => (
+                    <button
+                      key={cat.id}
+                      onClick={() => handlePickCategory(cat.id)}
+                      style={styles.dropdownItem}
+                    >
+                      <span style={{ color: cat.color }}>●</span> {cat.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {post.post_url && (
+            <button onClick={handleOpen} style={styles.originalBtn}>
+              Оригинал ↗
             </button>
-            {showCategoryPicker && availableCategories.length > 0 && (
-              <div style={styles.dropdown}>
-                {availableCategories.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => handlePickCategory(cat.id)}
-                    style={styles.dropdownItem}
-                  >
-                    <span style={{ color: cat.color }}>●</span> {cat.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Ссылка "Открыть" */}
-        {post.post_url && (
-          <div style={styles.openRow}>
-            <button onClick={handleOpen} style={styles.openBtn}>
-              Открыть →
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )
@@ -169,48 +159,34 @@ const styles = {
     border: '1px solid #2a2a3a',
     animation: 'slideUp 0.3s ease',
   },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 8,
+  clampedText: {
+    fontSize: 14,
+    color: '#d1d5db',
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap',
+    display: '-webkit-box',
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    wordBreak: 'break-word',
   },
-  title: {
-    fontSize: 15,
+  expandedText: {
+    fontSize: 14,
+    color: '#d1d5db',
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  titleText: {
     fontWeight: 600,
     color: '#fff',
-    flex: 1,
+    fontSize: 15,
   },
-  mediaIcons: {
-    fontSize: 14,
-    flexShrink: 0,
-  },
-  body: {
-    marginTop: 10,
-    borderTop: '1px solid #2a2a3a',
-    paddingTop: 10,
-  },
-  summary: {
-    fontSize: 14,
-    color: '#d1d5db',
-    lineHeight: 1.5,
-    whiteSpace: 'pre-wrap',
-  },
-  contentText: {
-    fontSize: 14,
-    color: '#d1d5db',
-    lineHeight: 1.5,
-    marginTop: 8,
-    whiteSpace: 'pre-wrap',
-  },
-  toggleBtn: {
-    background: 'none',
-    border: 'none',
+  showMore: {
     color: '#3b82f6',
     fontSize: 13,
-    cursor: 'pointer',
-    padding: '6px 0',
     fontWeight: 500,
+    marginTop: 4,
   },
   footer: {
     marginTop: 10,
@@ -224,9 +200,10 @@ const styles = {
     fontSize: 12,
     color: '#6b7280',
   },
-  categories: {
+  tagsRow: {
     display: 'flex',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 6,
   },
   pickerWrapper: {
@@ -268,17 +245,14 @@ const styles = {
     borderRadius: 6,
     textAlign: 'left',
   },
-  openRow: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-  },
-  openBtn: {
+  originalBtn: {
     background: 'none',
     border: 'none',
     color: '#3b82f6',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
     padding: '4px 0',
+    whiteSpace: 'nowrap',
   },
 }

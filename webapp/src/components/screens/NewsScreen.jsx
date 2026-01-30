@@ -3,6 +3,7 @@ import { getNewsCategories, getNewsChannels, getNewsPosts, addPostCategory, remo
 import { hapticFeedback, showAlert } from '../../services/telegram'
 import NewsCard from '../ui/NewsCard'
 import NewsFilters from '../ui/NewsFilters'
+import ScrollToTopButton from '../ui/ScrollToTopButton'
 
 const PAGE_SIZE = 20
 
@@ -191,6 +192,7 @@ export default function NewsScreen({ user }) {
           {loadingMore ? 'Загрузка...' : `Показать ещё (${totalCount - posts.length})`}
         </button>
       )}
+      <ScrollToTopButton />
     </div>
   )
 }

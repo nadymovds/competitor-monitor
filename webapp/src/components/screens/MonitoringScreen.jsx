@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getScanReports, supabase } from '../../services/supabase'
 import { openLink, hapticFeedback } from '../../services/telegram'
+import ScrollToTopButton from '../ui/ScrollToTopButton'
 
 export default function MonitoringScreen({ user, groups, onNavigateToCompetitor }) {
   const [reports, setReports] = useState([])
@@ -277,6 +278,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
           })
         )}
       </div>
+      <ScrollToTopButton />
     </div>
   )
 }

@@ -38,15 +38,15 @@ print("✅ Зависимости импортированы")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
 NEWS_PERIOD_DAYS = int(os.environ.get("NEWS_PERIOD_DAYS", "7"))
 
 # === LLM ===
-NEWS_LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+NEWS_LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # === ТАЙМАУТЫ И ЛИМИТЫ ===
 NEWS_REQUEST_TIMEOUT = 30
@@ -475,7 +475,7 @@ def save_digest(digest_data: dict, post_ids: list) -> int | None:
 async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens: int = 500) -> str | None:
     """Вызов OpenRouter API с семафором и retry."""
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
