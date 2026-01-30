@@ -148,6 +148,21 @@ export async function updateCompetitor(competitorId, updates) {
   return data
 }
 
+export async function createCompetitor(name, url, description = null) {
+  const { data, error } = await supabase
+    .from('competitors')
+    .insert({
+      name,
+      url,
+      description,
+      is_active: true
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
 export async function addCompetitorToGroup(competitorId, groupId) {
   const { data, error } = await supabase
     .from('competitor_groups')

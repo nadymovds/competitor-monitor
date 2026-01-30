@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { getCompetitors, getCompetitorWithHistory, updateCompetitor, addCompetitorToGroup, removeCompetitorFromGroup, createGroup, addCompetitorUrl, updateCompetitorUrl, deleteCompetitorUrl } from '../../services/supabase'
+import { getCompetitors, getCompetitorWithHistory, updateCompetitor, createCompetitor, addCompetitorToGroup, removeCompetitorFromGroup, createGroup, addCompetitorUrl, updateCompetitorUrl, deleteCompetitorUrl } from '../../services/supabase'
 import { openLink, hapticFeedback, showBackButton, hideBackButton, showAlert } from '../../services/telegram'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
@@ -22,6 +22,12 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
   const [showNewGroupForm, setShowNewGroupForm] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupColor, setNewGroupColor] = useState('#3b82f6')
+
+  // Создание конкурента
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [newCompetitorData, setNewCompetitorData] = useState({ name: '', url: '', description: '' })
+  const [newCompetitorGroups, setNewCompetitorGroups] = useState([])
+  const [creating, setCreating] = useState(false)
 
   // Фильтры
   const [filterGroupIds, setFilterGroupIds] = useState([])
@@ -268,6 +274,56 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
       console.error(err)
       showAlert('Ошибка создания группы: ' + err.message)
     }
+  }
+
+  const handleCreateCompetitor = async () => {
+    if (!newCompetitorData.name.trim()) {
+      showAlert('Введите название конкурента')
+      return
+    }
+    if (!newCompetitorData.url.trim()) {
+      showAlert('Введите URL сайта')
+      return
+    }
+
+    hapticFeedback('light')
+    setCreating(true)
+
+    try {
+      const created = await createCompetitor(
+        newCompetitorData.name.trim(),
+        newCompetitorData.url.trim(),
+        newCompetitorData.description.trim() || null
+      )
+
+      // Add groups to the new competitor
+      for (const group of newCompetitorGroups) {
+        await addCompetitorToGroup(created.id, group.id)
+      }
+
+      // Add to local state
+      setCompetitors(prev => [...prev, { ...created, groups: newCompetitorGroups, urls: [] }].sort((a, b) => a.name.localeCompare(b.name)))
+
+      // Reset form and close
+      setNewCompetitorData({ name: '', url: '', description: '' })
+      setNewCompetitorGroups([])
+      setShowCreateForm(false)
+      showAlert('Конкурент добавлен')
+    } catch (err) {
+      console.error(err)
+      showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleToggleNewCompetitorGroup = (group) => {
+    hapticFeedback('light')
+    setNewCompetitorGroups(prev =>
+      prev.some(g => g.id === group.id)
+        ? prev.filter(g => g.id !== group.id)
+        : [...prev, group]
+    )
   }
 
   const parseLlmSummary = (summary) => {
@@ -792,7 +848,29 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Конкуренты</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Конкуренты</h1>
+        {isAdmin && (
+          <button
+            onClick={() => { hapticFeedback('light'); setShowCreateForm(true) }}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#3b82f6',
+              border: 'none',
+              borderRadius: 8,
+              color: '#fff',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+          >
+            <span style={{ fontSize: 18 }}>+</span> Добавить
+          </button>
+        )}
+      </div>
 
       <div style={{ position: 'relative' }}>
         <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }}>🔍</span>
@@ -947,6 +1025,203 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
           {filtered.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>🔍 Ничего не найдено</div>}
         </div>
       )}
+
+      {/* Create Competitor Modal */}
+      {showCreateForm && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 20
+          }}
+          onClick={() => { setShowCreateForm(false); setNewCompetitorData({ name: '', url: '', description: '' }) }}
+        >
+          <div
+            style={{
+              backgroundColor: '#1a1a24',
+              borderRadius: 16,
+              padding: 24,
+              maxWidth: 500,
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Добавить конкурента</h2>
+
+            {/* Name */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 14, color: '#9ca3af' }}>Название *</label>
+              <input
+                type="text"
+                value={newCompetitorData.name}
+                onChange={e => setNewCompetitorData(prev => ({ ...prev, name: e.target.value }))}
+                placeholder='ООО "Компания"'
+                style={{
+                  padding: '12px 16px',
+                  backgroundColor: '#252532',
+                  border: '1px solid #2a2a3a',
+                  borderRadius: 10,
+                  color: '#fff',
+                  fontSize: 15,
+                  outline: 'none'
+                }}
+              />
+            </div>
+
+            {/* URL */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 14, color: '#9ca3af' }}>URL сайта *</label>
+              <input
+                type="text"
+                value={newCompetitorData.url}
+                onChange={e => setNewCompetitorData(prev => ({ ...prev, url: e.target.value }))}
+                placeholder="https://example.com"
+                style={{
+                  padding: '12px 16px',
+                  backgroundColor: '#252532',
+                  border: '1px solid #2a2a3a',
+                  borderRadius: 10,
+                  color: '#fff',
+                  fontSize: 15,
+                  outline: 'none'
+                }}
+              />
+            </div>
+
+            {/* Description */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 14, color: '#9ca3af' }}>Описание</label>
+              <textarea
+                value={newCompetitorData.description}
+                onChange={e => setNewCompetitorData(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Краткое описание конкурента..."
+                rows={3}
+                style={{
+                  padding: '12px 16px',
+                  backgroundColor: '#252532',
+                  border: '1px solid #2a2a3a',
+                  borderRadius: 10,
+                  color: '#fff',
+                  fontSize: 15,
+                  outline: 'none',
+                  resize: 'vertical',
+                  fontFamily: 'inherit'
+                }}
+              />
+            </div>
+
+            {/* Groups */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 14, color: '#9ca3af' }}>Группы</label>
+              {groups.length === 0 ? (
+                <div style={{ padding: 12, color: '#6b7280', fontSize: 13, textAlign: 'center', backgroundColor: '#252532', borderRadius: 8 }}>
+                  Нет доступных групп
+                </div>
+              ) : (
+                <div style={{
+                  backgroundColor: '#252532',
+                  borderRadius: 10,
+                  overflow: 'hidden'
+                }}>
+                  {groups.map((group, i) => {
+                    const isSelected = newCompetitorGroups.some(g => g.id === group.id)
+                    return (
+                      <button
+                        key={group.id}
+                        onClick={() => handleToggleNewCompetitorGroup(group)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          width: '100%',
+                          padding: '12px 14px',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          borderBottom: i < groups.length - 1 ? '1px solid #1a1a24' : 'none',
+                          cursor: 'pointer',
+                          textAlign: 'left'
+                        }}
+                      >
+                        <span style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 4,
+                          backgroundColor: isSelected ? group.color : 'transparent',
+                          border: `2px solid ${group.color}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#fff',
+                          fontSize: 11
+                        }}>
+                          {isSelected && '✓'}
+                        </span>
+                        <span style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          backgroundColor: group.color
+                        }} />
+                        <span style={{ fontSize: 14, color: '#fff' }}>{group.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+              <button
+                onClick={() => { setShowCreateForm(false); setNewCompetitorData({ name: '', url: '', description: '' }) }}
+                disabled={creating}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  backgroundColor: '#252532',
+                  border: 'none',
+                  borderRadius: 10,
+                  color: '#9ca3af',
+                  fontSize: 15,
+                  cursor: creating ? 'not-allowed' : 'pointer',
+                  opacity: creating ? 0.5 : 1
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleCreateCompetitor}
+                disabled={creating}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  backgroundColor: creating ? '#6b7280' : '#3b82f6',
+                  border: 'none',
+                  borderRadius: 10,
+                  color: '#fff',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  cursor: creating ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {creating ? 'Создание...' : 'Создать'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ScrollToTopButton />
     </div>
   )
