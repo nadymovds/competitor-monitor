@@ -8,6 +8,7 @@ export default function ScrollToTopButton() {
       setVisible(window.scrollY > window.innerHeight / 2)
     }
     window.addEventListener('scroll', handleScroll, { passive: true })
+    handleScroll()
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
@@ -18,8 +19,8 @@ export default function ScrollToTopButton() {
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       style={{
         position: 'fixed',
-        bottom: 24,
-        right: 24,
+        bottom: 80,
+        right: 16,
         width: 44,
         height: 44,
         borderRadius: '50%',

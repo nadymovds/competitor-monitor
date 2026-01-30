@@ -79,8 +79,14 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
   if (views) metaParts.push(`${views} 👁`)
   if (mediaIcons.length > 0) metaParts.push(mediaIcons.join(' '))
 
-  const title = post.title || 'Без заголовка'
+  const rawTitle = post.title || ''
   const bodyText = post.content_text || post.summary || ''
+
+  // Если body начинается с title — не дублируем, показываем только body
+  const showTitle = rawTitle && !bodyText.startsWith(rawTitle)
+  const displayText = showTitle
+    ? (bodyText ? `${rawTitle}\n${bodyText}` : rawTitle)
+    : (bodyText || rawTitle || 'Без заголовка')
 
   return (
     <div style={styles.card}>
@@ -88,14 +94,14 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
       <div onClick={handleToggleExpand} style={{ cursor: 'pointer' }}>
         {expanded ? (
           <div style={styles.expandedText}>
-            <span style={styles.titleText}>{title}</span>
-            {bodyText && <>{'\n'}{bodyText}</>}
+            {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
+            {showTitle ? bodyText : displayText}
           </div>
         ) : (
           <>
             <div ref={textRef} style={styles.clampedText}>
-              <span style={styles.titleText}>{title}</span>
-              {bodyText && <>{'\n'}{bodyText}</>}
+              {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
+              {showTitle ? bodyText : displayText}
             </div>
             {needsExpand && (
               <div style={styles.showMore}>Показать полностью</div>

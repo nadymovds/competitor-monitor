@@ -36,7 +36,7 @@ export default function NewsScreen({ user }) {
         const [cats, chs] = await Promise.all([getNewsCategories(), getNewsChannels()])
         setCategories(cats)
         setChannels(chs)
-        await loadPosts(0)
+        await loadPosts(0, cats)
       } catch (e) {
         console.error('NewsScreen init error:', e)
       } finally {
@@ -72,12 +72,17 @@ export default function NewsScreen({ user }) {
     return { dateFrom, dateTo }
   }
 
-  async function loadPosts(newOffset) {
+  async function loadPosts(newOffset, allCats = null) {
     try {
       if (newOffset === 0) setLoading(true)
       const { dateFrom, dateTo } = computeDateRange()
+      // Если пользователь не выбрал конкретные категории — фильтруем по всем видимым
+      const cats = allCats || categories
+      const effectiveCategories = selectedCategories.length > 0
+        ? selectedCategories
+        : cats.filter(c => c.is_visible).map(c => c.id)
       const { posts: newPosts, count } = await getNewsPosts({
-        categories: selectedCategories,
+        categories: effectiveCategories,
         channels: selectedChannels,
         dateFrom,
         dateTo,
@@ -145,11 +150,9 @@ export default function NewsScreen({ user }) {
     }
   }
 
-  // Видимые категории для фильтров
   const isAdmin = user?.role === 'admin'
-  const visibleCategories = isAdmin
-    ? categories
-    : categories.filter(c => c.is_visible)
+  // Видимые категории — всегда только is_visible, независимо от роли
+  const visibleCategories = categories.filter(c => c.is_visible)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

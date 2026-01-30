@@ -1,6 +1,6 @@
 name: Competitor Monitor
 
-on:
+"on":
   schedule:
     - cron: '0 7 */3 * *'   # раз в 3 дня в 10:00 МСК (07:00 UTC)
   workflow_dispatch:

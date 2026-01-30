@@ -105,7 +105,7 @@ CATEGORY_ICONS = {
     'Законодательство': '§',
     'Происшествия': '⚠',
     'Развлекательный контент': '★',
-    'Погодные условия': '☁',
+    'Дорожные условия': '☁',
     'Прочее': '•',
 }
 DEFAULT_CATEGORY_ICON = '▸'
@@ -432,6 +432,19 @@ def get_unprocessed_posts(period_start: datetime) -> list:
         print(f"❌ Ошибка получения необработанных постов: {e}")
         return []
 
+def get_processed_content_hashes(period_start: datetime) -> set:
+    """Выборка content_hash уже обработанных постов за период (для дедупликации)."""
+    try:
+        result = (supabase.table('news_posts')
+                  .select('content_hash')
+                  .eq('is_processed', True)
+                  .gte('post_date', period_start.isoformat())
+                  .execute())
+        return {r['content_hash'] for r in (result.data or []) if r.get('content_hash')}
+    except Exception as e:
+        print(f"⚠️ Ошибка получения хешей обработанных постов: {e}")
+        return set()
+
 def get_posts_for_digest(period_start: datetime, period_end: datetime) -> list:
     """Выборка обработанных постов с видимыми категориями для дайджеста."""
     try:
@@ -515,13 +528,14 @@ async def categorize_post(post_text: str, categories: list, session: aiohttp.Cli
 ТЕКСТ ПОСТА:
 {post_text[:2000]}
 
-ДОСТУПНЫЕ КАТЕГОРИИ:
+ДОСТУПНЫЕ КАТЕГОРИИ (ID: название — описание):
 {categories_desc}
 
 ПРАВИЛА:
+- Внимательно читай ОПИСАНИЕ каждой категории — оно определяет, какие темы к ней относятся
 - Выбери от 1 до 3 наиболее подходящих категорий
 - Для каждой категории укажи уверенность от 0.0 до 1.0
-- Если пост не относится ни к одной категории — верни пустой список
+- ВСЕГДА назначай хотя бы одну категорию. Если пост не подходит ни к одной специализированной категории, назначь категорию "Прочее"
 - Отвечай ТОЛЬКО JSON, без пояснений
 
 ФОРМАТ ОТВЕТА:
@@ -605,6 +619,13 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
         sum_task = generate_summary(post_text, session)
         post_categories, summary = await asyncio.gather(cat_task, sum_task)
 
+        # Фоллбек: если категории не назначены — назначаем "Прочее"
+        if not post_categories:
+            other_cat = next((c for c in categories if c['name'] == 'Прочее'), None)
+            if other_cat:
+                post_categories = [{'category_id': other_cat['id'], 'confidence': 0.5}]
+                print(f"  ℹ️ Пост {post_id}: категории не определены, назначена «Прочее»")
+
         title = extract_title(post_text)
 
         # Сохранение в БД
@@ -637,10 +658,10 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
 # ============================================================================
 
 def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_end: datetime,
-                              posts_by_category: list, channels_count: int) -> str:
-    """Генерация PDF-дайджеста новостей, сгруппированных по категориям.
+                              posts: list, channels_count: int) -> str:
+    """Генерация PDF-дайджеста новостей, отсортированных по дате публикации.
 
-    posts_by_category: list of (category_info_dict, posts_list) tuples.
+    posts: плоский список постов с полем category_tags.
     """
     filename = f"/tmp/news_digest_{digest_date}.pdf"
 
@@ -655,14 +676,14 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
         'title': ParagraphStyle('Title', fontName=font_bold, fontSize=16, spaceAfter=8, alignment=1),
         'subtitle': ParagraphStyle('Subtitle', fontName=font_regular, fontSize=10, spaceAfter=12,
                                    alignment=1, textColor=colors.grey),
-        'section': ParagraphStyle('Section', fontName=font_bold, fontSize=13, spaceBefore=16,
-                                  spaceAfter=8, textColor=colors.HexColor('#2c5aa0')),
         'post_title': ParagraphStyle('PostTitle', fontName=font_bold, fontSize=10, spaceBefore=10,
                                      spaceAfter=2),
         'summary': ParagraphStyle('Summary', fontName=font_regular, fontSize=9, spaceAfter=2,
                                   leading=12, leftIndent=10),
         'meta': ParagraphStyle('Meta', fontName=font_regular, fontSize=8, spaceAfter=2,
                                leftIndent=10, textColor=colors.HexColor('#666666')),
+        'tags': ParagraphStyle('Tags', fontName=font_regular, fontSize=8, spaceAfter=2,
+                               leftIndent=10, textColor=colors.HexColor('#555555')),
         'link': ParagraphStyle('Link', fontName=font_regular, fontSize=8, spaceAfter=8,
                                leftIndent=10, textColor=colors.HexColor('#2c5aa0')),
         'separator': ParagraphStyle('Separator', fontName=font_regular, fontSize=5,
@@ -678,82 +699,67 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
     content.append(Paragraph(f"Период: {period_str}", styles['subtitle']))
 
     # Статистика
-    total_posts = sum(len(posts) for _, posts in posts_by_category)
-    total_categories = len(posts_by_category)
-    stats = f"📊 Каналов: {channels_count} | 📝 Новостей: {total_posts} | 📂 Категорий: {total_categories}"
+    total_posts = len(posts)
+    stats = f"Каналов: {channels_count} | Новостей: {total_posts}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
 
-    # Категории, отсортированные по sort_order
-    sorted_categories = sorted(posts_by_category, key=lambda x: x[0].get('sort_order', 999))
+    for post_number, post in enumerate(posts, start=1):
+        title = post.get('title', 'Без заголовка')
+        summary = post.get('summary', '')
+        post_url = post.get('post_url', '')
+        channel_title = post.get('channel_title', '')
+        post_date = post.get('post_date', '')
+        views = post.get('views_count', 0)
+        category_tags = post.get('category_tags', [])
 
-    post_number = 0
+        # Заголовок поста с номером (кликабельный если есть URL)
+        if post_url:
+            title_text = f"{post_number}. <a href='{post_url}' color='#1a1a1a'><b>{title}</b></a>"
+        else:
+            title_text = f"{post_number}. <b>{title}</b>"
+        content.append(Paragraph(title_text, styles['post_title']))
 
-    for category_info, posts in sorted_categories:
-        if not posts:
-            continue
+        # Краткое содержание
+        if summary:
+            content.append(Paragraph(summary, styles['summary']))
 
-        cat_name = category_info.get('name', 'Без категории')
-        cat_color = category_info.get('color', '#2c5aa0')
-        cat_icon = CATEGORY_ICONS.get(cat_name, DEFAULT_CATEGORY_ICON)
+        # Теги категорий
+        if category_tags:
+            tag_spans = []
+            for tag in category_tags:
+                tag_name = tag.get('name', '')
+                tag_color = tag.get('color', '#2c5aa0')
+                icon = CATEGORY_ICONS.get(tag_name, DEFAULT_CATEGORY_ICON)
+                tag_spans.append(f"<font color='{tag_color}'>{icon} {tag_name}</font>")
+            content.append(Paragraph(" &nbsp; ".join(tag_spans), styles['tags']))
 
-        section_title = f"{cat_icon}  {cat_name.upper()} ({len(posts)})"
-        section_color = colors.HexColor(cat_color) if cat_color else colors.HexColor('#2c5aa0')
-        content.append(Paragraph(section_title, ParagraphStyle(
-            f'Section_{cat_name}', parent=styles['section'],
-            textColor=section_color
-        )))
-        content.append(Paragraph("─" * 80, styles['separator']))
-
-        # Посты внутри категории — сортировка по confidence (убывание)
-        sorted_posts = sorted(posts, key=lambda p: p.get('confidence', 0), reverse=True)
-
-        for post in sorted_posts:
-            post_number += 1
-            title = post.get('title', 'Без заголовка')
-            summary = post.get('summary', '')
-            post_url = post.get('post_url', '')
-            channel_title = post.get('channel_title', '')
-            post_date = post.get('post_date', '')
-            views = post.get('views_count', 0)
-
-            # Заголовок поста с номером (кликабельный если есть URL)
-            if post_url:
-                title_text = f"{post_number}. <a href='{post_url}' color='#1a1a1a'><b>{title}</b></a>"
+        # Мета: источник, дата, просмотры
+        meta_parts = []
+        if channel_title:
+            meta_parts.append(channel_title)
+        if post_date:
+            if isinstance(post_date, str):
+                try:
+                    dt = datetime.fromisoformat(post_date.replace('Z', '+00:00'))
+                    meta_parts.append(dt.strftime('%d.%m.%Y %H:%M'))
+                except ValueError:
+                    meta_parts.append(post_date)
             else:
-                title_text = f"{post_number}. <b>{title}</b>"
-            content.append(Paragraph(title_text, styles['post_title']))
+                meta_parts.append(post_date.strftime('%d.%m.%Y %H:%M'))
+        if views:
+            meta_parts.append(f"{views} views")
 
-            # Краткое содержание
-            if summary:
-                content.append(Paragraph(summary, styles['summary']))
+        if meta_parts:
+            content.append(Paragraph(" | ".join(meta_parts), styles['meta']))
 
-            # Мета: источник, дата, просмотры
-            meta_parts = []
-            if channel_title:
-                meta_parts.append(channel_title)
-            if post_date:
-                if isinstance(post_date, str):
-                    try:
-                        dt = datetime.fromisoformat(post_date.replace('Z', '+00:00'))
-                        meta_parts.append(dt.strftime('%d.%m.%Y %H:%M'))
-                    except ValueError:
-                        meta_parts.append(post_date)
-                else:
-                    meta_parts.append(post_date.strftime('%d.%m.%Y %H:%M'))
-            if views:
-                meta_parts.append(f"{views} views")
-
-            if meta_parts:
-                content.append(Paragraph(" | ".join(meta_parts), styles['meta']))
-
-            # Ссылка на пост (отдельной строкой)
-            if post_url:
-                short_url = post_url.replace('https://', '')
-                content.append(Paragraph(
-                    f"<a href='{post_url}' color='#2c5aa0'>{short_url}</a>",
-                    styles['link']
-                ))
+        # Ссылка на пост (отдельной строкой)
+        if post_url:
+            short_url = post_url.replace('https://', '')
+            content.append(Paragraph(
+                f"<a href='{post_url}' color='#2c5aa0'>{short_url}</a>",
+                styles['link']
+            ))
 
     # Если нет постов вообще
     if total_posts == 0:
@@ -906,10 +912,29 @@ async def run_news_monitoring_async():
         print(f"📝 Необработанных постов: {len(unprocessed)}")
 
         if unprocessed:
+            # 9.1 Дедупликация по content_hash — пропуск постов с уже обработанным контентом
+            processed_hashes = get_processed_content_hashes(period_start)
+            unique_posts = []
+            skipped_duplicates = 0
+            seen_hashes = set()
+
+            for post in unprocessed:
+                h = post.get('content_hash')
+                if h:
+                    if h in processed_hashes or h in seen_hashes:
+                        mark_post_processed(post['id'], extract_title(post.get('content_text', '')), '')
+                        skipped_duplicates += 1
+                        continue
+                    seen_hashes.add(h)
+                unique_posts.append(post)
+
+            if skipped_duplicates > 0:
+                print(f"⏭️ Пропущено дубликатов по content_hash: {skipped_duplicates}")
+
             # 10. Параллельная обработка через asyncio.gather + llm_semaphore
             tasks = [
                 process_post_with_llm(post, categories, http_session)
-                for post in unprocessed
+                for post in unique_posts
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -931,65 +956,66 @@ async def run_news_monitoring_async():
         print(f"📰 Постов для дайджеста: {len(digest_posts)}")
 
         if digest_posts:
-            # Группировка по категориям: dict[category_id → {'info': dict, 'posts': list}]
-            grouped = {}
+            # Плоский список постов с тегами категорий (без группировки)
+            posts_flat = []
+            seen_urls = set()
 
             for post in digest_posts:
-                post_categories = post.get('news_post_categories', [])
-                if not post_categories:
+                post_url = post.get('post_url', '')
+                if post_url in seen_urls:
                     continue
+                seen_urls.add(post_url)
 
+                # Собираем категории поста как теги
+                post_categories = post.get('news_post_categories', [])
+                category_tags = []
                 for pc in post_categories:
                     cat_info_raw = pc.get('news_categories', {})
                     if not cat_info_raw or not cat_info_raw.get('is_visible', True):
                         continue
+                    category_tags.append({
+                        'name': cat_info_raw['name'],
+                        'color': cat_info_raw.get('color', '#2c5aa0'),
+                    })
 
-                    cat_id = cat_info_raw['id']
+                if not category_tags:
+                    continue
 
-                    if cat_id not in grouped:
-                        grouped[cat_id] = {
-                            'info': {
-                                'id': cat_id,
-                                'name': cat_info_raw['name'],
-                                'color': cat_info_raw.get('color', '#2c5aa0'),
-                                'sort_order': cat_info_raw.get('sort_order', 999),
-                            },
-                            'posts': [],
-                        }
+                channel_info = post.get('news_channels', {})
+                posts_flat.append({
+                    'title': post.get('title', ''),
+                    'summary': post.get('summary', ''),
+                    'post_url': post_url,
+                    'channel_title': channel_info.get('title') or channel_info.get('username', ''),
+                    'post_date': post.get('post_date', ''),
+                    'views_count': post.get('views_count', 0),
+                    'category_tags': category_tags,
+                })
 
-                    channel_info = post.get('news_channels', {})
-                    post_entry = {
-                        'title': post.get('title', ''),
-                        'summary': post.get('summary', ''),
-                        'post_url': post.get('post_url', ''),
-                        'channel_title': channel_info.get('title') or channel_info.get('username', ''),
-                        'post_date': post.get('post_date', ''),
-                        'views_count': post.get('views_count', 0),
-                        'confidence': pc.get('confidence', 0),
-                    }
-
-                    # Дедупликация по post_url внутри категории
-                    existing_urls = {p['post_url'] for p in grouped[cat_id]['posts']}
-                    if post_entry['post_url'] not in existing_urls:
-                        grouped[cat_id]['posts'].append(post_entry)
-
-            # Формат для PDF: list[(cat_info_dict, posts_list)]
-            posts_by_category = [
-                (g['info'], g['posts']) for g in grouped.values()
-            ]
+            # Сортировка по дате (свежие первыми)
+            def parse_date_for_sort(d):
+                if not d:
+                    return datetime.min
+                if isinstance(d, str):
+                    try:
+                        return datetime.fromisoformat(d.replace('Z', '+00:00'))
+                    except ValueError:
+                        return datetime.min
+                return d
+            posts_flat.sort(key=lambda p: parse_date_for_sort(p['post_date']), reverse=True)
 
             # 12. Генерация PDF
             pdf_path = generate_news_digest_pdf(
                 digest_date=current_date,
                 period_start=period_start,
                 period_end=period_end,
-                posts_by_category=posts_by_category,
+                posts=posts_flat,
                 channels_count=len(channels),
             )
 
             # 13. Сохранение дайджеста в БД
             all_post_ids = [p.get('id') for p in digest_posts if p.get('id')]
-            total_digest_posts = sum(len(posts) for _, posts in posts_by_category)
+            total_digest_posts = len(posts_flat)
 
             digest_data = {
                 'digest_date': current_date,
@@ -997,7 +1023,6 @@ async def run_news_monitoring_async():
                 'period_end': period_end.isoformat(),
                 'total_posts': total_digest_posts,
                 'total_channels': len(channels),
-                'total_categories': len(posts_by_category),
             }
             digest_id = save_digest(digest_data, all_post_ids)
 

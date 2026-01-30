@@ -68,14 +68,26 @@ export async function getNewsPosts({ categories = [], channels = [], dateFrom, d
   const posts = data.map(post => ({
     ...post,
     channel: post.news_channels,
-    categories: (post.news_post_categories || []).map(pc => ({
-      ...pc.news_categories,
-      confidence: pc.confidence,
-      is_manual: pc.is_manual,
-    }))
+    categories: (post.news_post_categories || [])
+      .map(pc => ({
+        ...pc.news_categories,
+        confidence: pc.confidence,
+        is_manual: pc.is_manual,
+      }))
+      .filter(cat => cat.is_visible !== false)
   }))
 
-  return { posts, count }
+  // Дедупликация по content_hash — одинаковый контент показываем только один раз
+  const seenHashes = new Set()
+  const uniquePosts = posts.filter(post => {
+    const hash = post.content_hash
+    if (!hash) return true
+    if (seenHashes.has(hash)) return false
+    seenHashes.add(hash)
+    return true
+  })
+
+  return { posts: uniquePosts, count }
 }
 
 export async function addPostCategory(postId, categoryId) {

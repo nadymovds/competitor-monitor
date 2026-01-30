@@ -125,7 +125,7 @@ export default function App() {
 
 const styles = {
   container: { minHeight: '100vh', backgroundColor: '#0d0d14', color: '#fff', display: 'flex', flexDirection: 'column' },
-  main: { flex: 1, padding: 16, paddingBottom: 80, overflowY: 'auto' },
+  main: { flex: 1, padding: 16, paddingBottom: 80 },
   loadingContainer: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 16, backgroundColor: '#0d0d14' },
   spinner: { width: 40, height: 40, border: '3px solid rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' },
   loadingText: { color: '#6b7280', fontSize: 14 },
