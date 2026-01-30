@@ -189,7 +189,7 @@ def clean_text_for_pdf(text: str) -> str:
         return ""
     result = []
     for char in text:
-        cp = ord(char)
+        cp = ord(char)  
         # Пропускаем символы за пределами BMP (эмодзи U+1F000+ и т.д.)
         if cp > 0xFFFF:
             continue
@@ -201,10 +201,15 @@ def clean_text_for_pdf(text: str) -> str:
             continue
         if 0x202A <= cp <= 0x202E:
             continue
+        # Заменяем проблемные символы, которые не отображаются в DejaVuSans
+        # но оставляем все стандартные латинские, кириллические и распространенные символы
+        if cp < 32 and cp not in (9, 10, 13):  # Управляющие символы кроме tab, LF, CR
+            continue
         result.append(char)
     text = ''.join(result)
     # Убираем лишние пробелы после удаления символов
     text = re.sub(r'  +', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)  # Не более 2 переносов подряд
     # Экранируем спецсимволы XML для ReportLab Paragraph
     text = text.replace('&', '&amp;')
     text = text.replace('<', '&lt;')
@@ -733,11 +738,39 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
     for post in posts:
         p_title = clean_text_for_pdf(post.get('title', ''))
         p_summary = clean_text_for_pdf(post.get('summary', ''))
+        p_content = clean_text_for_pdf(post.get('content_text', ''))
+        
+        # Обеспечиваем наличие заголовка любой ценой
         if not p_title:
             if p_summary:
-                p_title = p_summary[:100] + ('...' if len(p_summary) > 100 else '')
+                # Используем summary как заголовок
+                p_title = p_summary[:150] + ('...' if len(p_summary) > 150 else '')
+                p_summary = ''  # Не дублировать summary
+            elif p_content:
+                # Берем первую строку из контента
+                first_line = p_content.split('\n')[0].strip()
+                p_title = first_line[:150] + ('...' if len(first_line) > 150 else '')
+                # Summary из оставшегося контента
+                if '\n' in p_content:
+                    rest = '\n'.join(p_content.split('\n')[1:]).strip()
+                    p_summary = rest[:300] + ('...' if len(rest) > 300 else '')
             else:
-                continue
+                # Последний fallback: используем название канала
+                channel_title = post.get('channel_title', 'Источник')
+                p_title = f"Новость от {channel_title}"
+        
+        # Обеспечиваем наличие summary если есть контент
+        if not p_summary and p_content and p_title != p_content:
+            # Извлекаем summary из контента, если он отличается от заголовка
+            content_lines = p_content.split('\n')
+            if len(content_lines) > 1:
+                # Берем все строки кроме первой (которая стала заголовком)
+                rest = '\n'.join(content_lines[1:]).strip()
+                p_summary = rest[:300] + ('...' if len(rest) > 300 else '')
+            elif len(p_content) > len(p_title) + 50:
+                # Если контент длинный, а заголовок короткий, используем остаток
+                p_summary = p_content[:300] + ('...' if len(p_content) > 300 else '')
+        
         cleaned_posts.append({**post, 'title': p_title, 'summary': p_summary})
 
     # Статистика
