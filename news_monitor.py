@@ -741,35 +741,39 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
         p_content = clean_text_for_pdf(post.get('content_text', ''))
         
         # Обеспечиваем наличие заголовка любой ценой
-        if not p_title:
+        if not p_title or len(p_title.strip()) < 5:
             if p_summary:
                 # Используем summary как заголовок
                 p_title = p_summary[:150] + ('...' if len(p_summary) > 150 else '')
                 p_summary = ''  # Не дублировать summary
             elif p_content:
-                # Берем первую строку из контента
-                first_line = p_content.split('\n')[0].strip()
-                p_title = first_line[:150] + ('...' if len(first_line) > 150 else '')
-                # Summary из оставшегося контента
-                if '\n' in p_content:
-                    rest = '\n'.join(p_content.split('\n')[1:]).strip()
-                    p_summary = rest[:300] + ('...' if len(rest) > 300 else '')
+                # Берем первую непустую строку длиной >= 5 символов из контента
+                for line in p_content.split('\n'):
+                    line = line.strip()
+                    if len(line) >= 5:
+                        p_title = line[:150] + ('...' if len(line) > 150 else '')
+                        break
+                if not p_title or len(p_title.strip()) < 5:
+                    p_title = p_content[:150].replace('\n', ' ') + ('...' if len(p_content) > 150 else '')
             else:
                 # Последний fallback: используем название канала
                 channel_title = post.get('channel_title', 'Источник')
                 p_title = f"Новость от {channel_title}"
-        
-        # Обеспечиваем наличие summary если есть контент
-        if not p_summary and p_content and p_title != p_content:
-            # Извлекаем summary из контента, если он отличается от заголовка
-            content_lines = p_content.split('\n')
-            if len(content_lines) > 1:
-                # Берем все строки кроме первой (которая стала заголовком)
-                rest = '\n'.join(content_lines[1:]).strip()
-                p_summary = rest[:300] + ('...' if len(rest) > 300 else '')
-            elif len(p_content) > len(p_title) + 50:
-                # Если контент длинный, а заголовок короткий, используем остаток
-                p_summary = p_content[:300] + ('...' if len(p_content) > 300 else '')
+
+        # Обеспечиваем наличие summary: берём из LLM-summary, либо из контента
+        if not p_summary and p_content:
+            # Извлекаем preview из контента
+            content_lines = [l.strip() for l in p_content.split('\n') if l.strip()]
+            # Пропускаем первую строку если она совпадает с заголовком
+            start_idx = 0
+            if content_lines and p_title and content_lines[0].startswith(p_title[:30]):
+                start_idx = 1
+            rest_lines = content_lines[start_idx:]
+            if rest_lines:
+                rest = '\n'.join(rest_lines)
+                p_summary = rest[:500] + ('...' if len(rest) > 500 else '')
+            elif len(p_content) > len(p_title) + 20:
+                p_summary = p_content[:500] + ('...' if len(p_content) > 500 else '')
         
         cleaned_posts.append({**post, 'title': p_title, 'summary': p_summary})
 
@@ -1060,6 +1064,7 @@ async def run_news_monitoring_async():
                 posts_flat.append({
                     'title': post.get('title', ''),
                     'summary': post.get('summary', ''),
+                    'content_text': post.get('content_text', ''),
                     'post_url': post_url,
                     'channel_title': channel_info.get('title') or channel_info.get('username', ''),
                     'post_date': post.get('post_date', ''),
