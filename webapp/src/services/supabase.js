@@ -66,7 +66,7 @@ export async function getCompetitorWithHistory(competitorId) {
     .select('*')
     .eq('competitor_id', competitorId)
     .eq('is_processed', true)
-    .neq('category', 'technical')
+    .in('category', ['products', 'prices', 'services', 'news'])
     .order('post_date', { ascending: false })
     .limit(50)
 
@@ -296,6 +296,7 @@ export async function getCompetitorTgPostsByReport(reportId) {
     .select('*, competitors(id, name)')
     .eq('report_id', reportId)
     .eq('is_processed', true)
+    .in('category', ['products', 'prices', 'services', 'news'])
     .order('post_date', { ascending: false })
   if (error) throw error
   return data

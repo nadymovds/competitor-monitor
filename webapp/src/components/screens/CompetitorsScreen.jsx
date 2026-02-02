@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { getCompetitors, getCompetitorWithHistory, updateCompetitor, createCompetitor, addCompetitorToGroup, removeCompetitorFromGroup, createGroup, addCompetitorUrl, updateCompetitorUrl, deleteCompetitorUrl } from '../../services/supabase'
-import { openLink, hapticFeedback, showBackButton, hideBackButton, showAlert } from '../../services/telegram'
+import { openLink, openTelegramLink, hapticFeedback, showBackButton, hideBackButton, showAlert } from '../../services/telegram'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
 export default function CompetitorsScreen({ user, groups: initialGroups, selectedCompetitorId, cameFromMonitoring, onBackToMonitoring, onClearSelection }) {
@@ -835,7 +835,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                     {isTg ? (
                       h.post_url && (
                         <button
-                          onClick={() => openLink(h.post_url)}
+                          onClick={() => openTelegramLink(h.post_url)}
                           style={{
                             fontSize: 11, color: '#3b82f6', marginBottom: 8, background: 'none',
                             border: 'none', padding: 0, cursor: 'pointer', display: 'flex',

@@ -34,6 +34,11 @@ export function openLink(url) {
   else window.open(url, '_blank')
 }
 
+export function openTelegramLink(url) {
+  if (tg?.openTelegramLink) tg.openTelegramLink(url)
+  else window.open(url, '_blank')
+}
+
 export function showBackButton(onClick) {
   if (!tg?.BackButton) return
   tg.BackButton.onClick(onClick)

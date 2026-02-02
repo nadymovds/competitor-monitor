@@ -14,7 +14,7 @@ import re
 import aiohttp
 import asyncio
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any, Tuple
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
@@ -85,12 +85,15 @@ CATEGORY_PRODUCTS = "products"
 CATEGORY_PRICES = "prices"
 CATEGORY_NEWS = "news"
 CATEGORY_TECHNICAL = "technical"
+CATEGORY_SERVICES = "services"
+CATEGORY_OTHER = "other"
 
 # === TELEGRAM CHANNEL SCANNING ===
 TG_PLAYWRIGHT_TIMEOUT = 30000
 MAX_POSTS_PER_CHANNEL_COMPETITOR = 30
 DELAY_BETWEEN_TG_CHANNELS = 3
 MAX_CONCURRENT_LLM_TG = 3
+TG_SCAN_PERIOD_DAYS = 8
 
 TAGS = {
     "новый_продукт": "#4CAF50",
@@ -356,8 +359,20 @@ def parse_tg_posts_from_html(html: str, channel_username: str) -> list:
     return posts
 
 
+def _should_include_post(post, after_message_id, min_date):
+    """Проверяет, нужно ли включить пост по message_id или дате."""
+    if after_message_id and post['message_id'] > after_message_id:
+        return True
+    if min_date and post.get('post_date') and post['post_date'] >= min_date:
+        return True
+    if not after_message_id and not min_date:
+        return True
+    return False
+
+
 async def fetch_tg_channel_posts(channel_username: str, browser_context,
                                   after_message_id: int = None,
+                                  min_date: str = None,
                                   max_posts: int = MAX_POSTS_PER_CHANNEL_COMPETITOR) -> list:
     """Загружает новые посты канала с пагинацией через ?before=."""
     all_posts = []
@@ -374,8 +389,7 @@ async def fetch_tg_channel_posts(channel_username: str, browser_context,
 
         total_on_page = len(page_posts)
 
-        if after_message_id:
-            page_posts = [p for p in page_posts if p['message_id'] > after_message_id]
+        page_posts = [p for p in page_posts if _should_include_post(p, after_message_id, min_date)]
 
         if not page_posts:
             break
@@ -385,9 +399,18 @@ async def fetch_tg_channel_posts(channel_username: str, browser_context,
         if total_on_page < 10:
             break
 
-        oldest_id = min(p['message_id'] for p in page_posts)
+        oldest_post = min(page_posts, key=lambda p: p['message_id'])
+        oldest_id = oldest_post['message_id']
+        oldest_date = oldest_post.get('post_date')
 
-        if after_message_id and oldest_id <= after_message_id:
+        # Останавливаем пагинацию только если старейший пост старше и по ID, и по дате
+        id_exhausted = after_message_id and oldest_id <= after_message_id
+        date_exhausted = min_date and oldest_date and oldest_date < min_date
+        if id_exhausted and date_exhausted:
+            break
+        if id_exhausted and not min_date:
+            break
+        if date_exhausted and not after_message_id:
             break
 
         before_id = oldest_id
@@ -786,7 +809,7 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
     try:
         result = json.loads(json_str)
         
-        if result.get("category") not in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_TECHNICAL]:
+        if result.get("category") not in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_TECHNICAL, CATEGORY_SERVICES, CATEGORY_OTHER]:
             result["category"] = CATEGORY_TECHNICAL
         
         valid_tags = [t for t in result.get("tags", []) if t in TAGS]
@@ -955,7 +978,7 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 
     if not post_text or len(post_text.strip()) < 20:
         return {
-            "category": CATEGORY_TECHNICAL,
+            "category": CATEGORY_OTHER,
             "tags": [],
             "summary": "",
             "is_meaningful": False
@@ -968,16 +991,19 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 
 ЗАДАЧА: Определи категорию и кратко опиши суть поста.
 
-ИГНОРИРУЙ (категория "technical", is_meaningful: false):
+ВАЖНО (is_meaningful: true) — только посты про:
+- Продукты/услуги: новые устройства, трекеры, тахографы, ПО, платформы, обновления
+- Цены: акции, скидки, изменение тарифов, спецпредложения, бесплатный период
+- Условия обслуживания: SLA, тарифные планы, техподдержка, условия работы, сервисные пакеты
+- Операционные изменения: сбои систем, сервисные объявления, важные изменения в работе
+- Новости компании: партнёрства, мероприятия, выставки, сертификация
+
+ИГНОРИРУЙ (категория "other", is_meaningful: false):
 - Поздравления с праздниками, развлекательный контент
 - Репосты без отношения к продуктам/услугам компании
 - Общие мотивационные посты без конкретики
-
-ФИКСИРУЙ как важные:
-- Новый продукт, устройство, обновление ПО
-- Акции, скидки, спецпредложения
-- Новости компании, партнёрства, мероприятия, выставки
-- Изменения в законодательстве, сертификация
+- Законодательство (если не влияет напрямую на продукты компании)
+- Награды, рейтинги, общий PR без конкретики о продуктах
 
 ВАЖНЫЕ ПРАВИЛА:
 - Отвечай ТОЛЬКО на русском языке
@@ -985,14 +1011,15 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 - Не выдумывай информацию
 
 КАТЕГОРИИ (выбери ОДНУ):
-1. "products" — новый продукт, устройство, трекер, тахограф, услуга, сервис, ПО, платформа, обновление
-2. "prices" — акция, скидка, спецпредложение, изменение цен, бесплатный период
-3. "news" — новость, партнёрство, событие, мероприятие, выставка, сертификация, законодательство
-4. "technical" — нерелевантный или развлекательный контент
+1. "products" — новый/обновлённый продукт, устройство, трекер, тахограф, ПО, платформа, обновление
+2. "prices" — акция, скидка, изменение цен/тарифов, спецпредложение, бесплатный период
+3. "services" — условия обслуживания, SLA, тарифные планы, техподдержка, условия работы
+4. "news" — новости компании, партнёрства, мероприятия, выставки, сертификация
+5. "other" — нерелевантный контент (поздравления, развлечения, общие репосты)
 
 ФОРМАТ ОТВЕТА (только JSON, без пояснений):
 {{
-    "category": "products|prices|news|technical",
+    "category": "products|prices|services|news|other",
     "summary": "Краткое описание сути поста. 1-2 предложения.",
     "tags": ["тег1", "тег2"],
     "is_meaningful": true/false
@@ -1045,7 +1072,7 @@ def generate_pdf_report(
     content.append(Paragraph("Отчёт мониторинга конкурентов", styles['title']))
     content.append(Paragraph(f"Дата: {report_date}", styles['subtitle']))
 
-    total_changes = sum(len(v) for k, v in categorized_changes.items() if k != CATEGORY_TECHNICAL)
+    total_changes = sum(len(v) for k, v in categorized_changes.items() if k not in (CATEGORY_TECHNICAL, CATEGORY_OTHER))
     total_ok = total_urls - len(failed_sites)
 
     tg_stats = f" | 📱 TG постов: {tg_posts_count}" if tg_posts_count > 0 else ""
@@ -1886,9 +1913,11 @@ async def scan_tg_channels_async(
 
         try:
             # 1. Загружаем посты
+            min_date = (datetime.now(timezone.utc) - timedelta(days=TG_SCAN_PERIOD_DAYS)).isoformat()
             posts = await fetch_tg_channel_posts(
                 channel_username, browser_context,
                 after_message_id=last_message_id,
+                min_date=min_date,
                 max_posts=MAX_POSTS_PER_CHANNEL_COMPETITOR
             )
 
@@ -1937,7 +1966,7 @@ async def scan_tg_channels_async(
 
                     title = extract_tg_title(text)
                     summary = analysis.get('summary', '')
-                    category = analysis.get('category', CATEGORY_TECHNICAL)
+                    category = analysis.get('category', CATEGORY_OTHER)
                     tags = analysis.get('tags', [])
 
                     mark_tg_post_processed(post_id, title, summary, category, tags)
@@ -2063,7 +2092,9 @@ async def run_monitoring_async():
         CATEGORY_PRODUCTS: [],
         CATEGORY_PRICES: [],
         CATEGORY_NEWS: [],
-        CATEGORY_TECHNICAL: []
+        CATEGORY_TECHNICAL: [],
+        CATEGORY_SERVICES: [],
+        CATEGORY_OTHER: [],
     }
     failed_sites = []
     duplicates_count = 0
@@ -2155,7 +2186,7 @@ async def run_monitoring_async():
     elapsed = int(time.time() - start_time)
     print(f"⏱️ Время: {elapsed} сек")
 
-    total_changes = sum(len(v) for k, v in categorized_changes.items() if k != CATEGORY_TECHNICAL)
+    total_changes = sum(len(v) for k, v in categorized_changes.items() if k not in (CATEGORY_TECHNICAL, CATEGORY_OTHER))
     total_ok = total_urls - len(failed_sites)
 
     # === СОХРАНЯЕМ СТАТИСТИКУ В БД ===

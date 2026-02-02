@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getScanReports, getCompetitorTgPostsByReport, supabase } from '../../services/supabase'
-import { openLink, hapticFeedback } from '../../services/telegram'
+import { openLink, openTelegramLink, hapticFeedback } from '../../services/telegram'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
 export default function MonitoringScreen({ user, groups, onNavigateToCompetitor }) {
@@ -333,11 +333,13 @@ function StatBox({ label, value, subvalue, color }) {
 function ChangeCard({ change, onNavigate }) {
   const typeColors = {
     products: '#22c55e',
+    services: '#3b82f6',
     news: '#f59e0b',
     prices: '#ef4444'
   }
   const typeLabels = {
     products: 'Продукт',
+    services: 'Условия',
     news: 'Новость',
     prices: 'Цена'
   }
@@ -363,7 +365,7 @@ function ChangeCard({ change, onNavigate }) {
             {change.competitor_name || 'Неизвестный'}
           </button>
           <button
-            onClick={() => openLink(ensureProtocol(linkUrl))}
+            onClick={() => isTelegram ? openTelegramLink(linkUrl) : openLink(ensureProtocol(linkUrl))}
             style={{
               display: 'block', fontSize: 11, color: '#3b82f6', background: 'none',
               border: 'none', padding: 0, marginTop: 2, cursor: 'pointer'
@@ -371,6 +373,11 @@ function ChangeCard({ change, onNavigate }) {
           >
             {isTelegram ? '📢' : '🌐'} {isTelegram ? `@${change.channel_username}` : change.competitor_url}
           </button>
+          {isTelegram && change.post_date && (
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+              {new Date(change.post_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
           <span style={{
@@ -397,7 +404,7 @@ function ChangeCard({ change, onNavigate }) {
         </div>
       )}
 
-      <div style={{ fontSize: 13, color: '#d1d5db', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 14, fontWeight: 500, color: '#e5e7eb', lineHeight: 1.5 }}>
         {summary}
       </div>
 
