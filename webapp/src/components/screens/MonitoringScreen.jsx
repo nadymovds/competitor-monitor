@@ -3,6 +3,13 @@ import { getScanReports, getCompetitorTgPostsByReport, supabase } from '../../se
 import { openLink, openTelegramLink, hapticFeedback } from '../../services/telegram'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
+const CATEGORY_CONFIG = {
+  products: { label: 'Продукты' },
+  prices: { label: 'Цены' },
+  services: { label: 'Условия' },
+  news: { label: 'Новости' },
+}
+
 export default function MonitoringScreen({ user, groups, onNavigateToCompetitor }) {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -11,6 +18,8 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
   const [reportCounts, setReportCounts] = useState({}) // Счётчики изменений без technical
   const [selectedGroups, setSelectedGroups] = useState([])
   const [activeCategory, setActiveCategory] = useState('all')
+  const [activeSourceFilter, setActiveSourceFilter] = useState('all') // 'all' | 'website' | 'telegram'
+  const [reportTgStats, setReportTgStats] = useState({}) // Кол-во TG-каналов по отчёту
 
   // Загрузка отчётов
   useEffect(() => {
@@ -23,7 +32,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
         // Загружаем счётчики изменений для всех отчётов (без technical)
         if (reportsData.length > 0) {
           const reportIds = reportsData.map(r => r.id)
-          const [{ data: countsData }, { data: tgCountsData }] = await Promise.all([
+          const [{ data: countsData }, { data: tgCountsData }, { data: tgChannelsData }] = await Promise.all([
             supabase
               .from('changes')
               .select('report_id')
@@ -34,7 +43,11 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
               .select('report_id')
               .in('report_id', reportIds)
               .eq('is_processed', true)
-              .neq('category', 'technical')
+              .neq('category', 'technical'),
+            supabase
+              .from('competitor_tg_posts')
+              .select('report_id, channel_username')
+              .in('report_id', reportIds)
           ])
 
           // Подсчитываем количество изменений по report_id (website + TG)
@@ -47,6 +60,20 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
             counts[item.report_id] = (counts[item.report_id] || 0) + 1
           })
           setReportCounts(counts)
+
+          // Подсчитываем уникальные TG-каналы по report_id
+          const tgStats = {}
+          reportIds.forEach(id => tgStats[id] = new Set())
+          tgChannelsData?.forEach(item => {
+            if (item.channel_username) {
+              tgStats[item.report_id]?.add(item.channel_username)
+            }
+          })
+          const tgStatsCount = {}
+          for (const [id, set] of Object.entries(tgStats)) {
+            tgStatsCount[id] = set.size
+          }
+          setReportTgStats(tgStatsCount)
 
           // Автоматически раскрываем последний отчёт
           const lastReport = reportsData[0]
@@ -136,13 +163,17 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     }
   }
 
-  // Фильтрация изменений
+  // Фильтрация изменений: группы → источник → категория
   const getFilteredChanges = (reportId) => {
     const changes = reportChanges[reportId] || []
     let result = changes
 
     if (selectedGroups.length > 0) {
       result = result.filter(c => (c.groups || []).some(g => selectedGroups.includes(g.id)))
+    }
+
+    if (activeSourceFilter !== 'all') {
+      result = result.filter(c => c.source_type === activeSourceFilter)
     }
 
     if (activeCategory !== 'all') {
@@ -152,8 +183,27 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     return result
   }
 
-  // Подсчёт по категориям для текущего отчёта
+  // Подсчёт по категориям для текущего отчёта (учитывает группы + источник)
   const getCategoryCounts = (reportId) => {
+    const changes = reportChanges[reportId] || []
+    let filtered = selectedGroups.length > 0
+      ? changes.filter(c => (c.groups || []).some(g => selectedGroups.includes(g.id)))
+      : changes
+
+    if (activeSourceFilter !== 'all') {
+      filtered = filtered.filter(c => c.source_type === activeSourceFilter)
+    }
+
+    const counts = { all: filtered.length }
+    for (const cat of Object.keys(CATEGORY_CONFIG)) {
+      const n = filtered.filter(c => c.category === cat).length
+      if (n > 0) counts[cat] = n
+    }
+    return counts
+  }
+
+  // Подсчёт по источникам для текущего отчёта (учитывает группы)
+  const getSourceCounts = (reportId) => {
     const changes = reportChanges[reportId] || []
     const filtered = selectedGroups.length > 0
       ? changes.filter(c => (c.groups || []).some(g => selectedGroups.includes(g.id)))
@@ -161,8 +211,8 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
 
     return {
       all: filtered.length,
-      products: filtered.filter(c => c.category === 'products').length,
-      news: filtered.filter(c => c.category === 'news').length
+      website: filtered.filter(c => c.source_type === 'website').length,
+      telegram: filtered.filter(c => c.source_type === 'telegram').length,
     }
   }
 
@@ -171,9 +221,11 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     setSelectedGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]) 
   }
   
-  const resetFilters = () => { 
+  const resetFilters = () => {
     hapticFeedback('light')
-    setSelectedGroups([]) 
+    setSelectedGroups([])
+    setActiveSourceFilter('all')
+    setActiveCategory('all')
   }
 
   if (loading) return <div style={{ padding: 20, textAlign: 'center', color: '#6b7280' }}>Загрузка...</div>
@@ -220,6 +272,7 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
             const isExpanded = expandedReportId === report.id
             const filteredChanges = getFilteredChanges(report.id)
             const categoryCounts = getCategoryCounts(report.id)
+            const sourceCounts = getSourceCounts(report.id)
             
             return (
               <div key={report.id} style={{ backgroundColor: '#1a1a24', borderRadius: 12, overflow: 'hidden' }}>
@@ -253,12 +306,16 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                   
                   {/* Статистика */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
-                    <StatBox label="Сайтов" value={report.total_sites || 0} color="#6b7280" />
-                    <StatBox 
-                      label="Успешно" 
-                      value={report.successful_sites || 0} 
-                      subvalue={report.total_sites ? `${Math.round((report.successful_sites / report.total_sites) * 100)}%` : null}
-                      color="#22c55e" 
+                    <StatBox label="Источники" value={(report.total_sites || 0) + (reportTgStats[report.id] || 0)} color="#6b7280" />
+                    <StatBox
+                      label="Успешно"
+                      value={(report.successful_sites || 0) + (reportTgStats[report.id] || 0)}
+                      subvalue={(() => {
+                        const total = (report.total_sites || 0) + (reportTgStats[report.id] || 0)
+                        const successful = (report.successful_sites || 0) + (reportTgStats[report.id] || 0)
+                        return total ? `${Math.round((successful / total) * 100)}%` : null
+                      })()}
+                      color="#22c55e"
                     />
                     <StatBox label="Изменений" value={reportCounts[report.id] ?? 0} color="#3b82f6" />
                     <StatBox label="Неуспешно" value={report.problems_count || 0} color="#ef4444" />
@@ -268,24 +325,46 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
                 {/* Раскрытое содержимое */}
                 {isExpanded && (
                   <div style={{ borderTop: '1px solid #2a2a3a', padding: 16 }}>
-                    {/* Категории */}
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto' }}>
+                    {/* Фильтр по источникам */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 10, overflowX: 'auto' }}>
                       {[
-                        { id: 'all', label: 'Все' },
-                        { id: 'products', label: 'Продукты' },
-                        { id: 'news', label: 'Новости' }
-                      ].map(cat => (
-                        <button 
-                          key={cat.id} 
-                          onClick={() => { hapticFeedback('light'); setActiveCategory(cat.id) }} 
-                          style={{ 
-                            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, 
-                            backgroundColor: activeCategory === cat.id ? '#3b82f6' : '#252532', 
-                            color: activeCategory === cat.id ? '#fff' : '#9ca3af', 
-                            fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', cursor: 'pointer' 
+                        { id: 'all', label: 'Все источники' },
+                        { id: 'website', label: '🌐 Web' },
+                        { id: 'telegram', label: '📢 TG' }
+                      ].map(src => (
+                        <button
+                          key={src.id}
+                          onClick={() => {
+                            hapticFeedback('light')
+                            setActiveSourceFilter(src.id)
+                            setActiveCategory('all')
+                          }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6,
+                            backgroundColor: activeSourceFilter === src.id ? '#8b5cf6' : '#252532',
+                            color: activeSourceFilter === src.id ? '#fff' : '#9ca3af',
+                            fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', cursor: 'pointer'
                           }}
                         >
-                          {cat.label} <span style={{ opacity: 0.7 }}>{categoryCounts[cat.id]}</span>
+                          {src.label} <span style={{ opacity: 0.7 }}>{sourceCounts[src.id]}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Категории */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto' }}>
+                      {Object.entries(categoryCounts).map(([id, count]) => (
+                        <button
+                          key={id}
+                          onClick={() => { hapticFeedback('light'); setActiveCategory(id) }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6,
+                            backgroundColor: activeCategory === id ? '#3b82f6' : '#252532',
+                            color: activeCategory === id ? '#fff' : '#9ca3af',
+                            fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', cursor: 'pointer'
+                          }}
+                        >
+                          {id === 'all' ? 'Все' : CATEGORY_CONFIG[id]?.label || id} <span style={{ opacity: 0.7 }}>{count}</span>
                         </button>
                       ))}
                     </div>
