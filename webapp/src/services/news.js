@@ -12,7 +12,7 @@ export async function getNewsCategories() {
 export async function getNewsChannels() {
   const { data, error } = await supabase
     .from('news_channels')
-    .select('id, username, title, is_active')
+    .select('id, username, title, is_active, last_scan_at')
     .eq('is_active', true)
     .order('title')
   if (error) throw error

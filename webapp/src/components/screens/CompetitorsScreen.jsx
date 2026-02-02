@@ -152,7 +152,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
       showAlert(`Максимум ${MAX_URLS_PER_COMPETITOR} URL на конкурента`)
       return
     }
-    setEditUrls(prev => [...prev, { url: '', label: '', is_active: true, isNew: true }])
+    setEditUrls(prev => [...prev, { url: '', label: '', is_active: true, source_type: 'website', isNew: true }])
   }
 
   const handleUpdateUrl = (index, field, value) => {
@@ -190,13 +190,14 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
         if (url.isDeleted && url.id) {
           await deleteCompetitorUrl(url.id)
         } else if (url.isNew && url.url) {
-          const saved = await addCompetitorUrl(selectedCompetitor.id, url.url, url.label || null)
+          const saved = await addCompetitorUrl(selectedCompetitor.id, url.url, url.label || null, url.source_type || 'website')
           savedUrls.push(saved)
         } else if (url.id && !url.isNew && !url.isDeleted) {
           const saved = await updateCompetitorUrl(url.id, {
             url: url.url,
             label: url.label || null,
-            is_active: url.is_active
+            is_active: url.is_active,
+            source_type: url.source_type || 'website'
           })
           savedUrls.push(saved)
         }
@@ -350,12 +351,21 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 
   if (selectedCompetitor) {
     const rawHistory = details?.changes_history || []
-    const history = (Array.isArray(rawHistory) ? rawHistory : [])
+    const websiteHistory = (Array.isArray(rawHistory) ? rawHistory : [])
       .filter(h => h.category !== 'technical')
       .map(h => ({
         ...h,
+        source_type: 'website',
         parsed: parseLlmSummary(h.summary)
       }))
+    const tgHistory = (details?.tg_posts || []).map(p => ({
+      ...p,
+      source_type: 'telegram',
+      detected_at: p.post_date || p.detected_at,
+      parsed: { summary: p.summary || p.title || 'Нет описания', category: p.category, tags: p.tags || [] }
+    }))
+    const history = [...websiteHistory, ...tgHistory]
+      .sort((a, b) => new Date(b.detected_at || 0) - new Date(a.detected_at || 0))
     const visibleHistory = history.slice(0, visibleChangesCount)
     const hasMoreChanges = history.length > visibleChangesCount
 
@@ -383,77 +393,98 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 
             {editUrls.filter(u => !u.isDeleted).map((u, index) => {
               const actualIndex = editUrls.findIndex(eu => eu === u)
+              const isTgType = u.source_type === 'telegram'
               return (
                 <div key={u.id || index} style={{
                   display: 'flex',
+                  flexDirection: 'column',
                   gap: 8,
-                  alignItems: 'center',
                   padding: 12,
                   backgroundColor: '#252532',
                   borderRadius: 8
                 }}>
-                  <input
-                    type="text"
-                    value={u.label || ''}
-                    onChange={e => handleUpdateUrl(actualIndex, 'label', e.target.value)}
-                    placeholder="Метка"
-                    style={{
-                      width: 70,
-                      padding: '8px 10px',
-                      backgroundColor: '#1a1a24',
-                      border: '1px solid #2a2a3a',
-                      borderRadius: 6,
-                      color: '#fff',
-                      fontSize: 13,
-                      outline: 'none'
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={u.url}
-                    onChange={e => handleUpdateUrl(actualIndex, 'url', e.target.value)}
-                    placeholder="example.com"
-                    style={{
-                      flex: 1,
-                      padding: '8px 10px',
-                      backgroundColor: '#1a1a24',
-                      border: '1px solid #2a2a3a',
-                      borderRadius: 6,
-                      color: '#fff',
-                      fontSize: 13,
-                      outline: 'none'
-                    }}
-                  />
-                  <button
-                    onClick={() => handleToggleUrlActive(actualIndex)}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 6,
-                      border: 'none',
-                      backgroundColor: u.is_active !== false ? '#22c55e20' : '#ef444420',
-                      color: u.is_active !== false ? '#22c55e' : '#ef4444',
-                      cursor: 'pointer',
-                      fontSize: 14
-                    }}
-                  >
-                    {u.is_active !== false ? '✓' : '✗'}
-                  </button>
-                  <button
-                    onClick={() => handleDeleteUrl(actualIndex)}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 6,
-                      border: 'none',
-                      backgroundColor: '#ef444420',
-                      color: '#ef4444',
-                      cursor: 'pointer',
-                      fontSize: 14
-                    }}
-                  >
-                    🗑
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button
+                      onClick={() => handleUpdateUrl(actualIndex, 'source_type', isTgType ? 'website' : 'telegram')}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 4,
+                        border: 'none',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        backgroundColor: isTgType ? '#8b5cf620' : '#6b728020',
+                        color: isTgType ? '#8b5cf6' : '#6b7280',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {isTgType ? '📢 TG' : '🌐 Web'}
+                    </button>
+                    <input
+                      type="text"
+                      value={u.label || ''}
+                      onChange={e => handleUpdateUrl(actualIndex, 'label', e.target.value)}
+                      placeholder="Метка"
+                      style={{
+                        width: 70,
+                        padding: '8px 10px',
+                        backgroundColor: '#1a1a24',
+                        border: '1px solid #2a2a3a',
+                        borderRadius: 6,
+                        color: '#fff',
+                        fontSize: 13,
+                        outline: 'none'
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={u.url}
+                      onChange={e => handleUpdateUrl(actualIndex, 'url', e.target.value)}
+                      placeholder={isTgType ? 'https://t.me/username' : 'example.com'}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        backgroundColor: '#1a1a24',
+                        border: '1px solid #2a2a3a',
+                        borderRadius: 6,
+                        color: '#fff',
+                        fontSize: 13,
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => handleToggleUrlActive(actualIndex)}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 6,
+                        border: 'none',
+                        backgroundColor: u.is_active !== false ? '#22c55e20' : '#ef444420',
+                        color: u.is_active !== false ? '#22c55e' : '#ef4444',
+                        cursor: 'pointer',
+                        fontSize: 14
+                      }}
+                    >
+                      {u.is_active !== false ? '✓' : '✗'}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteUrl(actualIndex)}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 6,
+                        border: 'none',
+                        backgroundColor: '#ef444420',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        fontSize: 14
+                      }}
+                    >
+                      🗑
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -706,29 +737,32 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
         {/* URLs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {(details?.urls || selectedCompetitor?.urls || []).length > 0 ? (
-            (details?.urls || selectedCompetitor?.urls || []).map(u => (
-              <button
-                key={u.id}
-                onClick={() => openLink(ensureProtocol(u.url))}
-                style={{
-                  fontSize: 14,
-                  color: '#3b82f6',
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8
-                }}
-              >
-                🌐 {u.label && <span style={{ color: '#9ca3af' }}>[{u.label}]</span>} {u.url}
-                {u.is_active === false && (
-                  <span style={{ fontSize: 10, color: '#ef4444', backgroundColor: '#ef444420', padding: '2px 6px', borderRadius: 4 }}>откл.</span>
-                )}
-              </button>
-            ))
+            (details?.urls || selectedCompetitor?.urls || []).map(u => {
+              const isTgUrl = u.source_type === 'telegram'
+              return (
+                <button
+                  key={u.id}
+                  onClick={() => openLink(ensureProtocol(u.url))}
+                  style={{
+                    fontSize: 14,
+                    color: '#3b82f6',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}
+                >
+                  {isTgUrl ? '📢' : '🌐'} {u.label && <span style={{ color: '#9ca3af' }}>[{u.label}]</span>} {isTgUrl ? `@${u.url.replace(/^https?:\/\/t\.me\//, '')}` : u.url}
+                  {u.is_active === false && (
+                    <span style={{ fontSize: 10, color: '#ef4444', backgroundColor: '#ef444420', padding: '2px 6px', borderRadius: 4 }}>откл.</span>
+                  )}
+                </button>
+              )
+            })
           ) : selectedCompetitor.url ? (
             <button onClick={() => openLink(ensureProtocol(selectedCompetitor.url))} style={{ fontSize: 14, color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
               🌐 {selectedCompetitor.url}
@@ -773,33 +807,54 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
                   prices: 'Цена'
                 }
                 const category = h.parsed.category || h.change_type || 'news'
+                const isTg = h.source_type === 'telegram'
 
                 return (
                   <div key={i} style={{ padding: 12, backgroundColor: '#1a1a24', borderRadius: 10, borderLeft: `3px solid ${typeColors[category] || '#3b82f6'}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <span style={{ fontSize: 12, color: '#6b7280' }}>{formatDate(h.detected_at || h.scan_date)}</span>
-                      <span style={{
-                        fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4,
-                        backgroundColor: (typeColors[category] || '#6b7280') + '20',
-                        color: typeColors[category] || '#6b7280'
-                      }}>
-                        {typeLabels[category] || category}
-                      </span>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4,
+                          backgroundColor: isTg ? '#8b5cf620' : '#6b728020',
+                          color: isTg ? '#8b5cf6' : '#6b7280'
+                        }}>
+                          {isTg ? 'TG' : 'Web'}
+                        </span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4,
+                          backgroundColor: (typeColors[category] || '#6b7280') + '20',
+                          color: typeColors[category] || '#6b7280'
+                        }}>
+                          {typeLabels[category] || category}
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Показываем URL где произошло изменение */}
-                    {(h.scanned_url || h.competitor_urls?.url) && (
-                      <div style={{
-                        fontSize: 11,
-                        color: '#3b82f6',
-                        marginBottom: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}>
-                        🔗 {h.competitor_urls?.label && `[${h.competitor_urls.label}] `}
-                        {h.scanned_url || h.competitor_urls?.url}
-                      </div>
+                    {/* Показываем URL/канал где произошло изменение */}
+                    {isTg ? (
+                      h.post_url && (
+                        <button
+                          onClick={() => openLink(h.post_url)}
+                          style={{
+                            fontSize: 11, color: '#3b82f6', marginBottom: 8, background: 'none',
+                            border: 'none', padding: 0, cursor: 'pointer', display: 'flex',
+                            alignItems: 'center', gap: 4
+                          }}
+                        >
+                          📢 @{h.channel_username}
+                        </button>
+                      )
+                    ) : (
+                      (h.scanned_url || h.competitor_urls?.url) && (
+                        <div style={{
+                          fontSize: 11, color: '#3b82f6', marginBottom: 8,
+                          display: 'flex', alignItems: 'center', gap: 4
+                        }}>
+                          🔗 {h.competitor_urls?.label && `[${h.competitor_urls.label}] `}
+                          {h.scanned_url || h.competitor_urls?.url}
+                        </div>
+                      )
                     )}
 
                     <div style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.5 }}>

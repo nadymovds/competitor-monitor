@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getScanReports, supabase } from '../../services/supabase'
+import { getScanReports, getCompetitorTgPostsByReport, supabase } from '../../services/supabase'
 import { openLink, hapticFeedback } from '../../services/telegram'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
@@ -23,16 +23,27 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
         // Загружаем счётчики изменений для всех отчётов (без technical)
         if (reportsData.length > 0) {
           const reportIds = reportsData.map(r => r.id)
-          const { data: countsData } = await supabase
-            .from('changes')
-            .select('report_id')
-            .in('report_id', reportIds)
-            .neq('category', 'technical')
+          const [{ data: countsData }, { data: tgCountsData }] = await Promise.all([
+            supabase
+              .from('changes')
+              .select('report_id')
+              .in('report_id', reportIds)
+              .neq('category', 'technical'),
+            supabase
+              .from('competitor_tg_posts')
+              .select('report_id')
+              .in('report_id', reportIds)
+              .eq('is_processed', true)
+              .neq('category', 'technical')
+          ])
 
-          // Подсчитываем количество изменений по report_id
+          // Подсчитываем количество изменений по report_id (website + TG)
           const counts = {}
           reportIds.forEach(id => counts[id] = 0)
           countsData?.forEach(item => {
+            counts[item.report_id] = (counts[item.report_id] || 0) + 1
+          })
+          tgCountsData?.forEach(item => {
             counts[item.report_id] = (counts[item.report_id] || 0) + 1
           })
           setReportCounts(counts)
@@ -56,22 +67,26 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
     if (reportChanges[reportId]) return // Уже загружено
 
     try {
-      const { data, error } = await supabase
-        .from('changes')
-        .select(`
-          *,
-          competitors (id, name, url, competitor_groups(group_id, groups(id, name, color))),
-          competitor_urls (url, label)
-        `)
-        .eq('report_id', reportId)
-        .neq('category', 'technical')
-        .order('detected_at', { ascending: false })
+      const [{ data, error }, tgPosts] = await Promise.all([
+        supabase
+          .from('changes')
+          .select(`
+            *,
+            competitors (id, name, url, competitor_groups(group_id, groups(id, name, color))),
+            competitor_urls (url, label)
+          `)
+          .eq('report_id', reportId)
+          .neq('category', 'technical')
+          .order('detected_at', { ascending: false }),
+        getCompetitorTgPostsByReport(reportId)
+      ])
 
       if (error) throw error
 
-      // Преобразуем данные
-      const changes = data.map(item => ({
+      // Преобразуем данные website-изменений
+      const websiteChanges = data.map(item => ({
         id: item.id,
+        source_type: 'website',
         competitor_id: item.competitors?.id,
         competitor_name: item.competitors?.name,
         competitor_url: item.competitors?.url,
@@ -84,7 +99,27 @@ export default function MonitoringScreen({ user, groups, onNavigateToCompetitor 
         groups: item.competitors?.competitor_groups?.map(cg => cg.groups) || []
       }))
 
-      setReportChanges(prev => ({ ...prev, [reportId]: changes }))
+      // Преобразуем данные TG-постов
+      const tgChanges = (tgPosts || []).map(item => ({
+        id: `tg_${item.id}`,
+        source_type: 'telegram',
+        competitor_id: item.competitor_id,
+        competitor_name: item.competitors?.name,
+        competitor_url: item.post_url,
+        post_url: item.post_url,
+        channel_username: item.channel_username,
+        category: item.category,
+        summary: item.summary || item.title || 'Нет описания',
+        tags: item.tags || [],
+        detected_at: item.post_date || item.detected_at,
+        groups: []
+      }))
+
+      // Объединяем и сортируем по дате
+      const allChanges = [...websiteChanges, ...tgChanges]
+        .sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at))
+
+      setReportChanges(prev => ({ ...prev, [reportId]: allChanges }))
     } catch (err) {
       console.error('Load changes error:', err)
     }
@@ -310,42 +345,53 @@ function ChangeCard({ change, onNavigate }) {
   const category = change.category || 'news'
   const summary = change.summary || 'Нет описания'
   const tags = change.tags || []
+  const isTelegram = change.source_type === 'telegram'
+  const linkUrl = isTelegram ? change.post_url : change.competitor_url
 
   return (
     <div style={{ backgroundColor: '#252532', borderRadius: 10, padding: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
         <div>
-          <button 
+          <button
             onClick={onNavigate}
-            style={{ 
-              fontSize: 14, fontWeight: 600, color: '#fff', background: 'none', border: 'none', 
-              padding: 0, textAlign: 'left', cursor: 'pointer', 
-              textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.3)' 
+            style={{
+              fontSize: 14, fontWeight: 600, color: '#fff', background: 'none', border: 'none',
+              padding: 0, textAlign: 'left', cursor: 'pointer',
+              textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.3)'
             }}
           >
             {change.competitor_name || 'Неизвестный'}
           </button>
-          <button 
-            onClick={() => openLink(ensureProtocol(change.competitor_url))}
-            style={{ 
-              display: 'block', fontSize: 11, color: '#3b82f6', background: 'none', 
-              border: 'none', padding: 0, marginTop: 2, cursor: 'pointer' 
+          <button
+            onClick={() => openLink(ensureProtocol(linkUrl))}
+            style={{
+              display: 'block', fontSize: 11, color: '#3b82f6', background: 'none',
+              border: 'none', padding: 0, marginTop: 2, cursor: 'pointer'
             }}
           >
-            🌐 {change.competitor_url}
+            {isTelegram ? '📢' : '🌐'} {isTelegram ? `@${change.channel_username}` : change.competitor_url}
           </button>
         </div>
-        <span style={{ 
-          fontSize: 10, fontWeight: 500, padding: '3px 6px', borderRadius: 4, 
-          backgroundColor: (typeColors[category] || '#6b7280') + '20', 
-          color: typeColors[category] || '#6b7280' 
-        }}>
-          {typeLabels[category] || category}
-        </span>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 500, padding: '3px 6px', borderRadius: 4,
+            backgroundColor: isTelegram ? '#8b5cf620' : '#6b728020',
+            color: isTelegram ? '#8b5cf6' : '#6b7280'
+          }}>
+            {isTelegram ? 'TG' : 'Web'}
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 500, padding: '3px 6px', borderRadius: 4,
+            backgroundColor: (typeColors[category] || '#6b7280') + '20',
+            color: typeColors[category] || '#6b7280'
+          }}>
+            {typeLabels[category] || category}
+          </span>
+        </div>
       </div>
-      
-      {/* Показываем URL где произошло изменение */}
-      {change.scanned_url && (
+
+      {/* Показываем URL где произошло изменение (только для website) */}
+      {!isTelegram && change.scanned_url && (
         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
           🔗 {change.scanned_url}
         </div>

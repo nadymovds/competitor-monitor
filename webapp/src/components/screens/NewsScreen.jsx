@@ -158,11 +158,18 @@ export default function NewsScreen({ user }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>Новости</h1>
-        {posts.length > 0 && (
-          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
-            Обновлено {new Date(posts[0].post_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          </div>
-        )}
+        {channels.length > 0 && (() => {
+          const lastScan = channels
+            .map(ch => ch.last_scan_at)
+            .filter(Boolean)
+            .sort()
+            .pop()
+          return lastScan ? (
+            <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+              Обновлено {new Date(lastScan).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </div>
+          ) : null
+        })()}
       </div>
 
       <NewsFilters

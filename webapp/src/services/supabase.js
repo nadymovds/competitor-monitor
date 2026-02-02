@@ -17,7 +17,7 @@ export async function getCompetitors(filters = {}) {
     .select(`
       *,
       competitor_groups(group_id, groups(id, name, color)),
-      competitor_urls(id, url, label, is_active, sort_order)
+      competitor_urls(id, url, label, is_active, sort_order, source_type)
     `)
     .eq('is_active', true)
     .order('name')
@@ -43,7 +43,7 @@ export async function getCompetitorWithHistory(competitorId) {
     .select(`
       *,
       competitor_groups(group_id, groups(id, name, color)),
-      competitor_urls(id, url, label, is_active, sort_order)
+      competitor_urls(id, url, label, is_active, sort_order, source_type)
     `)
     .eq('id', competitorId)
     .single()
@@ -60,11 +60,24 @@ export async function getCompetitorWithHistory(competitorId) {
 
   if (changesError) throw changesError
 
+  // Получаем посты из Telegram-каналов
+  const { data: tgPosts, error: tgError } = await supabase
+    .from('competitor_tg_posts')
+    .select('*')
+    .eq('competitor_id', competitorId)
+    .eq('is_processed', true)
+    .neq('category', 'technical')
+    .order('post_date', { ascending: false })
+    .limit(50)
+
+  if (tgError) throw tgError
+
   return {
     ...competitor,
     groups: competitor.competitor_groups?.map(cg => cg.groups) || [],
     urls: (competitor.competitor_urls || []).sort((a, b) => a.sort_order - b.sort_order),
-    changes_history: changes || []
+    changes_history: changes || [],
+    tg_posts: tgPosts || []
   }
 }
 
@@ -239,7 +252,7 @@ export async function deleteGroup(groupId) {
 
 // === Функции для управления URL конкурентов ===
 
-export async function addCompetitorUrl(competitorId, url, label = null) {
+export async function addCompetitorUrl(competitorId, url, label = null, sourceType = 'website') {
   const { data: maxOrder } = await supabase
     .from('competitor_urls')
     .select('sort_order')
@@ -251,7 +264,7 @@ export async function addCompetitorUrl(competitorId, url, label = null) {
 
   const { data, error } = await supabase
     .from('competitor_urls')
-    .insert({ competitor_id: competitorId, url, label, sort_order: nextOrder })
+    .insert({ competitor_id: competitorId, url, label, sort_order: nextOrder, source_type: sourceType })
     .select()
     .single()
   if (error) throw error
@@ -275,4 +288,15 @@ export async function deleteCompetitorUrl(urlId) {
     .delete()
     .eq('id', urlId)
   if (error) throw error
+}
+
+export async function getCompetitorTgPostsByReport(reportId) {
+  const { data, error } = await supabase
+    .from('competitor_tg_posts')
+    .select('*, competitors(id, name)')
+    .eq('report_id', reportId)
+    .eq('is_processed', true)
+    .order('post_date', { ascending: false })
+  if (error) throw error
+  return data
 }
