@@ -86,6 +86,12 @@ CATEGORY_PRICES = "prices"
 CATEGORY_NEWS = "news"
 CATEGORY_TECHNICAL = "technical"
 
+# === TELEGRAM CHANNEL SCANNING ===
+TG_PLAYWRIGHT_TIMEOUT = 30000
+MAX_POSTS_PER_CHANNEL_COMPETITOR = 30
+DELAY_BETWEEN_TG_CHANNELS = 3
+MAX_CONCURRENT_LLM_TG = 3
+
 TAGS = {
     "новый_продукт": "#4CAF50",
     "оборудование": "#2196F3",
@@ -213,6 +219,182 @@ def normalize_content_for_hash(content: str) -> str:
     content = re.sub(r'онлайн\s*:?\s*\d+', '', content, flags=re.IGNORECASE)
     content = ' '.join(content.split())
     return content
+
+# === УТИЛИТЫ ДЛЯ TELEGRAM КАНАЛОВ ===
+
+def clean_tg_post_text(html_text: str) -> str:
+    if not html_text:
+        return ""
+    soup = BeautifulSoup(html_text, 'lxml')
+    text = soup.get_text(separator='\n', strip=True)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    return text.strip()
+
+def parse_tg_views_count(views_str: str) -> int:
+    if not views_str:
+        return 0
+    views_str = views_str.strip().upper()
+    try:
+        if 'M' in views_str:
+            return int(float(views_str.replace('M', '')) * 1_000_000)
+        elif 'K' in views_str:
+            return int(float(views_str.replace('K', '')) * 1_000)
+        else:
+            return int(re.sub(r'[^\d]', '', views_str))
+    except (ValueError, TypeError):
+        return 0
+
+def extract_tg_title(text: str) -> str:
+    if not text:
+        return ""
+    first_line = text.strip().split('\n')[0].strip()
+    if len(first_line) > 100:
+        first_line = first_line[:97] + "..."
+    return first_line
+
+# === ПАРСИНГ TELEGRAM КАНАЛОВ (t.me/s/) ===
+
+async def fetch_tg_channel_page(channel_username: str, browser_context, before_id: int = None) -> str:
+    """Загружает HTML страницы публичного Telegram-канала через Playwright."""
+    url = f"https://t.me/s/{channel_username}"
+    if before_id:
+        url += f"?before={before_id}"
+
+    async with browser_semaphore:
+        page = await browser_context.new_page()
+        try:
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                window.chrome = { runtime: {} };
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            """)
+
+            await page.route("**/*.{mp4,webm,mp3,wav,avi,mov,flv}", lambda route: route.abort())
+            await page.route("**/*google-analytics*", lambda route: route.abort())
+            await page.route("**/*googletagmanager*", lambda route: route.abort())
+            await page.route("**/*mc.yandex*", lambda route: route.abort())
+
+            await page.goto(url, wait_until='domcontentloaded', timeout=TG_PLAYWRIGHT_TIMEOUT)
+
+            try:
+                await page.wait_for_selector('div.tgme_widget_message_wrap', timeout=15000)
+            except PlaywrightTimeout:
+                print(f"  ⚠️ Селектор сообщений не найден для @{channel_username}")
+                return ""
+
+            html = await page.content()
+            return html
+        except Exception as e:
+            print(f"  ❌ Ошибка загрузки @{channel_username}: {e}")
+            return ""
+        finally:
+            await page.close()
+
+
+def parse_tg_posts_from_html(html: str, channel_username: str) -> list:
+    """Парсит посты из HTML страницы t.me/s/."""
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, 'lxml')
+    message_wraps = soup.find_all('div', class_='tgme_widget_message_wrap')
+    posts = []
+
+    for wrap in message_wraps:
+        try:
+            message_div = wrap.find('div', class_='tgme_widget_message')
+            if not message_div:
+                continue
+
+            data_post = message_div.get('data-post', '')
+            if '/' not in data_post:
+                continue
+            message_id = int(data_post.split('/')[-1])
+
+            text_div = message_div.find('div', class_='tgme_widget_message_text')
+            raw_html = str(text_div) if text_div else ""
+            text = clean_tg_post_text(raw_html)
+
+            time_tag = message_div.find('time')
+            post_date = None
+            if time_tag and time_tag.get('datetime'):
+                post_date = datetime.fromisoformat(time_tag['datetime'].replace('Z', '+00:00'))
+
+            views_span = message_div.find('span', class_='tgme_widget_message_views')
+            views = parse_tg_views_count(views_span.get_text() if views_span else "")
+
+            has_photo = bool(message_div.find('a', class_='tgme_widget_message_photo_wrap'))
+            has_video = bool(message_div.find('video') or message_div.find(class_='tgme_widget_message_video'))
+            has_document = bool(message_div.find('div', class_='tgme_widget_message_document'))
+
+            post_url = f"https://t.me/{channel_username}/{message_id}"
+
+            posts.append({
+                'message_id': message_id,
+                'post_url': post_url,
+                'text': text,
+                'post_date': post_date,
+                'has_photo': has_photo,
+                'has_video': has_video,
+                'has_document': has_document,
+                'views': views,
+                'content_hash': calculate_hash(text) if text else None,
+            })
+        except Exception as e:
+            print(f"  ⚠️ Ошибка парсинга поста: {e}")
+            continue
+
+    posts.sort(key=lambda p: p['message_id'])
+    return posts
+
+
+async def fetch_tg_channel_posts(channel_username: str, browser_context,
+                                  after_message_id: int = None,
+                                  max_posts: int = MAX_POSTS_PER_CHANNEL_COMPETITOR) -> list:
+    """Загружает новые посты канала с пагинацией через ?before=."""
+    all_posts = []
+    before_id = None
+
+    while len(all_posts) < max_posts:
+        html = await fetch_tg_channel_page(channel_username, browser_context, before_id=before_id)
+        if not html:
+            break
+
+        page_posts = parse_tg_posts_from_html(html, channel_username)
+        if not page_posts:
+            break
+
+        total_on_page = len(page_posts)
+
+        if after_message_id:
+            page_posts = [p for p in page_posts if p['message_id'] > after_message_id]
+
+        if not page_posts:
+            break
+
+        all_posts.extend(page_posts)
+
+        if total_on_page < 10:
+            break
+
+        oldest_id = min(p['message_id'] for p in page_posts)
+
+        if after_message_id and oldest_id <= after_message_id:
+            break
+
+        before_id = oldest_id
+        await asyncio.sleep(1)
+
+    all_posts.sort(key=lambda p: p['message_id'])
+    return all_posts[:max_posts]
 
 def clean_html_content(soup: BeautifulSoup) -> str:
     for element in soup(['script', 'style', 'nav', 'footer', 'header', 'noscript', 'iframe']):
@@ -766,6 +948,61 @@ async def analyze_changes_async(competitor_name: str, new_content: str, session:
     response = await call_llm_async(prompt, session, max_tokens=600)
     return parse_llm_json_response(response, competitor_name)
 
+
+async def analyze_tg_post_async(competitor_name: str, post_text: str,
+                                 session: aiohttp.ClientSession) -> Dict[str, Any]:
+    """Анализирует пост из Telegram-канала конкурента через LLM."""
+
+    if not post_text or len(post_text.strip()) < 20:
+        return {
+            "category": CATEGORY_TECHNICAL,
+            "tags": [],
+            "summary": "",
+            "is_meaningful": False
+        }
+
+    prompt = f"""Проанализируй пост из Telegram-канала компании "{competitor_name}" в сфере ГЛОНАСС/GPS мониторинга транспорта.
+
+ТЕКСТ ПОСТА:
+{post_text[:2000]}
+
+ЗАДАЧА: Определи категорию и кратко опиши суть поста.
+
+ИГНОРИРУЙ (категория "technical", is_meaningful: false):
+- Поздравления с праздниками, развлекательный контент
+- Репосты без отношения к продуктам/услугам компании
+- Общие мотивационные посты без конкретики
+
+ФИКСИРУЙ как важные:
+- Новый продукт, устройство, обновление ПО
+- Акции, скидки, спецпредложения
+- Новости компании, партнёрства, мероприятия, выставки
+- Изменения в законодательстве, сертификация
+
+ВАЖНЫЕ ПРАВИЛА:
+- Отвечай ТОЛЬКО на русском языке
+- Описывай только то, что реально содержится в посте
+- Не выдумывай информацию
+
+КАТЕГОРИИ (выбери ОДНУ):
+1. "products" — новый продукт, устройство, трекер, тахограф, услуга, сервис, ПО, платформа, обновление
+2. "prices" — акция, скидка, спецпредложение, изменение цен, бесплатный период
+3. "news" — новость, партнёрство, событие, мероприятие, выставка, сертификация, законодательство
+4. "technical" — нерелевантный или развлекательный контент
+
+ФОРМАТ ОТВЕТА (только JSON, без пояснений):
+{{
+    "category": "products|prices|news|technical",
+    "summary": "Краткое описание сути поста. 1-2 предложения.",
+    "tags": ["тег1", "тег2"],
+    "is_meaningful": true/false
+}}
+
+ТЕГИ: новый_продукт, оборудование, тахографы, мониторинг, ПО, акция, скидка, бесплатно, новость, важное, партнёрство, законодательство, wialon, глонасс"""
+
+    response = await call_llm_async(prompt, session, max_tokens=400)
+    return parse_llm_json_response(response, competitor_name)
+
 print("✅ LLM анализ настроен")
 
 # ============================================================================
@@ -779,7 +1016,8 @@ def generate_pdf_report(
     categorized_changes: Dict[str, List[Dict]],
     failed_sites: List[Dict],
     duplicates_count: int = 0,
-    first_scans_count: int = 0
+    first_scans_count: int = 0,
+    tg_posts_count: int = 0
 ) -> str:
     filename = f"/tmp/competitor_report_{report_date}.pdf"
     
@@ -810,7 +1048,8 @@ def generate_pdf_report(
     total_changes = sum(len(v) for k, v in categorized_changes.items() if k != CATEGORY_TECHNICAL)
     total_ok = total_urls - len(failed_sites)
 
-    stats = f"📊 Конкурентов: {total_competitors} | 🔗 URL: {total_urls} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes} | 🔁 Дубликаты: {duplicates_count} | 🆕 Первые: {first_scans_count} | ⚠️ Проблемы: {len(failed_sites)}"
+    tg_stats = f" | 📱 TG постов: {tg_posts_count}" if tg_posts_count > 0 else ""
+    stats = f"📊 Конкурентов: {total_competitors} | 🔗 URL: {total_urls} | ✅ Успешно: {total_ok} | 🔄 Изменения: {total_changes}{tg_stats} | 🔁 Дубликаты: {duplicates_count} | 🆕 Первые: {first_scans_count} | ⚠️ Проблемы: {len(failed_sites)}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
     
@@ -875,17 +1114,21 @@ def generate_pdf_report(
         for i, item in enumerate(items, 1):
             # Используем display_name если доступен (включает label URL)
             name = item.get('display_name') or item.get('competitor', '')
-            url = item.get('url', '')
             summary = item.get('summary', '')
             tags = item.get('tags', [])
-            
+            is_telegram = item.get('source_type') == 'telegram'
+
+            # Для TG-постов используем post_url, для сайтов — url
+            url = item.get('post_url') if is_telegram else item.get('url', '')
+            source_prefix = "TG: " if is_telegram else ""
+
             # === КЛИКАБЕЛЬНАЯ ССЫЛКА ===
             if url:
                 # Добавляем https:// если нет
                 full_url = url if url.startswith('http') else f'https://{url}'
-                company_text = f"{i}. <b>{name}</b> — <a href='{full_url}' color='blue'>{full_url}</a>"
+                company_text = f"{i}. {source_prefix}<b>{name}</b> — <a href='{full_url}' color='blue'>{full_url}</a>"
             else:
-                company_text = f"{i}. <b>{name}</b>"
+                company_text = f"{i}. {source_prefix}<b>{name}</b>"
             content.append(Paragraph(company_text, styles['company']))
             
             if summary:
@@ -1291,6 +1534,103 @@ def save_change_for_url(
 print("✅ URL функции настроены")
 
 # ============================================================================
+# SUPABASE — TELEGRAM ПОСТЫ КОНКУРЕНТОВ
+# ============================================================================
+
+def save_competitor_tg_post(competitor_id: str, url_id: str, channel_username: str,
+                            post_data: dict, report_id: str) -> int:
+    """Upsert поста в competitor_tg_posts. Возвращает id записи или None."""
+    try:
+        data = {
+            'competitor_id': competitor_id,
+            'url_id': url_id,
+            'channel_username': channel_username,
+            'message_id': post_data['message_id'],
+            'post_url': post_data.get('post_url'),
+            'content_text': post_data.get('text', ''),
+            'title': extract_tg_title(post_data.get('text', '')),
+            'post_date': post_data['post_date'].isoformat() if post_data.get('post_date') else None,
+            'has_photo': post_data.get('has_photo', False),
+            'has_video': post_data.get('has_video', False),
+            'has_document': post_data.get('has_document', False),
+            'views_count': post_data.get('views', 0),
+            'content_hash': post_data.get('content_hash'),
+            'report_id': report_id,
+        }
+
+        result = supabase.table('competitor_tg_posts').upsert(
+            data, on_conflict='channel_username,message_id'
+        ).execute()
+
+        if result.data:
+            return result.data[0].get('id')
+        return None
+
+    except Exception as e:
+        print(f"   ⚠️ Ошибка save_competitor_tg_post: {str(e)[:100]}")
+        return None
+
+
+def get_existing_tg_content_hashes(competitor_id: str, days: int = 14) -> set:
+    """Возвращает set content_hash постов конкурента за последние N дней для дедупликации."""
+    try:
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        result = supabase.table('competitor_tg_posts') \
+            .select('content_hash') \
+            .eq('competitor_id', competitor_id) \
+            .gte('detected_at', since) \
+            .not_.is_('content_hash', 'null') \
+            .execute()
+
+        return {row['content_hash'] for row in (result.data or [])}
+
+    except Exception as e:
+        print(f"   ⚠️ Ошибка get_existing_tg_content_hashes: {str(e)[:100]}")
+        return set()
+
+
+def mark_tg_post_processed(post_id: int, title: str, summary: str,
+                           category: str, tags: list) -> bool:
+    """Обновляет пост после LLM-анализа."""
+    try:
+        data = {
+            'title': title,
+            'summary': summary,
+            'category': category,
+            'tags': tags or [],
+            'is_processed': True,
+        }
+
+        result = supabase.table('competitor_tg_posts') \
+            .update(data) \
+            .eq('id', post_id) \
+            .execute()
+
+        return bool(result.data)
+
+    except Exception as e:
+        print(f"   ⚠️ Ошибка mark_tg_post_processed: {str(e)[:100]}")
+        return False
+
+
+def update_competitor_url_last_message_id(url_id: str, last_message_id: int) -> bool:
+    """Обновляет last_message_id в competitor_urls для отслеживания позиции сканирования."""
+    try:
+        result = supabase.table('competitor_urls') \
+            .update({'last_message_id': last_message_id}) \
+            .eq('id', url_id) \
+            .execute()
+
+        return bool(result.data)
+
+    except Exception as e:
+        print(f"   ⚠️ Ошибка update_competitor_url_last_message_id: {str(e)[:100]}")
+        return False
+
+
+print("✅ TG функции настроены")
+
+# ============================================================================
 # СКАНИРОВАНИЕ URL
 # ============================================================================
 
@@ -1501,6 +1841,164 @@ async def scan_url_async(
 print("✅ Сканирование настроено")
 
 # ============================================================================
+# СКАНИРОВАНИЕ TELEGRAM КАНАЛОВ КОНКУРЕНТОВ
+# ============================================================================
+
+async def scan_tg_channels_async(
+    tg_tasks: List[Tuple[Dict, Dict]],
+    report_id: str,
+    browser_context,
+    http_session: aiohttp.ClientSession
+) -> List[Dict[str, Any]]:
+    """
+    Сканирует Telegram-каналы конкурентов (фаза 2).
+
+    Args:
+        tg_tasks: список кортежей (competitor, url_info) для TG-каналов
+        report_id: ID отчёта
+        browser_context: контекст браузера Playwright
+        http_session: HTTP-сессия для LLM-вызовов
+
+    Returns:
+        Список результатов с source_type='telegram'
+    """
+    if not tg_tasks:
+        return []
+
+    print(f"\n📱 Фаза 2: Сканирование {len(tg_tasks)} Telegram-каналов конкурентов")
+    results = []
+    tg_llm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM_TG)
+
+    for idx, (competitor, url_info) in enumerate(tg_tasks):
+        competitor_id = competitor['id']
+        competitor_name = competitor.get('name', 'Unknown')
+        url_id = url_info.get('id')
+        channel_url = url_info.get('url', '')
+        last_message_id = url_info.get('last_message_id')
+
+        # Извлекаем username из URL: https://t.me/channel_name -> channel_name
+        channel_username = channel_url.rstrip('/').split('/')[-1]
+        if not channel_username:
+            print(f"  ⚠️ Не удалось извлечь username из {channel_url}")
+            continue
+
+        print(f"\n  📡 [{idx+1}/{len(tg_tasks)}] @{channel_username} ({competitor_name})")
+
+        try:
+            # 1. Загружаем посты
+            posts = await fetch_tg_channel_posts(
+                channel_username, browser_context,
+                after_message_id=last_message_id,
+                max_posts=MAX_POSTS_PER_CHANNEL_COMPETITOR
+            )
+
+            if not posts:
+                print(f"    ℹ️ Нет новых постов")
+                continue
+
+            print(f"    📬 Получено {len(posts)} новых постов")
+
+            # 2. Дедупликация по content_hash
+            existing_hashes = get_existing_tg_content_hashes(competitor_id)
+            new_posts = []
+            skipped_dupes = 0
+            for post in posts:
+                if post.get('content_hash') and post['content_hash'] in existing_hashes:
+                    skipped_dupes += 1
+                    continue
+                new_posts.append(post)
+
+            if skipped_dupes:
+                print(f"    ⏭️ Пропущено дубликатов: {skipped_dupes}")
+
+            if not new_posts:
+                # Обновляем last_message_id даже если все дубликаты
+                max_msg_id = max(p['message_id'] for p in posts)
+                if url_id:
+                    update_competitor_url_last_message_id(url_id, max_msg_id)
+                continue
+
+            # 3. Сохраняем посты в БД
+            saved_posts = []
+            for post in new_posts:
+                post_id = save_competitor_tg_post(
+                    competitor_id, url_id, channel_username, post, report_id
+                )
+                if post_id:
+                    saved_posts.append((post_id, post))
+
+            print(f"    💾 Сохранено {len(saved_posts)} постов")
+
+            # 4. LLM-анализ (конкурентно с семафором)
+            async def analyze_and_mark(post_id: int, post: dict):
+                async with tg_llm_semaphore:
+                    text = post.get('text', '')
+                    analysis = await analyze_tg_post_async(competitor_name, text, http_session)
+
+                    title = extract_tg_title(text)
+                    summary = analysis.get('summary', '')
+                    category = analysis.get('category', CATEGORY_TECHNICAL)
+                    tags = analysis.get('tags', [])
+
+                    mark_tg_post_processed(post_id, title, summary, category, tags)
+
+                    return {
+                        'post_id': post_id,
+                        'analysis': analysis,
+                        'post': post,
+                    }
+
+            llm_tasks = [analyze_and_mark(pid, p) for pid, p in saved_posts]
+            llm_results = await asyncio.gather(*llm_tasks, return_exceptions=True)
+
+            # 5. Собираем результаты
+            meaningful_count = 0
+            for lr in llm_results:
+                if isinstance(lr, Exception):
+                    print(f"    ⚠️ Ошибка LLM: {lr}")
+                    continue
+
+                analysis = lr['analysis']
+                post = lr['post']
+
+                if analysis.get('is_meaningful'):
+                    meaningful_count += 1
+                    results.append({
+                        'competitor': competitor_name,
+                        'display_name': f"{competitor_name} (@{channel_username})",
+                        'url': channel_url,
+                        'url_id': url_id,
+                        'label': url_info.get('label', 'Telegram'),
+                        'category': analysis['category'],
+                        'summary': analysis['summary'],
+                        'tags': analysis.get('tags', []),
+                        'is_error': False,
+                        'is_meaningful': True,
+                        'source_type': 'telegram',
+                        'post_url': post.get('post_url'),
+                        'post_date': post.get('post_date'),
+                    })
+
+            print(f"    ✅ Важных постов: {meaningful_count}/{len(saved_posts)}")
+
+            # 6. Обновляем last_message_id
+            max_msg_id = max(p['message_id'] for p in posts)
+            if url_id:
+                update_competitor_url_last_message_id(url_id, max_msg_id)
+
+        except Exception as e:
+            print(f"    ❌ Ошибка сканирования @{channel_username}: {e}")
+
+        # Задержка между каналами
+        if idx < len(tg_tasks) - 1:
+            await asyncio.sleep(DELAY_BETWEEN_TG_CHANNELS)
+
+    print(f"\n📱 Telegram-каналы: {len(results)} важных постов найдено")
+    return results
+
+print("✅ TG сканирование настроено")
+
+# ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================================
 
@@ -1522,7 +2020,7 @@ async def run_monitoring_async():
     try:
         # Загружаем конкурентов вместе с их URL
         competitors = supabase.table('competitors').select(
-            '*, competitor_urls(id, url, label, is_active, sort_order)'
+            '*, competitor_urls(id, url, label, is_active, sort_order, source_type, last_message_id)'
         ).eq('is_active', True).execute().data
     except Exception as e:
         send_telegram_message(f"❌ Ошибка: {str(e)[:200]}")
@@ -1553,8 +2051,13 @@ async def run_monitoring_async():
                 }
                 scan_tasks_list.append((competitor, fallback_url_info))
 
-    total_urls = len(scan_tasks_list)
-    print(f"🌐 Конкурентов: {total_competitors}, URL для проверки: {total_urls}")
+    # Разделяем на веб-сайты и Telegram-каналы
+    website_tasks = [(c, u) for c, u in scan_tasks_list if u.get('source_type', 'website') == 'website']
+    tg_tasks = [(c, u) for c, u in scan_tasks_list if u.get('source_type') == 'telegram']
+
+    total_urls = len(website_tasks)
+    total_tg_channels = len(tg_tasks)
+    print(f"🌐 Конкурентов: {total_competitors}, URL: {total_urls}, TG-каналов: {total_tg_channels}")
 
     categorized_changes = {
         CATEGORY_PRODUCTS: [],
@@ -1594,14 +2097,14 @@ async def run_monitoring_async():
                 }
             )
 
-            # Batch-обработка для стабильности
+            # Фаза 1: Batch-обработка веб-сайтов
             results = []
-            total_batches = (len(scan_tasks_list) + BATCH_SIZE - 1) // BATCH_SIZE
+            total_batches = (len(website_tasks) + BATCH_SIZE - 1) // BATCH_SIZE
 
             for batch_idx in range(total_batches):
                 start_idx = batch_idx * BATCH_SIZE
-                end_idx = min(start_idx + BATCH_SIZE, len(scan_tasks_list))
-                batch = scan_tasks_list[start_idx:end_idx]
+                end_idx = min(start_idx + BATCH_SIZE, len(website_tasks))
+                batch = website_tasks[start_idx:end_idx]
 
                 tasks = [
                     scan_url_async(comp, url_info, summary_report_id, current_date, http_session, browser_context)
@@ -1616,6 +2119,11 @@ async def run_monitoring_async():
                 # Пауза между батчами (кроме последнего)
                 if batch_idx < total_batches - 1:
                     await asyncio.sleep(BATCH_DELAY)
+
+            # Фаза 2: Сканирование Telegram-каналов конкурентов
+            tg_results = await scan_tg_channels_async(
+                tg_tasks, summary_report_id, browser_context, http_session
+            )
 
             await browser_context.close()
             await browser.close()
@@ -1635,6 +2143,15 @@ async def run_monitoring_async():
             if category in categorized_changes:
                 categorized_changes[category].append(result)
 
+    # Добавляем результаты Telegram-каналов
+    tg_meaningful_count = 0
+    for tg_result in tg_results:
+        if tg_result.get('is_meaningful'):
+            tg_meaningful_count += 1
+            category = tg_result.get('category', CATEGORY_TECHNICAL)
+            if category in categorized_changes:
+                categorized_changes[category].append(tg_result)
+
     elapsed = int(time.time() - start_time)
     print(f"⏱️ Время: {elapsed} сек")
 
@@ -1651,7 +2168,7 @@ async def run_monitoring_async():
         duration_seconds=elapsed
     )
 
-    pdf_path = generate_pdf_report(current_date, total_competitors, total_urls, categorized_changes, failed_sites, duplicates_count, first_scans_count)
+    pdf_path = generate_pdf_report(current_date, total_competitors, total_urls, categorized_changes, failed_sites, duplicates_count, first_scans_count, tg_meaningful_count)
 
     errors_by_type = {}
     for site in failed_sites:
@@ -1679,12 +2196,14 @@ async def run_monitoring_async():
 
     success_rate = round(total_ok / total_urls * 100, 1) if total_urls > 0 else 0
 
+    tg_line = f"\n📱 TG-каналов: <b>{total_tg_channels}</b> (важных постов: {tg_meaningful_count})" if total_tg_channels > 0 else ""
+
     msg = f"""📊 <b>Мониторинг завершён</b>
 
 📅 Дата: {current_date}
 ⏱️ Время: {elapsed} сек
 🌐 Конкурентов: <b>{total_competitors}</b>
-🔗 URL проверено: <b>{total_urls}</b>
+🔗 URL проверено: <b>{total_urls}</b>{tg_line}
 
 ✅ <b>Успешно: {total_ok}</b> ({success_rate}%)
 
