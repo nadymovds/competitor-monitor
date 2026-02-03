@@ -17,7 +17,6 @@ import time
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
-import trafilatura
 
 # Импорты для Playwright
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
@@ -73,49 +72,94 @@ DEFAULT_CSS_CONFIG = {
 }
 
 
-def extract_with_trafilatura(html: str, base_url: str) -> list:
-    """Извлечение новостей через trafilatura (fallback)."""
+async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSession) -> list:
+    """Извлечение новостей через LLM (fallback когда CSS не работает)."""
     try:
-        # Извлекаем основной контент
-        extracted = trafilatura.extract(
-            html,
-            include_comments=False,
-            include_tables=False,
-            output_format='json',
-            with_metadata=True
-        )
+        # Очищаем HTML от служебных элементов
+        soup = BeautifulSoup(html, 'lxml')
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'noscript', 'iframe', 'svg', 'form']):
+            tag.decompose()
 
-        if not extracted:
+        # Берём текстовое содержимое (ограничиваем размер)
+        text_content = soup.get_text(separator='\n', strip=True)[:10000]
+
+        if len(text_content) < 200:
             return []
 
-        data = json.loads(extracted)
+        prompt = f"""Проанализируй текст веб-страницы и извлеки из него список новостей или статей.
 
-        title = data.get('title', '')
-        text = data.get('text', '')[:5000]
-        date_str = data.get('date')
+ТЕКСТ СТРАНИЦЫ:
+{text_content}
 
-        if not title and not text:
+ЗАДАЧА: Найди все новости/статьи на странице. Для каждой извлеки заголовок и краткое описание.
+
+ВАЖНО:
+- Игнорируй служебные тексты (формы входа, регистрации, восстановления пароля)
+- Игнорируй меню навигации, футеры, рекламу
+- Извлекай только реальные новости/статьи о транспорте, логистике, ГЛОНАСС/GPS
+
+ФОРМАТ ОТВЕТА (только JSON, без пояснений):
+{{
+    "news": [
+        {{"title": "Заголовок новости 1", "text": "Краткое описание (до 500 символов)"}},
+        {{"title": "Заголовок новости 2", "text": "Краткое описание"}}
+    ]
+}}
+
+Если новостей нет — верни: {{"news": []}}
+"""
+
+        response = await call_llm_async(prompt, session, max_tokens=2000)
+
+        if not response:
             return []
 
-        # Парсинг даты
-        post_date = None
-        if date_str:
-            post_date = parse_date_from_text(date_str)
+        # Парсим JSON ответ
+        response = response.strip()
+        response = re.sub(r'^```json?\s*', '', response)
+        response = re.sub(r'\s*```$', '', response)
 
-        # Хэш для дедупликации
-        content_for_hash = f"{title}\n{text}"
-        content_hash = hashlib.sha256(content_for_hash.encode()).hexdigest()
+        data = json.loads(response)
+        news_list = data.get('news', [])
 
-        return [{
-            'title': title[:500],
-            'text': text,
-            'post_date': post_date,
-            'article_url': base_url,
-            'content_hash': content_hash,
-        }]
+        if not news_list:
+            return []
 
+        result = []
+        for item in news_list[:MAX_NEWS_PER_WEBSITE]:
+            title = item.get('title', '').strip()
+            text = item.get('text', '').strip()
+
+            if not title or len(text) < 30:
+                continue
+
+            # Проверка релевантности (транспорт/логистика)
+            combined = f"{title} {text}".lower()
+            keywords = ['транспорт', 'логистик', 'перевоз', 'груз', 'доставк', 'склад',
+                       'глонасс', 'gps', 'навигац', 'мониторинг', 'трекер', 'автопарк',
+                       'жд', 'железнодорож', 'авиа', 'морск', 'порт', 'дорог']
+            if not any(kw in combined for kw in keywords):
+                continue
+
+            # Формируем хэш для дедупликации
+            content_for_hash = f"{title}\n{text}"
+            content_hash = hashlib.sha256(content_for_hash.encode()).hexdigest()
+
+            result.append({
+                'title': title[:500],
+                'text': text[:2000],
+                'post_date': None,
+                'article_url': base_url,
+                'content_hash': content_hash,
+            })
+
+        return result
+
+    except json.JSONDecodeError as e:
+        print(f"    ⚠️ LLM вернул невалидный JSON: {e}")
+        return []
     except Exception as e:
-        print(f"    ⚠️ Trafilatura error: {e}")
+        print(f"    ⚠️ LLM extraction error: {e}")
         return []
 
 
@@ -603,7 +647,7 @@ async def fetch_website_news_page(url: str, browser_context) -> str:
                 pass
 
 
-def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None) -> list:
+async def parse_news_items_from_html(html: str, base_url: str, session: aiohttp.ClientSession, css_config: dict = None) -> list:
     """Парсинг новостей из HTML по CSS-селекторам.
 
     Возвращает список: [{title, text, date, article_url, content_hash}, ...]
@@ -631,14 +675,14 @@ def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None
         all_tags = set(tag.name for tag in soup.find_all()[:50] if tag.name)
         print(f"  ℹ️ Теги в HTML: {sorted(all_tags)[:15]}")
 
-        # Fallback: trafilatura
-        print(f"  🔄 Пробуем trafilatura...")
-        fallback_items = extract_with_trafilatura(html, base_url)
-        if fallback_items:
-            print(f"  ✅ Trafilatura извлёк {len(fallback_items)} элемент(ов)")
-            return fallback_items
+        # Fallback: LLM
+        print(f"  🤖 Пробуем LLM...")
+        llm_items = await extract_with_llm(html, base_url, session)
+        if llm_items:
+            print(f"  ✅ LLM извлёк {len(llm_items)} элемент(ов)")
+            return llm_items
 
-        print(f"  ❌ Trafilatura не смог извлечь контент")
+        print(f"  ❌ LLM не смог извлечь контент")
         return []
 
     from urllib.parse import urljoin
@@ -717,7 +761,7 @@ def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None
     return news_items
 
 
-async def scan_website_source(source: dict, browser_context, existing_hashes: set) -> list:
+async def scan_website_source(source: dict, browser_context, session: aiohttp.ClientSession, existing_hashes: set) -> list:
     """Сканирование одного веб-источника новостей.
 
     Возвращает список новых постов для сохранения.
@@ -734,7 +778,7 @@ async def scan_website_source(source: dict, browser_context, existing_hashes: se
         return []
     print(f"  ✅ HTML загружен: {len(html)} символов")
 
-    news_items = parse_news_items_from_html(html, url, css_config)
+    news_items = await parse_news_items_from_html(html, url, session, css_config)
     print(f"  📰 Найдено элементов: {len(news_items)}")
 
     # Фильтрация дубликатов по content_hash
@@ -1435,7 +1479,7 @@ async def run_news_monitoring_async():
                     print(f"\n🌐 [{i}/{len(web_sources)}] Сканирование {source_title}...")
 
                     try:
-                        new_items = await scan_website_source(source, browser_context, existing_hashes)
+                        new_items = await scan_website_source(source, browser_context, http_session, existing_hashes)
 
                         if new_items:
                             saved_count = 0
