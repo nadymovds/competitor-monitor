@@ -572,10 +572,16 @@ def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None
     items = []
     for selector in item_selectors:
         if selector:
-            items.extend(soup.select(selector))
+            found = soup.select(selector)
+            if found:
+                print(f"    ✓ '{selector}': найдено {len(found)}")
+            items.extend(found)
 
     if not items:
-        print(f"  ⚠️ Не найдены элементы новостей по селекторам: {config.get('item')}")
+        print(f"  ⚠️ Не найдены элементы по селекторам: {config.get('item')}")
+        # Подсказка по структуре HTML
+        all_tags = set(tag.name for tag in soup.find_all()[:50] if tag.name)
+        print(f"  ℹ️ Теги в HTML: {sorted(all_tags)[:15]}")
         return []
 
     from urllib.parse import urljoin
@@ -604,6 +610,7 @@ def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None
 
             # Если заголовок и текст пустые — пропускаем
             if not title and not text:
+                print(f"    ⏭️ Пропуск элемента: title и text пустые")
                 continue
 
             # Извлечение даты
@@ -666,7 +673,9 @@ async def scan_website_source(source: dict, browser_context, existing_hashes: se
 
     html = await fetch_website_news_page(url, browser_context)
     if not html:
+        print(f"  ❌ Не удалось загрузить страницу: {url}")
         return []
+    print(f"  ✅ HTML загружен: {len(html)} символов")
 
     news_items = parse_news_items_from_html(html, url, css_config)
     print(f"  📰 Найдено элементов: {len(news_items)}")
@@ -1238,6 +1247,11 @@ async def run_news_monitoring_async():
     web_sources = [s for s in all_sources if s.get('source_type') == 'website']
 
     print(f"📋 Загружено источников: {len(all_sources)} (📱 TG: {len(tg_channels)}, 🌐 Web: {len(web_sources)})")
+
+    if web_sources:
+        print(f"  🌐 Веб-источники ({len(web_sources)}):")
+        for s in web_sources:
+            print(f"    - {s.get('title')}: {s.get('url')}, css_config: {bool(s.get('css_config'))}")
 
     # 4. Загрузка категорий из БД
     categories = get_categories()
