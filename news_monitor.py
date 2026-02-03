@@ -967,14 +967,14 @@ async def categorize_post(post_text: str, categories: list, session: aiohttp.Cli
 
 
 async def generate_summary(post_text: str, session: aiohttp.ClientSession) -> str:
-    """Генерация краткого содержания поста (1-2 предложения, до 300 символов)."""
+    """Генерация краткого содержания поста (1-2 предложения, до 250 символов)."""
     prompt = f"""Напиши краткое содержание следующего поста из Telegram-канала о транспортно-логистической отрасли.
 
 ТЕКСТ ПОСТА:
 {post_text[:2000]}
 
 ПРАВИЛА:
-- 1-2 предложения, максимум 300 символов
+- 1-2 предложения, максимум 250 символов
 - Только на русском языке
 - Фокус на ключевых фактах: что произошло, кто участвует, какой результат
 - Не используй фразы "В посте говорится", "Автор сообщает" и подобные
@@ -990,8 +990,8 @@ async def generate_summary(post_text: str, session: aiohttp.ClientSession) -> st
     summary = re.sub(r'^```.*?```$', '', summary, flags=re.DOTALL).strip()
     summary = ' '.join(summary.split())
 
-    if len(summary) > 300:
-        summary = summary[:297] + "..."
+    if len(summary) > 250:
+        summary = summary[:247] + "..."
 
     return summary
 
@@ -1129,9 +1129,9 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
             rest_lines = content_lines[start_idx:]
             if rest_lines:
                 rest = '\n'.join(rest_lines)
-                p_summary = rest[:500] + ('...' if len(rest) > 500 else '')
+                p_summary = rest[:250] + ('...' if len(rest) > 250 else '')
             elif len(p_content) > len(p_title) + 20:
-                p_summary = p_content[:500] + ('...' if len(p_content) > 500 else '')
+                p_summary = p_content[:250] + ('...' if len(p_content) > 250 else '')
         
         cleaned_posts.append({**post, 'title': p_title, 'summary': p_summary})
 
