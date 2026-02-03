@@ -72,8 +72,19 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
 
   // Мета-строка
   const metaParts = []
-  if (post.channel?.username) metaParts.push(`@${post.channel.username}`)
-  if (post.channel?.title && post.channel.title !== post.channel.username) metaParts.push(post.channel.title)
+  const sourceType = post.source_type || post.channel?.source_type || 'telegram'
+  const sourceIcon = sourceType === 'website' ? '🌐' : '📱'
+
+  if (sourceType === 'website') {
+    // Для веб-источника показываем title
+    if (post.channel?.title) metaParts.push(`${sourceIcon} ${post.channel.title}`)
+    else metaParts.push(sourceIcon)
+  } else {
+    // Для Telegram показываем @username
+    if (post.channel?.username) metaParts.push(`${sourceIcon} @${post.channel.username}`)
+    else if (post.channel?.title) metaParts.push(`${sourceIcon} ${post.channel.title}`)
+    else metaParts.push(sourceIcon)
+  }
   if (post.post_date) metaParts.push(formatDate(post.post_date))
   const views = formatViews(post.views_count)
   if (views) metaParts.push(`${views} 👁`)

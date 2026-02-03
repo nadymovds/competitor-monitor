@@ -8,11 +8,17 @@ const dateRangeLabels = {
   custom: 'Свой...',
 }
 
+const sourceTypeLabels = {
+  telegram: '📱 Telegram',
+  website: '🌐 Веб-сайты',
+}
+
 export default function NewsFilters({
   categories,
   channels,
   selectedCategories,
   selectedChannels,
+  selectedSourceTypes = [],
   dateRange,
   customDateFrom,
   customDateTo,
@@ -25,12 +31,12 @@ export default function NewsFilters({
     const next = selectedCategories.includes(id)
       ? selectedCategories.filter(c => c !== id)
       : [...selectedCategories, id]
-    onChange({ categories: next, channels: selectedChannels, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: next, channels: selectedChannels, sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
   }
 
   const selectAllCategories = () => {
     hapticFeedback('light')
-    onChange({ categories: [], channels: selectedChannels, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: [], channels: selectedChannels, sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
   }
 
   const toggleChannel = (id) => {
@@ -38,23 +44,37 @@ export default function NewsFilters({
     const next = selectedChannels.includes(id)
       ? selectedChannels.filter(c => c !== id)
       : [...selectedChannels, id]
-    onChange({ categories: selectedCategories, channels: next, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: next, sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
   }
 
   const selectAllChannels = () => {
     hapticFeedback('light')
-    onChange({ categories: selectedCategories, channels: [], dateRange, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: [], sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
+  }
+
+  const toggleSourceType = (type) => {
+    hapticFeedback('light')
+    const next = selectedSourceTypes.includes(type)
+      ? selectedSourceTypes.filter(t => t !== type)
+      : [...selectedSourceTypes, type]
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: next, dateRange, customDateFrom, customDateTo })
+  }
+
+  const selectAllSourceTypes = () => {
+    hapticFeedback('light')
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: [], dateRange, customDateFrom, customDateTo })
   }
 
   const changeDateRange = (value) => {
     hapticFeedback('light')
-    onChange({ categories: selectedCategories, channels: selectedChannels, dateRange: value, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: selectedSourceTypes, dateRange: value, customDateFrom, customDateTo })
   }
 
   const changeCustomDate = (field, value) => {
     onChange({
       categories: selectedCategories,
       channels: selectedChannels,
+      sourceTypes: selectedSourceTypes,
       dateRange,
       customDateFrom: field === 'from' ? value : customDateFrom,
       customDateTo: field === 'to' ? value : customDateTo,
@@ -68,6 +88,10 @@ export default function NewsFilters({
       const names = categories
         .filter(c => selectedCategories.includes(c.id))
         .map(c => c.name)
+      parts.push(names.join(', '))
+    }
+    if (selectedSourceTypes.length > 0) {
+      const names = selectedSourceTypes.map(t => sourceTypeLabels[t] || t)
       parts.push(names.join(', '))
     }
     if (selectedChannels.length > 0) {
@@ -117,6 +141,31 @@ export default function NewsFilters({
                     }
                   >
                     <span style={{ color: active ? cat.color : '#6b7280' }}>●</span> {cat.name}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Тип источника */}
+          <div style={{ marginTop: 10 }}>
+            <div style={styles.sectionLabel}>Тип источника</div>
+            <div style={styles.pillRow}>
+              <button
+                onClick={selectAllSourceTypes}
+                style={selectedSourceTypes.length === 0 ? styles.pillActive : styles.pill}
+              >
+                Все
+              </button>
+              {Object.entries(sourceTypeLabels).map(([type, label]) => {
+                const active = selectedSourceTypes.includes(type)
+                return (
+                  <button
+                    key={type}
+                    onClick={() => toggleSourceType(type)}
+                    style={active ? styles.pillActive : styles.pill}
+                  >
+                    {label}
                   </button>
                 )
               })}

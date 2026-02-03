@@ -36,8 +36,14 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   const [showNewChannelForm, setShowNewChannelForm] = useState(false)
   const [newChUsername, setNewChUsername] = useState('')
   const [newChTitle, setNewChTitle] = useState('')
+  const [newChSourceType, setNewChSourceType] = useState('telegram')
+  const [newChUrl, setNewChUrl] = useState('')
+  const [newChCssConfig, setNewChCssConfig] = useState('')
   const [editChUsername, setEditChUsername] = useState('')
   const [editChTitle, setEditChTitle] = useState('')
+  const [editChSourceType, setEditChSourceType] = useState('telegram')
+  const [editChUrl, setEditChUrl] = useState('')
+  const [editChCssConfig, setEditChCssConfig] = useState('')
 
   const isAdmin = user?.role === 'admin'
   const soon = () => { hapticFeedback('warning'); showAlert('Эта функция скоро будет доступна') }
@@ -261,8 +267,11 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   const handleEditChannel = (ch) => {
     hapticFeedback('light')
     setEditingChannel(ch)
-    setEditChUsername(ch.username)
+    setEditChUsername(ch.username || '')
     setEditChTitle(ch.title || '')
+    setEditChSourceType(ch.source_type || 'telegram')
+    setEditChUrl(ch.url || '')
+    setEditChCssConfig(ch.css_config || '')
   }
 
   const handleCancelEditChannel = () => {
@@ -270,26 +279,42 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     setEditingChannel(null)
     setEditChUsername('')
     setEditChTitle('')
+    setEditChSourceType('telegram')
+    setEditChUrl('')
+    setEditChCssConfig('')
   }
 
   const handleSaveChannel = async () => {
-    if (!editChUsername.trim()) {
-      hapticFeedback('error')
-      showAlert('Введите username канала')
-      return
+    if (editChSourceType === 'telegram') {
+      if (!editChUsername.trim()) {
+        hapticFeedback('error')
+        showAlert('Введите username канала')
+        return
+      }
+    } else {
+      if (!editChUrl.trim()) {
+        hapticFeedback('error')
+        showAlert('Введите URL источника')
+        return
+      }
     }
 
     hapticFeedback('light')
     setSaving(true)
     try {
       const updated = await updateChannel(editingChannel.id, {
-        username: editChUsername.trim(),
-        title: editChTitle.trim() || null
+        username: editChSourceType === 'telegram' ? editChUsername.trim() : null,
+        title: editChTitle.trim() || null,
+        url: editChSourceType === 'website' ? editChUrl.trim() : null,
+        cssConfig: editChSourceType === 'website' && editChCssConfig.trim() ? editChCssConfig.trim() : null
       })
       setChannels(prev => prev.map(c => c.id === updated.id ? updated : c))
       setEditingChannel(null)
       setEditChUsername('')
       setEditChTitle('')
+      setEditChSourceType('telegram')
+      setEditChUrl('')
+      setEditChCssConfig('')
       hapticFeedback('success')
     } catch (err) {
       console.error('Error updating channel:', err)
@@ -302,7 +327,8 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
 
   const handleDeleteChannel = async (ch) => {
     hapticFeedback('warning')
-    const confirmed = await showConfirm(`Удалить канал "@${ch.username}"? Все новости этого канала будут удалены.`)
+    const channelName = ch.source_type === 'website' ? ch.title || ch.url : `@${ch.username}`
+    const confirmed = await showConfirm(`Удалить источник "${channelName}"? Все новости этого источника будут удалены.`)
     if (!confirmed) return
 
     setSaving(true)
@@ -321,23 +347,37 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   }
 
   const handleCreateChannel = async () => {
-    if (!newChUsername.trim()) {
-      hapticFeedback('error')
-      showAlert('Введите username канала')
-      return
+    if (newChSourceType === 'telegram') {
+      if (!newChUsername.trim()) {
+        hapticFeedback('error')
+        showAlert('Введите username канала')
+        return
+      }
+    } else {
+      if (!newChUrl.trim()) {
+        hapticFeedback('error')
+        showAlert('Введите URL источника')
+        return
+      }
     }
 
     hapticFeedback('light')
     setSaving(true)
     try {
       const created = await createChannel({
-        username: newChUsername.trim(),
-        title: newChTitle.trim() || null
+        username: newChSourceType === 'telegram' ? newChUsername.trim() : null,
+        title: newChTitle.trim() || null,
+        sourceType: newChSourceType,
+        url: newChSourceType === 'website' ? newChUrl.trim() : null,
+        cssConfig: newChSourceType === 'website' && newChCssConfig.trim() ? newChCssConfig.trim() : null
       })
       setChannels(prev => [...prev, created])
       setShowNewChannelForm(false)
       setNewChUsername('')
       setNewChTitle('')
+      setNewChSourceType('telegram')
+      setNewChUrl('')
+      setNewChCssConfig('')
       hapticFeedback('success')
     } catch (err) {
       console.error('Error creating channel:', err)
@@ -591,29 +631,67 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
         </Section>
       )}
 
-      {/* Telegram-каналы — только для админов */}
+      {/* Источники новостей — только для админов */}
       {isAdmin && (
-        <Section title="Telegram-каналы" count={channels.length}>
+        <Section title="Источники новостей" count={channels.length}>
           {channels.map((ch, i) => (
             <div key={ch.id}>
               {editingChannel?.id === ch.id ? (
                 <div style={{ padding: 16, borderBottom: i < channels.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ position: 'relative' }}>
-                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
-                      <input
-                        type="text"
-                        value={editChUsername}
-                        onChange={(e) => setEditChUsername(e.target.value.replace(/^@/, ''))}
-                        placeholder="username"
-                        style={{ ...inputStyle, paddingLeft: 28 }}
-                      />
+                    <div>
+                      <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Тип источника</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={() => { hapticFeedback('light'); setEditChSourceType('telegram') }}
+                          style={editChSourceType === 'telegram' ? sourceTypeBtnActive : sourceTypeBtn}
+                        >
+                          📱 Telegram
+                        </button>
+                        <button
+                          onClick={() => { hapticFeedback('light'); setEditChSourceType('website') }}
+                          style={editChSourceType === 'website' ? sourceTypeBtnActive : sourceTypeBtn}
+                        >
+                          🌐 Веб-сайт
+                        </button>
+                      </div>
                     </div>
+
+                    {editChSourceType === 'telegram' ? (
+                      <div style={{ position: 'relative' }}>
+                        <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
+                        <input
+                          type="text"
+                          value={editChUsername}
+                          onChange={(e) => setEditChUsername(e.target.value.replace(/^@/, ''))}
+                          placeholder="username"
+                          style={{ ...inputStyle, paddingLeft: 28 }}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          value={editChUrl}
+                          onChange={(e) => setEditChUrl(e.target.value)}
+                          placeholder="https://example.com/news"
+                          style={inputStyle}
+                        />
+                        <input
+                          type="text"
+                          value={editChCssConfig}
+                          onChange={(e) => setEditChCssConfig(e.target.value)}
+                          placeholder="CSS-селекторы (JSON, необязательно)"
+                          style={inputStyle}
+                        />
+                      </>
+                    )}
+
                     <input
                       type="text"
                       value={editChTitle}
                       onChange={(e) => setEditChTitle(e.target.value)}
-                      placeholder="Название канала (необязательно)"
+                      placeholder="Название (необязательно)"
                       style={inputStyle}
                     />
 
@@ -640,9 +718,19 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
                     >
                       {ch.is_active && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
                     </button>
+                    <span style={{ fontSize: 14, flexShrink: 0 }}>{ch.source_type === 'website' ? '🌐' : '📱'}</span>
                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>@{ch.username}</span>
-                      {ch.title && <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>{ch.title}</span>}
+                      {ch.source_type === 'website' ? (
+                        <>
+                          <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>{ch.title || ch.url}</span>
+                          {ch.title && ch.url && <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>{ch.url}</span>}
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>@{ch.username}</span>
+                          {ch.title && <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>{ch.title}</span>}
+                        </>
+                      )}
                     </div>
                   </div>
                   <button
@@ -659,29 +747,67 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
           {showNewChannelForm && (
             <div style={{ padding: 16, borderTop: channels.length > 0 ? '1px solid #2a2a3a' : 'none' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
-                  <input
-                    type="text"
-                    value={newChUsername}
-                    onChange={(e) => setNewChUsername(e.target.value.replace(/^@/, ''))}
-                    placeholder="username"
-                    style={{ ...inputStyle, paddingLeft: 28 }}
-                  />
+                <div>
+                  <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Тип источника</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={() => { hapticFeedback('light'); setNewChSourceType('telegram') }}
+                      style={newChSourceType === 'telegram' ? sourceTypeBtnActive : sourceTypeBtn}
+                    >
+                      📱 Telegram
+                    </button>
+                    <button
+                      onClick={() => { hapticFeedback('light'); setNewChSourceType('website') }}
+                      style={newChSourceType === 'website' ? sourceTypeBtnActive : sourceTypeBtn}
+                    >
+                      🌐 Веб-сайт
+                    </button>
+                  </div>
                 </div>
+
+                {newChSourceType === 'telegram' ? (
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
+                    <input
+                      type="text"
+                      value={newChUsername}
+                      onChange={(e) => setNewChUsername(e.target.value.replace(/^@/, ''))}
+                      placeholder="username"
+                      style={{ ...inputStyle, paddingLeft: 28 }}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={newChUrl}
+                      onChange={(e) => setNewChUrl(e.target.value)}
+                      placeholder="https://example.com/news"
+                      style={inputStyle}
+                    />
+                    <input
+                      type="text"
+                      value={newChCssConfig}
+                      onChange={(e) => setNewChCssConfig(e.target.value)}
+                      placeholder="CSS-селекторы (JSON, необязательно)"
+                      style={inputStyle}
+                    />
+                  </>
+                )}
+
                 <input
                   type="text"
                   value={newChTitle}
                   onChange={(e) => setNewChTitle(e.target.value)}
-                  placeholder="Название канала (необязательно)"
+                  placeholder="Название (необязательно)"
                   style={inputStyle}
                 />
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                   <button onClick={handleCreateChannel} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                    {saving ? 'Создание...' : 'Создать канал'}
+                    {saving ? 'Создание...' : 'Создать источник'}
                   </button>
-                  <button onClick={() => { hapticFeedback('light'); setShowNewChannelForm(false); setNewChUsername(''); setNewChTitle('') }} disabled={saving} style={btnSecondary}>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewChannelForm(false); setNewChUsername(''); setNewChTitle(''); setNewChSourceType('telegram'); setNewChUrl(''); setNewChCssConfig('') }} disabled={saving} style={btnSecondary}>
                     Отмена
                   </button>
                 </div>
@@ -694,7 +820,7 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
               onClick={() => { hapticFeedback('light'); setShowNewChannelForm(true); setEditingChannel(null) }}
               style={addBtnStyle}
             >
-              + Добавить канал
+              + Добавить источник
             </button>
           )}
         </Section>
@@ -789,6 +915,28 @@ const addBtnStyle = {
   color: '#3b82f6',
   fontSize: 14,
   fontWeight: 500,
+  cursor: 'pointer'
+}
+
+const sourceTypeBtn = {
+  padding: '8px 16px',
+  fontSize: 14,
+  fontWeight: 500,
+  backgroundColor: '#252532',
+  color: '#9ca3af',
+  border: 'none',
+  borderRadius: 8,
+  cursor: 'pointer'
+}
+
+const sourceTypeBtnActive = {
+  padding: '8px 16px',
+  fontSize: 14,
+  fontWeight: 500,
+  backgroundColor: '#3b82f620',
+  color: '#3b82f6',
+  border: 'none',
+  borderRadius: 8,
   cursor: 'pointer'
 }
 

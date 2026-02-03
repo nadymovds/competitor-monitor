@@ -12,7 +12,7 @@ export async function getNewsCategories() {
 export async function getNewsChannels() {
   const { data, error } = await supabase
     .from('news_channels')
-    .select('id, username, title, is_active, last_scan_at')
+    .select('id, username, title, is_active, last_scan_at, source_type, url, css_config')
     .eq('is_active', true)
     .order('title')
   if (error) throw error
@@ -22,22 +22,27 @@ export async function getNewsChannels() {
 export async function getAllNewsChannels() {
   const { data, error } = await supabase
     .from('news_channels')
-    .select('id, username, title, is_active')
+    .select('id, username, title, is_active, source_type, url, css_config')
     .order('title')
   if (error) throw error
   return data
 }
 
-export async function getNewsPosts({ categories = [], channels = [], dateFrom, dateTo, limit = 20, offset = 0 } = {}) {
+export async function getNewsPosts({ categories = [], channels = [], sourceTypes = [], dateFrom, dateTo, limit = 20, offset = 0 } = {}) {
   const categoryJoin = categories.length > 0
     ? 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
     : 'news_post_categories(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
+
+  // Use inner join when filtering by source_type
+  const channelsJoin = sourceTypes.length > 0
+    ? 'news_channels!inner(id, username, title, source_type)'
+    : 'news_channels(id, username, title, source_type)'
 
   let query = supabase
     .from('news_posts')
     .select(`
       *,
-      news_channels(id, username, title),
+      ${channelsJoin},
       ${categoryJoin}
     `, { count: 'exact' })
     .eq('is_processed', true)
@@ -48,6 +53,10 @@ export async function getNewsPosts({ categories = [], channels = [], dateFrom, d
 
   if (channels.length > 0) {
     query = query.in('channel_id', channels)
+  }
+
+  if (sourceTypes.length > 0) {
+    query = query.in('news_channels.source_type', sourceTypes)
   }
 
   if (dateFrom) {
@@ -68,6 +77,7 @@ export async function getNewsPosts({ categories = [], channels = [], dateFrom, d
   const posts = data.map(post => ({
     ...post,
     channel: post.news_channels,
+    source_type: post.news_channels?.source_type || 'telegram',
     categories: (post.news_post_categories || [])
       .map(pc => ({
         ...pc.news_categories,
@@ -197,25 +207,37 @@ export async function deleteCategory(categoryId) {
   if (error) throw error
 }
 
-export async function createChannel({ username, title }) {
-  const cleanUsername = username.replace(/^@/, '')
+export async function createChannel({ username, title, sourceType = 'telegram', url, cssConfig }) {
+  const insertData = {
+    title: title || null,
+    source_type: sourceType
+  }
+
+  if (sourceType === 'telegram') {
+    insertData.username = username?.replace(/^@/, '') || null
+  } else {
+    // website
+    insertData.url = url || null
+    insertData.css_config = cssConfig || null
+    insertData.username = null
+  }
+
   const { data, error } = await supabase
     .from('news_channels')
-    .insert({
-      username: cleanUsername,
-      title: title || null
-    })
+    .insert(insertData)
     .select()
     .single()
   if (error) throw error
   return data
 }
 
-export async function updateChannel(channelId, { username, title, isActive }) {
+export async function updateChannel(channelId, { username, title, isActive, url, cssConfig }) {
   const updates = { updated_at: new Date().toISOString() }
-  if (username !== undefined) updates.username = username.replace(/^@/, '')
+  if (username !== undefined) updates.username = username?.replace(/^@/, '') || null
   if (title !== undefined) updates.title = title
   if (isActive !== undefined) updates.is_active = isActive
+  if (url !== undefined) updates.url = url
+  if (cssConfig !== undefined) updates.css_config = cssConfig
 
   const { data, error } = await supabase
     .from('news_channels')

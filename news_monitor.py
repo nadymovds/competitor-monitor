@@ -57,6 +57,20 @@ MAX_POSTS_IN_DIGEST = 100
 MAX_CONCURRENT_LLM_NEWS = 3
 DEFAULT_DIGEST_PERIOD_DAYS = 7
 
+# === ВЕБ-СКАНИРОВАНИЕ ===
+WEB_PLAYWRIGHT_TIMEOUT = 45000
+WEB_REQUEST_TIMEOUT = 45
+MAX_NEWS_PER_WEBSITE = 20
+DELAY_BETWEEN_WEBSITES = 3
+
+DEFAULT_CSS_CONFIG = {
+    "item": "article, .news-item, .post, .news, .entry",
+    "title": "h1, h2, h3, .title, .headline",
+    "text": "p, .content, .excerpt, .summary, .description",
+    "date": "time, .date, [datetime], .published, .timestamp",
+    "link": "a[href]"
+}
+
 # === РОТАЦИЯ USER-AGENT ===
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -217,6 +231,94 @@ def clean_text_for_pdf(text: str) -> str:
     return text.strip()
 
 
+def clean_html_content_for_web(soup: BeautifulSoup) -> str:
+    """Очистка HTML от служебных элементов для веб-сайтов."""
+    for element in soup(['script', 'style', 'nav', 'footer', 'header', 'noscript', 'iframe', 'aside']):
+        element.decompose()
+    text = soup.get_text(separator=' ', strip=True)
+    return ' '.join(text.split())
+
+
+def is_protection_page(content: str) -> bool:
+    """Детекция страниц защиты от ботов (Cloudflare, CAPTCHA и др.)."""
+    patterns = [
+        'cloudflare', 'ray id', 'checking your browser', 'ddos protection',
+        'just a moment', 'attention required', 'security check',
+        'recaptcha', 'hcaptcha', 'verifying you are human',
+        'защита от ботов', 'проверка браузера',
+    ]
+    content_lower = content.lower()
+    for pattern in patterns:
+        if pattern in content_lower:
+            return True
+    return False
+
+
+# === ПАРСИНГ ДАТ ИЗ ТЕКСТА ===
+MONTHS_RU = {
+    'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
+    'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
+    'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12,
+    'янв': 1, 'фев': 2, 'мар': 3, 'апр': 4,
+    'май': 5, 'июн': 6, 'июл': 7, 'авг': 8,
+    'сен': 9, 'окт': 10, 'ноя': 11, 'дек': 12,
+}
+
+
+def parse_date_from_text(date_str: str) -> datetime | None:
+    """Парсинг дат из текста: '01.02.2025', '15 января 2025', 'вчера', ISO-формат."""
+    if not date_str:
+        return None
+
+    date_str = date_str.strip().lower()
+    now = datetime.now()
+
+    # Относительные даты
+    if 'сегодня' in date_str:
+        return now.replace(hour=12, minute=0, second=0, microsecond=0)
+    if 'вчера' in date_str:
+        return (now - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+
+    # ISO-формат: 2025-01-15T10:30:00
+    try:
+        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+    except ValueError:
+        pass
+
+    # Формат DD.MM.YYYY или DD/MM/YYYY
+    match = re.search(r'(\d{1,2})[./](\d{1,2})[./](\d{4})', date_str)
+    if match:
+        try:
+            day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            return datetime(year, month, day, 12, 0, 0)
+        except ValueError:
+            pass
+
+    # Формат YYYY-MM-DD
+    match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
+    if match:
+        try:
+            year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            return datetime(year, month, day, 12, 0, 0)
+        except ValueError:
+            pass
+
+    # Русский формат: "15 января 2025" или "15 янв 2025"
+    for month_name, month_num in MONTHS_RU.items():
+        if month_name in date_str:
+            match = re.search(rf'(\d{{1,2}})\s*{month_name}[а-я]*\s*(\d{{4}})?', date_str)
+            if match:
+                try:
+                    day = int(match.group(1))
+                    year = int(match.group(2)) if match.group(2) else now.year
+                    return datetime(year, month_num, day, 12, 0, 0)
+                except ValueError:
+                    pass
+            break
+
+    return None
+
+
 # ============================================================================
 # ПАРСИНГ КАНАЛОВ (t.me/s/)
 # ============================================================================
@@ -371,6 +473,215 @@ async def fetch_channel_posts(channel_username: str, browser_context,
     all_posts.sort(key=lambda p: p['message_id'])
     return all_posts[:max_posts]
 
+
+# ============================================================================
+# ПАРСИНГ ВЕБ-САЙТОВ
+# ============================================================================
+
+async def fetch_website_news_page(url: str, browser_context) -> str:
+    """Загрузка HTML страницы веб-сайта через Playwright со stealth-режимом."""
+    async with browser_semaphore:
+        page = await browser_context.new_page()
+        try:
+            # Stealth-настройки
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                window.chrome = { runtime: {} };
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            """)
+
+            # Блокировка тяжёлых медиа и аналитики
+            await page.route("**/*.{mp4,webm,mp3,wav,avi,mov,flv}", lambda route: route.abort())
+            await page.route("**/*google-analytics*", lambda route: route.abort())
+            await page.route("**/*googletagmanager*", lambda route: route.abort())
+            await page.route("**/*mc.yandex*", lambda route: route.abort())
+
+            # Случайная задержка
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+
+            # Загрузка страницы с разными стратегиями
+            load_success = False
+            for wait_strategy in ['domcontentloaded', 'load', 'networkidle']:
+                try:
+                    await page.goto(url, timeout=WEB_PLAYWRIGHT_TIMEOUT, wait_until=wait_strategy)
+                    load_success = True
+                    break
+                except Exception as e:
+                    if 'timeout' not in str(e).lower():
+                        break
+                    continue
+
+            if not load_success:
+                await page.close()
+                return ""
+
+            # Ждём загрузки динамического контента
+            await page.wait_for_timeout(2500)
+
+            # Скролл для активации lazy-load
+            try:
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
+                await page.wait_for_timeout(500)
+            except:
+                pass
+
+            html = await page.content()
+
+            # Проверка на страницу защиты
+            if is_protection_page(html):
+                print(f"  ⚠️ Обнаружена защита от ботов на {url}")
+                await page.close()
+                return ""
+
+            return html
+
+        except PlaywrightTimeout:
+            print(f"  ⚠️ Таймаут при загрузке {url}")
+            return ""
+        except Exception as e:
+            print(f"  ❌ Ошибка загрузки {url}: {e}")
+            return ""
+        finally:
+            try:
+                await page.close()
+            except:
+                pass
+
+
+def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None) -> list:
+    """Парсинг новостей из HTML по CSS-селекторам.
+
+    Возвращает список: [{title, text, date, article_url, content_hash}, ...]
+    """
+    if not html:
+        return []
+
+    config = css_config or DEFAULT_CSS_CONFIG
+    soup = BeautifulSoup(html, 'lxml')
+    news_items = []
+
+    # Поиск элементов новостей
+    item_selectors = [s.strip() for s in config.get('item', '').split(',')]
+    items = []
+    for selector in item_selectors:
+        if selector:
+            items.extend(soup.select(selector))
+
+    if not items:
+        print(f"  ⚠️ Не найдены элементы новостей по селекторам: {config.get('item')}")
+        return []
+
+    from urllib.parse import urljoin
+
+    for item in items[:MAX_NEWS_PER_WEBSITE]:
+        try:
+            # Извлечение заголовка
+            title = ""
+            title_selectors = [s.strip() for s in config.get('title', '').split(',')]
+            for selector in title_selectors:
+                if selector:
+                    title_elem = item.select_one(selector)
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        break
+
+            # Извлечение текста
+            text = ""
+            text_selectors = [s.strip() for s in config.get('text', '').split(',')]
+            for selector in text_selectors:
+                if selector:
+                    text_elems = item.select(selector)
+                    if text_elems:
+                        text = ' '.join(elem.get_text(strip=True) for elem in text_elems)
+                        break
+
+            # Если заголовок и текст пустые — пропускаем
+            if not title and not text:
+                continue
+
+            # Извлечение даты
+            post_date = None
+            date_selectors = [s.strip() for s in config.get('date', '').split(',')]
+            for selector in date_selectors:
+                if selector:
+                    date_elem = item.select_one(selector)
+                    if date_elem:
+                        # Пробуем datetime атрибут
+                        datetime_attr = date_elem.get('datetime')
+                        if datetime_attr:
+                            post_date = parse_date_from_text(datetime_attr)
+                        if not post_date:
+                            post_date = parse_date_from_text(date_elem.get_text(strip=True))
+                        if post_date:
+                            break
+
+            # Извлечение ссылки на статью
+            article_url = ""
+            link_selectors = [s.strip() for s in config.get('link', '').split(',')]
+            for selector in link_selectors:
+                if selector:
+                    link_elem = item.select_one(selector)
+                    if link_elem and link_elem.get('href'):
+                        href = link_elem.get('href')
+                        article_url = urljoin(base_url, href)
+                        break
+
+            # Формируем контент для хеширования
+            content_for_hash = f"{title}\n{text}".strip()
+            if not content_for_hash:
+                continue
+
+            news_items.append({
+                'title': title[:500] if title else "",
+                'text': text[:5000] if text else "",
+                'post_date': post_date,
+                'article_url': article_url,
+                'content_hash': calculate_hash(content_for_hash),
+            })
+
+        except Exception as e:
+            print(f"  ⚠️ Ошибка парсинга элемента новости: {e}")
+            continue
+
+    return news_items
+
+
+async def scan_website_source(source: dict, browser_context, existing_hashes: set) -> list:
+    """Сканирование одного веб-источника новостей.
+
+    Возвращает список новых постов для сохранения.
+    """
+    url = source.get('url')
+    title = source.get('title') or source.get('username') or url
+    css_config = source.get('css_config') or DEFAULT_CSS_CONFIG
+
+    print(f"  🌐 Загрузка {url}...")
+
+    html = await fetch_website_news_page(url, browser_context)
+    if not html:
+        return []
+
+    news_items = parse_news_items_from_html(html, url, css_config)
+    print(f"  📰 Найдено элементов: {len(news_items)}")
+
+    # Фильтрация дубликатов по content_hash
+    new_items = []
+    for item in news_items:
+        content_hash = item.get('content_hash')
+        if content_hash and content_hash not in existing_hashes:
+            new_items.append(item)
+            existing_hashes.add(content_hash)
+
+    return new_items
+
+
 # ============================================================================
 # ОПЕРАЦИИ С SUPABASE
 # ============================================================================
@@ -393,7 +704,7 @@ def get_categories() -> list:
         print(f"❌ Ошибка получения категорий: {e}")
         return []
 
-def save_post(channel_id: int, post_data: dict) -> int | None:
+def save_post(channel_id: int, post_data: dict, source_type: str = 'telegram') -> int | None:
     """Upsert поста в news_posts. Возвращает id записи."""
     try:
         data = {
@@ -407,6 +718,7 @@ def save_post(channel_id: int, post_data: dict) -> int | None:
             'has_document': post_data.get('has_document', False),
             'views_count': post_data.get('views', 0),
             'content_hash': post_data.get('content_hash'),
+            'source_type': source_type,
         }
         result = supabase.table('news_posts').upsert(data, on_conflict='channel_id,message_id').execute()
         if result.data:
@@ -414,6 +726,52 @@ def save_post(channel_id: int, post_data: dict) -> int | None:
         return None
     except Exception as e:
         print(f"  ⚠️ Ошибка сохранения поста {post_data.get('message_id')}: {e}")
+        return None
+
+
+def save_web_post(channel_id: int, post_data: dict) -> int | None:
+    """Сохранение веб-новости в news_posts. Возвращает id записи.
+
+    Для веб-новостей нет message_id, используем content_hash для дедупликации.
+    """
+    try:
+        content_hash = post_data.get('content_hash')
+        if not content_hash:
+            return None
+
+        # Проверяем существование по content_hash
+        existing = (supabase.table('news_posts')
+                    .select('id')
+                    .eq('channel_id', channel_id)
+                    .eq('content_hash', content_hash)
+                    .execute())
+        if existing.data:
+            return existing.data[0].get('id')
+
+        # Генерируем уникальный message_id на основе хеша
+        message_id = int(content_hash[:8], 16) % 2147483647
+
+        data = {
+            'channel_id': channel_id,
+            'message_id': message_id,
+            'post_url': post_data.get('article_url', ''),
+            'title': post_data.get('title', ''),
+            'content_text': post_data.get('text', ''),
+            'post_date': post_data['post_date'].isoformat() if post_data.get('post_date') else None,
+            'has_photo': False,
+            'has_video': False,
+            'has_document': False,
+            'views_count': 0,
+            'content_hash': content_hash,
+            'source_type': 'website',
+            'article_url': post_data.get('article_url', ''),
+        }
+        result = supabase.table('news_posts').insert(data).execute()
+        if result.data:
+            return result.data[0].get('id')
+        return None
+    except Exception as e:
+        print(f"  ⚠️ Ошибка сохранения веб-новости: {e}")
         return None
 
 def save_post_categories(post_id: int, categories_list: list) -> None:
@@ -779,7 +1137,7 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
 
     # Статистика
     total_posts = len(cleaned_posts)
-    stats = f"Каналов: {channels_count} | Новостей: {total_posts}"
+    stats = f"Источников: {channels_count} | Новостей: {total_posts}"
     content.append(Paragraph(stats, styles['subtitle']))
     content.append(Spacer(1, 10))
 
@@ -791,12 +1149,16 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
         post_date = post.get('post_date', '')
         views = post.get('views_count', 0)
         category_tags = post.get('category_tags', [])
+        source_type = post.get('source_type', 'telegram')
 
-        # Заголовок поста с номером (кликабельный если есть URL)
+        # Иконка типа источника (ASCII-символы для совместимости с PDF-шрифтом)
+        source_icon = "[TG]" if source_type == 'telegram' else "[Web]"
+
+        # Заголовок поста с номером и иконкой источника (кликабельный если есть URL)
         if post_url:
-            title_text = f"{post_number}. <a href='{post_url}' color='#1a1a1a'><b>{title}</b></a>"
+            title_text = f"{post_number}. {source_icon} <a href='{post_url}' color='#1a1a1a'><b>{title}</b></a>"
         else:
-            title_text = f"{post_number}. <b>{title}</b>"
+            title_text = f"{post_number}. {source_icon} <b>{title}</b>"
         content.append(Paragraph(title_text, styles['post_title']))
 
         # Краткое содержание
@@ -854,7 +1216,7 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
 # ============================================================================
 
 async def run_news_monitoring_async():
-    """Главная функция: сканирование каналов → LLM-обработка → PDF-дайджест → Telegram."""
+    """Главная функция: сканирование каналов и веб-сайтов → LLM-обработка → PDF-дайджест → Telegram."""
     print("🚀 Запуск мониторинга новостей...")
     start_time = time.time()
 
@@ -862,16 +1224,20 @@ async def run_news_monitoring_async():
     init_semaphores()
 
     # 2. Уведомление о старте
-    send_telegram_message("🚀 <b>Запуск мониторинга новостей</b>\n📰 Сканирование Telegram-каналов...")
+    send_telegram_message("🚀 <b>Запуск мониторинга новостей</b>\n📰 Сканирование источников...")
 
-    # 3. Загрузка каналов из БД
-    channels = get_active_channels()
-    if not channels:
-        send_telegram_message("❌ Нет активных каналов для мониторинга")
-        print("❌ Нет активных каналов")
+    # 3. Загрузка источников из БД
+    all_sources = get_active_channels()
+    if not all_sources:
+        send_telegram_message("❌ Нет активных источников для мониторинга")
+        print("❌ Нет активных источников")
         return
 
-    print(f"📋 Загружено каналов: {len(channels)}")
+    # 3.1 Разделение на TG-каналы и веб-сайты
+    tg_channels = [s for s in all_sources if s.get('source_type', 'telegram') == 'telegram']
+    web_sources = [s for s in all_sources if s.get('source_type') == 'website']
+
+    print(f"📋 Загружено источников: {len(all_sources)} (📱 TG: {len(tg_channels)}, 🌐 Web: {len(web_sources)})")
 
     # 4. Загрузка категорий из БД
     categories = get_categories()
@@ -888,14 +1254,13 @@ async def run_news_monitoring_async():
     current_date = period_end.strftime("%Y-%m-%d")
     print(f"📅 Период: {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}")
 
-    # === ФАЗА 1: СКАНИРОВАНИЕ КАНАЛОВ ===
-    print("\n" + "=" * 60)
-    print("ФАЗА 1: СКАНИРОВАНИЕ КАНАЛОВ")
-    print("=" * 60)
-
+    # Счётчики
     total_new_posts = 0
-    channels_scanned = 0
-    channels_with_errors = 0
+    tg_channels_scanned = 0
+    tg_channels_with_errors = 0
+    web_sources_scanned = 0
+    web_sources_with_errors = 0
+    total_web_posts = 0
     processed_count = 0
     digest_posts = []
     pdf_path = None
@@ -930,56 +1295,109 @@ async def run_news_monitoring_async():
                 }
             )
 
-            # 7. Последовательное сканирование каналов
-            for i, channel in enumerate(channels, start=1):
-                channel_id = channel['id']
-                username = channel['username']
-                last_message_id = channel.get('last_message_id')
+            # === ФАЗА 1A: СКАНИРОВАНИЕ TG КАНАЛОВ ===
+            if tg_channels:
+                print("\n" + "=" * 60)
+                print("ФАЗА 1A: СКАНИРОВАНИЕ TG КАНАЛОВ")
+                print("=" * 60)
 
-                print(f"\n📡 [{i}/{len(channels)}] Сканирование @{username} (last_id: {last_message_id})...")
+                for i, channel in enumerate(tg_channels, start=1):
+                    channel_id = channel['id']
+                    username = channel['username']
+                    last_message_id = channel.get('last_message_id')
 
-                try:
-                    posts = await fetch_channel_posts(
-                        channel_username=username,
-                        browser_context=browser_context,
-                        after_message_id=last_message_id,
-                        max_posts=MAX_POSTS_PER_CHANNEL,
-                    )
+                    print(f"\n📱 [{i}/{len(tg_channels)}] Сканирование @{username} (last_id: {last_message_id})...")
 
-                    if posts:
-                        saved_count = 0
-                        max_msg_id = last_message_id or 0
+                    try:
+                        posts = await fetch_channel_posts(
+                            channel_username=username,
+                            browser_context=browser_context,
+                            after_message_id=last_message_id,
+                            max_posts=MAX_POSTS_PER_CHANNEL,
+                        )
 
-                        for post_data in posts:
-                            post_id = save_post(channel_id, post_data)
-                            if post_id:
-                                saved_count += 1
-                            if post_data['message_id'] > max_msg_id:
-                                max_msg_id = post_data['message_id']
+                        if posts:
+                            saved_count = 0
+                            max_msg_id = last_message_id or 0
 
-                        # Обновление last_message_id
-                        if max_msg_id > (last_message_id or 0):
-                            update_channel_after_scan(channel_id, max_msg_id)
+                            for post_data in posts:
+                                post_id = save_post(channel_id, post_data, source_type='telegram')
+                                if post_id:
+                                    saved_count += 1
+                                if post_data['message_id'] > max_msg_id:
+                                    max_msg_id = post_data['message_id']
 
-                        total_new_posts += saved_count
-                        print(f"  ✅ Найдено {len(posts)} постов, сохранено {saved_count}, max_id={max_msg_id}")
-                    else:
-                        print(f"  ℹ️ Новых постов нет")
+                            # Обновление last_message_id
+                            if max_msg_id > (last_message_id or 0):
+                                update_channel_after_scan(channel_id, max_msg_id)
 
-                    channels_scanned += 1
-                except Exception as e:
-                    print(f"  ❌ Ошибка сканирования @{username}: {e}")
-                    channels_with_errors += 1
+                            total_new_posts += saved_count
+                            print(f"  ✅ Найдено {len(posts)} постов, сохранено {saved_count}, max_id={max_msg_id}")
+                        else:
+                            print(f"  ℹ️ Новых постов нет")
 
-                # Пауза между каналами
-                if i < len(channels):
-                    await asyncio.sleep(DELAY_BETWEEN_CHANNELS)
+                        tg_channels_scanned += 1
+                    except Exception as e:
+                        print(f"  ❌ Ошибка сканирования @{username}: {e}")
+                        tg_channels_with_errors += 1
+
+                    # Пауза между каналами
+                    if i < len(tg_channels):
+                        await asyncio.sleep(DELAY_BETWEEN_CHANNELS)
+
+                print(f"\n📊 Фаза 1A завершена: {tg_channels_scanned} каналов, {total_new_posts} новых постов, {tg_channels_with_errors} ошибок")
+
+            # === ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ ===
+            if web_sources:
+                print("\n" + "=" * 60)
+                print("ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ")
+                print("=" * 60)
+
+                # Получаем существующие хеши для дедупликации
+                existing_hashes = get_processed_content_hashes(period_start)
+
+                for i, source in enumerate(web_sources, start=1):
+                    source_id = source['id']
+                    source_url = source.get('url', '')
+                    source_title = source.get('title') or source_url
+
+                    print(f"\n🌐 [{i}/{len(web_sources)}] Сканирование {source_title}...")
+
+                    try:
+                        new_items = await scan_website_source(source, browser_context, existing_hashes)
+
+                        if new_items:
+                            saved_count = 0
+                            for item in new_items:
+                                post_id = save_web_post(source_id, item)
+                                if post_id:
+                                    saved_count += 1
+
+                            total_web_posts += saved_count
+                            print(f"  ✅ Найдено {len(new_items)} новостей, сохранено {saved_count}")
+                        else:
+                            print(f"  ℹ️ Новых новостей нет")
+
+                        web_sources_scanned += 1
+                    except Exception as e:
+                        print(f"  ❌ Ошибка сканирования {source_title}: {e}")
+                        web_sources_with_errors += 1
+
+                    # Пауза между сайтами
+                    if i < len(web_sources):
+                        await asyncio.sleep(DELAY_BETWEEN_WEBSITES)
+
+                print(f"\n📊 Фаза 1B завершена: {web_sources_scanned} сайтов, {total_web_posts} новых новостей, {web_sources_with_errors} ошибок")
 
             # 8. Закрытие браузера
             await browser_context.close()
             await browser.close()
 
-        print(f"\n📊 Фаза 1 завершена: {channels_scanned} каналов, {total_new_posts} новых постов, {channels_with_errors} ошибок")
+        # Общая статистика по фазе 1
+        total_sources_scanned = tg_channels_scanned + web_sources_scanned
+        total_all_posts = total_new_posts + total_web_posts
+        total_errors = tg_channels_with_errors + web_sources_with_errors
+        print(f"\n📊 Фаза 1 завершена: {total_sources_scanned} источников, {total_all_posts} новых записей, {total_errors} ошибок")
 
         # === ФАЗА 2: LLM-ОБРАБОТКА ===
         print("\n" + "=" * 60)
@@ -1061,6 +1479,7 @@ async def run_news_monitoring_async():
                     continue
 
                 channel_info = post.get('news_channels', {})
+                source_type = post.get('source_type', 'telegram')
                 posts_flat.append({
                     'title': post.get('title', ''),
                     'summary': post.get('summary', ''),
@@ -1070,6 +1489,7 @@ async def run_news_monitoring_async():
                     'post_date': post.get('post_date', ''),
                     'views_count': post.get('views_count', 0),
                     'category_tags': category_tags,
+                    'source_type': source_type,
                 })
 
             # Сортировка по дате (свежие первыми)
@@ -1090,7 +1510,7 @@ async def run_news_monitoring_async():
                 period_start=period_start,
                 period_end=period_end,
                 posts=posts_flat,
-                channels_count=len(channels),
+                channels_count=len(all_sources),
             )
 
             # 13. Сохранение дайджеста в БД
@@ -1102,7 +1522,7 @@ async def run_news_monitoring_async():
                 'period_start': period_start.isoformat(),
                 'period_end': period_end.isoformat(),
                 'total_posts': total_digest_posts,
-                'total_channels': len(channels),
+                'total_channels': len(all_sources),
             }
             digest_id = save_digest(digest_data, all_post_ids)
 
@@ -1112,19 +1532,21 @@ async def run_news_monitoring_async():
 
     # 14. Отправка PDF + сводного сообщения в Telegram
     total_digest = len(digest_posts) if digest_posts else 0
+    total_all_new = total_new_posts + total_web_posts
 
     summary_msg = f"""📊 <b>Мониторинг новостей завершён</b>
 
 📅 Период: {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}
 ⏱️ Время: {elapsed} сек
 
-📡 Каналов просканировано: <b>{channels_scanned}</b> из {len(channels)}
-📝 Новых постов загружено: <b>{total_new_posts}</b>
+📱 TG-каналов: <b>{tg_channels_scanned}</b> из {len(tg_channels)}
+🌐 Веб-сайтов: <b>{web_sources_scanned}</b> из {len(web_sources)}
+📝 Новых записей: <b>{total_all_new}</b> (📱 {total_new_posts} + 🌐 {total_web_posts})
 🤖 Обработано LLM: <b>{processed_count}</b>
 📰 Постов в дайджесте: <b>{total_digest}</b>"""
 
-    if channels_with_errors:
-        summary_msg += f"\n⚠️ Ошибки сканирования: <b>{channels_with_errors}</b>"
+    if tg_channels_with_errors or web_sources_with_errors:
+        summary_msg += f"\n⚠️ Ошибки: 📱 {tg_channels_with_errors}, 🌐 {web_sources_with_errors}"
 
     if pdf_path and os.path.exists(pdf_path):
         summary_msg += "\n\n📎 Подробный дайджест во вложении"

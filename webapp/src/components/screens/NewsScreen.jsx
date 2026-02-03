@@ -19,6 +19,7 @@ export default function NewsScreen({ user }) {
   // Фильтры
   const [selectedCategories, setSelectedCategories] = useState([])
   const [selectedChannels, setSelectedChannels] = useState([])
+  const [selectedSourceTypes, setSelectedSourceTypes] = useState([])
   const [dateRange, setDateRange] = useState('week')
   const [customDateFrom, setCustomDateFrom] = useState('')
   const [customDateTo, setCustomDateTo] = useState('')
@@ -51,7 +52,7 @@ export default function NewsScreen({ user }) {
     if (!initialized.current) return
     setOffset(0)
     loadPosts(0)
-  }, [selectedCategories, selectedChannels, dateRange, customDateFrom, customDateTo])
+  }, [selectedCategories, selectedChannels, selectedSourceTypes, dateRange, customDateFrom, customDateTo])
 
   function computeDateRange() {
     const now = new Date()
@@ -84,6 +85,7 @@ export default function NewsScreen({ user }) {
       const { posts: newPosts, count } = await getNewsPosts({
         categories: effectiveCategories,
         channels: selectedChannels,
+        sourceTypes: selectedSourceTypes,
         dateFrom,
         dateTo,
         limit: PAGE_SIZE,
@@ -109,9 +111,10 @@ export default function NewsScreen({ user }) {
     loadPosts(offset + PAGE_SIZE)
   }
 
-  const handleFilterChange = ({ categories: cats, channels: chs, dateRange: dr, customDateFrom: cdf, customDateTo: cdt }) => {
+  const handleFilterChange = ({ categories: cats, channels: chs, sourceTypes: st, dateRange: dr, customDateFrom: cdf, customDateTo: cdt }) => {
     setSelectedCategories(cats)
     setSelectedChannels(chs)
+    setSelectedSourceTypes(st || [])
     setDateRange(dr)
     setCustomDateFrom(cdf)
     setCustomDateTo(cdt)
@@ -177,6 +180,7 @@ export default function NewsScreen({ user }) {
         channels={channels}
         selectedCategories={selectedCategories}
         selectedChannels={selectedChannels}
+        selectedSourceTypes={selectedSourceTypes}
         dateRange={dateRange}
         customDateFrom={customDateFrom}
         customDateTo={customDateTo}
