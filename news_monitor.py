@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
+import trafilatura
 
 # Импорты для Playwright
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
@@ -70,6 +71,53 @@ DEFAULT_CSS_CONFIG = {
     "date": "time, .date, [datetime], .published, .timestamp",
     "link": "a[href]"
 }
+
+
+def extract_with_trafilatura(html: str, base_url: str) -> list:
+    """Извлечение новостей через trafilatura (fallback)."""
+    try:
+        # Извлекаем основной контент
+        extracted = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            output_format='json',
+            with_metadata=True
+        )
+
+        if not extracted:
+            return []
+
+        data = json.loads(extracted)
+
+        title = data.get('title', '')
+        text = data.get('text', '')[:5000]
+        date_str = data.get('date')
+
+        if not title and not text:
+            return []
+
+        # Парсинг даты
+        post_date = None
+        if date_str:
+            post_date = parse_date_from_text(date_str)
+
+        # Хэш для дедупликации
+        content_for_hash = f"{title}\n{text}"
+        content_hash = hashlib.sha256(content_for_hash.encode()).hexdigest()
+
+        return [{
+            'title': title[:500],
+            'text': text,
+            'post_date': post_date,
+            'article_url': base_url,
+            'content_hash': content_hash,
+        }]
+
+    except Exception as e:
+        print(f"    ⚠️ Trafilatura error: {e}")
+        return []
+
 
 # === РОТАЦИЯ USER-AGENT ===
 USER_AGENTS = [
@@ -582,6 +630,15 @@ def parse_news_items_from_html(html: str, base_url: str, css_config: dict = None
         # Подсказка по структуре HTML
         all_tags = set(tag.name for tag in soup.find_all()[:50] if tag.name)
         print(f"  ℹ️ Теги в HTML: {sorted(all_tags)[:15]}")
+
+        # Fallback: trafilatura
+        print(f"  🔄 Пробуем trafilatura...")
+        fallback_items = extract_with_trafilatura(html, base_url)
+        if fallback_items:
+            print(f"  ✅ Trafilatura извлёк {len(fallback_items)} элемент(ов)")
+            return fallback_items
+
+        print(f"  ❌ Trafilatura не смог извлечь контент")
         return []
 
     from urllib.parse import urljoin
