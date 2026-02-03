@@ -82,8 +82,10 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
 
         # Берём текстовое содержимое (ограничиваем размер)
         text_content = soup.get_text(separator='\n', strip=True)[:10000]
+        print(f"    📝 Текст для LLM: {len(text_content)} символов")
 
         if len(text_content) < 200:
+            print(f"    ⚠️ Контент слишком короткий: {len(text_content)} < 200")
             return []
 
         prompt = f"""Проанализируй текст веб-страницы и извлеки из него список новостей или статей.
@@ -112,6 +114,7 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
         response = await call_llm_async(prompt, session, max_tokens=2000)
 
         if not response:
+            print(f"    ⚠️ LLM вернул пустой ответ")
             return []
 
         # Парсим JSON ответ
@@ -123,6 +126,7 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
         news_list = data.get('news', [])
 
         if not news_list:
+            print(f"    ⚠️ LLM не нашёл новостей в JSON")
             return []
 
         result = []
@@ -139,6 +143,7 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
                        'глонасс', 'gps', 'навигац', 'мониторинг', 'трекер', 'автопарк',
                        'жд', 'железнодорож', 'авиа', 'морск', 'порт', 'дорог']
             if not any(kw in combined for kw in keywords):
+                print(f"    ⏭️ Отфильтровано (нет ключевых слов): {title[:60]}...")
                 continue
 
             # Формируем хэш для дедупликации
@@ -153,6 +158,7 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
                 'content_hash': content_hash,
             })
 
+        print(f"    📊 LLM: всего {len(news_list)}, после фильтра {len(result)}")
         return result
 
     except json.JSONDecodeError as e:
@@ -256,6 +262,38 @@ def send_telegram_document(file_path: str, caption: str = "") -> bool:
 
 def calculate_hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def format_error_summary(scan_results: list) -> str:
+    """Форматирует сводку ошибок веб-сканирования для Telegram-сообщения."""
+    errors_by_type = {}
+    for r in scan_results:
+        if not r.get('is_success') and r.get('error_type'):
+            err_type = r['error_type']
+            errors_by_type.setdefault(err_type, []).append(r.get('source_title', 'unknown'))
+
+    if not errors_by_type:
+        return ""
+
+    labels = {
+        'fetch_error': '❌ Ошибка загрузки',
+        'empty_content': '📄 Пустой контент',
+        'protection': '🛡️ Защита от ботов',
+        'llm_error': '🤖 Ошибка LLM',
+        'no_news': '📰 Новости не найдены',
+        'exception': '💥 Исключение',
+    }
+
+    lines = ["\n\n⚠️ <b>Детали ошибок веб-сканирования:</b>"]
+    for err_type, sources in sorted(errors_by_type.items()):
+        label = labels.get(err_type, err_type)
+        src_str = ', '.join(sources[:3])
+        if len(sources) > 3:
+            src_str += f' (+{len(sources) - 3})'
+        lines.append(f"  • {label}: {len(sources)} ({src_str})")
+
+    return '\n'.join(lines)
+
 
 def clean_post_text(html_text: str) -> str:
     if not html_text:
@@ -761,24 +799,46 @@ async def parse_news_items_from_html(html: str, base_url: str, session: aiohttp.
     return news_items
 
 
-async def scan_website_source(source: dict, browser_context, session: aiohttp.ClientSession, existing_hashes: set) -> list:
-    """Сканирование одного веб-источника новостей.
+async def scan_website_source(source: dict, browser_context, session: aiohttp.ClientSession, existing_hashes: set) -> dict:
+    """Сканирование веб-источника напрямую через LLM (без CSS-селекторов).
 
-    Возвращает список новых постов для сохранения.
+    Возвращает dict с результатом скана, включая статистику и ошибки.
     """
     url = source.get('url')
     title = source.get('title') or source.get('username') or url
-    css_config = source.get('css_config') or DEFAULT_CSS_CONFIG
+
+    result = {
+        'source_id': source.get('id'),
+        'source_title': title,
+        'source_url': url,
+        'is_success': False,
+        'error_type': None,
+        'error_message': None,
+        'items_found': 0,
+        'items_saved': 0,
+        'new_items': [],
+    }
 
     print(f"  🌐 Загрузка {url}...")
 
     html = await fetch_website_news_page(url, browser_context)
     if not html:
+        result['error_type'] = 'fetch_error'
+        result['error_message'] = 'Не удалось загрузить страницу'
         print(f"  ❌ Не удалось загрузить страницу: {url}")
-        return []
+        return result
     print(f"  ✅ HTML загружен: {len(html)} символов")
 
-    news_items = await parse_news_items_from_html(html, url, session, css_config)
+    # Напрямую LLM-извлечение (без CSS-селекторов)
+    news_items = await extract_with_llm(html, url, session)
+
+    if not news_items:
+        result['error_type'] = 'no_news'
+        result['error_message'] = 'LLM не нашёл новостей'
+        print(f"  ℹ️ LLM не нашёл новостей на странице")
+        return result
+
+    result['items_found'] = len(news_items)
     print(f"  📰 Найдено элементов: {len(news_items)}")
 
     # Фильтрация дубликатов по content_hash
@@ -789,7 +849,11 @@ async def scan_website_source(source: dict, browser_context, session: aiohttp.Cl
             new_items.append(item)
             existing_hashes.add(content_hash)
 
-    return new_items
+    result['is_success'] = True
+    result['new_items'] = new_items
+    result['items_saved'] = len(new_items)
+
+    return result
 
 
 # ============================================================================
@@ -1463,6 +1527,8 @@ async def run_news_monitoring_async():
                 print(f"\n📊 Фаза 1A завершена: {tg_channels_scanned} каналов, {total_new_posts} новых постов, {tg_channels_with_errors} ошибок")
 
             # === ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ ===
+            web_scan_results = []  # Для сбора статистики по каждому источнику
+
             if web_sources:
                 print("\n" + "=" * 60)
                 print("ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ")
@@ -1473,29 +1539,46 @@ async def run_news_monitoring_async():
 
                 for i, source in enumerate(web_sources, start=1):
                     source_id = source['id']
-                    source_url = source.get('url', '')
-                    source_title = source.get('title') or source_url
+                    source_title = source.get('title') or source.get('url', '')
 
                     print(f"\n🌐 [{i}/{len(web_sources)}] Сканирование {source_title}...")
 
                     try:
-                        new_items = await scan_website_source(source, browser_context, http_session, existing_hashes)
+                        scan_result = await scan_website_source(source, browser_context, http_session, existing_hashes)
+                        web_scan_results.append(scan_result)
 
-                        if new_items:
+                        if scan_result['is_success']:
+                            # Сохранение новых записей в БД
                             saved_count = 0
-                            for item in new_items:
+                            for item in scan_result['new_items']:
                                 post_id = save_web_post(source_id, item)
                                 if post_id:
                                     saved_count += 1
 
+                            scan_result['items_saved'] = saved_count
                             total_web_posts += saved_count
-                            print(f"  ✅ Найдено {len(new_items)} новостей, сохранено {saved_count}")
-                        else:
-                            print(f"  ℹ️ Новых новостей нет")
+                            web_sources_scanned += 1
 
-                        web_sources_scanned += 1
+                            if saved_count > 0:
+                                print(f"  ✅ Сохранено {saved_count} новых новостей (найдено {scan_result['items_found']})")
+                            else:
+                                print(f"  ℹ️ Новых новостей нет (все дубликаты)")
+                        else:
+                            web_sources_with_errors += 1
+
                     except Exception as e:
-                        print(f"  ❌ Ошибка сканирования {source_title}: {e}")
+                        print(f"  ❌ Исключение при сканировании: {e}")
+                        web_scan_results.append({
+                            'source_id': source_id,
+                            'source_title': source_title,
+                            'source_url': source.get('url', ''),
+                            'is_success': False,
+                            'error_type': 'exception',
+                            'error_message': str(e)[:200],
+                            'items_found': 0,
+                            'items_saved': 0,
+                            'new_items': [],
+                        })
                         web_sources_with_errors += 1
 
                     # Пауза между сайтами
@@ -1660,8 +1743,13 @@ async def run_news_monitoring_async():
 🤖 Обработано LLM: <b>{processed_count}</b>
 📰 Постов в дайджесте: <b>{total_digest}</b>"""
 
+    # Общая статистика ошибок
     if tg_channels_with_errors or web_sources_with_errors:
         summary_msg += f"\n⚠️ Ошибки: 📱 {tg_channels_with_errors}, 🌐 {web_sources_with_errors}"
+
+    # Детальная статистика ошибок веб-сканирования
+    error_summary = format_error_summary(web_scan_results)
+    summary_msg += error_summary
 
     if pdf_path and os.path.exists(pdf_path):
         summary_msg += "\n\n📎 Подробный дайджест во вложении"
