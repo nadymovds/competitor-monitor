@@ -301,3 +301,56 @@ export async function getCompetitorTgPostsByReport(reportId) {
   if (error) throw error
   return data
 }
+
+// === Функции для страницы "Сканирования" ===
+
+export async function getCompetitorScans(limit = 10, offset = 0) {
+  const twoMonthsAgo = new Date()
+  twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
+
+  const { data, error, count } = await supabase
+    .from('summary_reports')
+    .select('*', { count: 'exact' })
+    .gte('report_date', twoMonthsAgo.toISOString())
+    .order('report_date', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) throw error
+
+  return {
+    scans: data || [],
+    hasMore: (count || 0) > offset + limit
+  }
+}
+
+export async function getCompetitorScanDetails(reportId) {
+  // Получаем изменения на сайтах
+  const { data: changes, error: changesError } = await supabase
+    .from('changes')
+    .select(`
+      *,
+      competitors (id, name, url),
+      competitor_urls (url, label)
+    `)
+    .eq('report_id', reportId)
+    .neq('category', 'technical')
+    .order('detected_at', { ascending: false })
+
+  if (changesError) throw changesError
+
+  // Получаем посты из TG-каналов
+  const { data: tgPosts, error: tgError } = await supabase
+    .from('competitor_tg_posts')
+    .select('*, competitors(id, name)')
+    .eq('report_id', reportId)
+    .eq('is_processed', true)
+    .neq('category', 'technical')
+    .order('post_date', { ascending: false })
+
+  if (tgError) throw tgError
+
+  return {
+    changes: changes || [],
+    tgPosts: tgPosts || []
+  }
+}

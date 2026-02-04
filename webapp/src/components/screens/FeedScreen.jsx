@@ -4,6 +4,7 @@ import { getNewsCategories, getNewsChannels } from '../../services/news'
 import { hapticFeedback, openLink, openTelegramLink } from '../../services/telegram'
 import FeedTypeToggle from '../ui/FeedTypeToggle'
 import NewsFilters from '../ui/NewsFilters'
+import MultiSelect from '../ui/MultiSelect'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
 const CATEGORY_CONFIG = {
@@ -170,14 +171,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     setSelectedNewsSourceTypes([])
   }
 
-  const toggleGroup = (id) => {
-    hapticFeedback('light')
-    setSelectedGroups(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-  }
-
-  const resetCompetitorFilters = () => {
+const resetCompetitorFilters = () => {
     hapticFeedback('light')
     setSelectedGroups([])
     setActiveSourceFilter('all')
@@ -238,23 +232,12 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
                 </button>
               )}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {groups.map(g => (
-                <button
-                  key={g.id}
-                  onClick={() => toggleGroup(g.id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 20,
-                    backgroundColor: selectedGroups.includes(g.id) ? g.color + '20' : '#252532',
-                    border: selectedGroups.includes(g.id) ? `1px solid ${g.color}` : '1px solid transparent',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: g.color }} />
-                  <span style={{ fontSize: 13, color: '#fff' }}>{g.name}</span>
-                </button>
-              ))}
-            </div>
+            <MultiSelect
+              options={groups}
+              selectedIds={selectedGroups}
+              onChange={setSelectedGroups}
+              placeholder="Все группы"
+            />
           </div>
 
           {/* Фильтр по источникам */}

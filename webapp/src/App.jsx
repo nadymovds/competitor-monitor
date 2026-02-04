@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react'
-import { getTelegramUser } from './services/telegram'
-import { checkUserAccess, getGroups } from './services/supabase'
+import React, { useState } from 'react'
+import './App.css'
 import FeedScreen from './components/screens/FeedScreen'
-import MonitoringScreen from './components/screens/MonitoringScreen'
+import ScansScreen from './components/screens/ScansScreen'
 import CompetitorsScreen from './components/screens/CompetitorsScreen'
 import SettingsScreen from './components/screens/SettingsScreen'
-import NewsScreen from './components/screens/NewsScreen'
 import BottomNav from './components/ui/BottomNav'
 
 export default function App() {
@@ -116,32 +114,31 @@ export default function App() {
     )
   }
 
-  const renderScreen = () => {
+    const renderScreen = () => {
+    if (selectedCompetitor) {
+      return (
+        <CompetitorsScreen 
+          competitorId={selectedCompetitor} 
+          onBack={handleBackFromCompetitor}
+          onBackToFeed={cameFromFeed ? handleBackToFeed : null}
+        />
+      )
+    }
+
     switch (activeTab) {
       case 'feed':
-        return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
-      case 'monitoring':
-        return <MonitoringScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromMonitoring} />
+        return <FeedScreen onNavigateToCompetitor={navigateToCompetitorFromFeed} />
+      case 'scans':
+        return <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} />
       case 'competitors':
-        return (
-          <CompetitorsScreen
-            user={user}
-            groups={groups}
-            selectedCompetitorId={selectedCompetitorId}
-            cameFromMonitoring={cameFromMonitoring}
-            onBackToMonitoring={cameFromMonitoring ? handleBackFromCompetitor : null}
-            onBackToFeed={cameFromFeed ? handleBackFromCompetitor : null}
-            onClearSelection={() => setSelectedCompetitorId(null)}
-          />
-        )
-      case 'news':
-        return <NewsScreen user={user} />
+        return <CompetitorsScreen />
       case 'settings':
-        return <SettingsScreen user={user} groups={groups} />
+        return <SettingsScreen />
       default:
-        return null
+        return <FeedScreen onNavigateToCompetitor={navigateToCompetitorFromFeed} />
     }
   }
+
 
   return (
     <div style={styles.container}>

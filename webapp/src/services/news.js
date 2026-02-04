@@ -256,3 +256,60 @@ export async function deleteChannel(channelId) {
     .eq('id', channelId)
   if (error) throw error
 }
+
+// === Функции для страницы "Сканирования" ===
+
+export async function getNewsDigests(limit = 10, offset = 0) {
+  const twoMonthsAgo = new Date()
+  twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
+
+  const { data, error, count } = await supabase
+    .from('news_digests')
+    .select('*', { count: 'exact' })
+    .gte('created_at', twoMonthsAgo.toISOString())
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) throw error
+
+  return {
+    digests: data || [],
+    hasMore: (count || 0) > offset + limit
+  }
+}
+
+export async function getNewsDigestDetails(digestId) {
+  const { data, error } = await supabase
+    .from('news_posts')
+    .select(`
+      *,
+      news_channels (id, username, title, source_type),
+      news_post_categories (
+        category_id,
+        confidence,
+        is_manual,
+        news_categories (id, name, color, is_visible)
+      )
+    `)
+    .eq('digest_id', digestId)
+    .eq('is_processed', true)
+    .order('post_date', { ascending: false })
+
+  if (error) throw error
+
+  // Форматируем посты
+  const posts = (data || []).map(post => ({
+    ...post,
+    channel: post.news_channels,
+    source_type: post.news_channels?.source_type || 'telegram',
+    categories: (post.news_post_categories || [])
+      .map(pc => ({
+        ...pc.news_categories,
+        confidence: pc.confidence,
+        is_manual: pc.is_manual
+      }))
+      .filter(cat => cat.is_visible !== false)
+  }))
+
+  return { posts }
+}

@@ -3,9 +3,9 @@ import { hapticFeedback } from '../../services/telegram'
 
 export default function FeedTypeToggle({ feedType, onChange }) {
   const types = [
-    { id: 'all', label: 'Все', icon: '📊' },
-    { id: 'competitors', label: 'Конкуренты', icon: '👥' },
-    { id: 'news', label: 'Новости отрасли', icon: '📰' }
+    { id: 'all', label: 'Все' },
+    { id: 'competitors', label: 'Конкуренты' },
+    { id: 'news', label: 'Новости отрасли' }
   ]
 
   const handleClick = (id) => {
@@ -23,13 +23,11 @@ export default function FeedTypeToggle({ feedType, onChange }) {
           onClick={() => handleClick(type.id)}
           style={{
             ...styles.button,
-            backgroundColor: feedType === type.id ? '#3b82f6' : '#252532',
-            color: feedType === type.id ? '#fff' : '#9ca3af',
-            borderColor: feedType === type.id ? '#3b82f6' : 'transparent'
+            backgroundColor: feedType === type.id ? '#3b82f6' : 'transparent',
+            color: feedType === type.id ? '#fff' : '#9ca3af'
           }}
         >
-          <span style={{ fontSize: 18 }}>{type.icon}</span>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>{type.label}</span>
+          {type.label}
         </button>
       ))}
     </div>
@@ -39,19 +37,24 @@ export default function FeedTypeToggle({ feedType, onChange }) {
 const styles = {
   container: {
     display: 'flex',
-    gap: 8,
-    padding: '8px 0'
+    gap: 0,
+    backgroundColor: '#1a1a24',
+    borderRadius: 8,
+    padding: 3,
+    border: '1px solid #2a2a3a'
   },
   button: {
     flex: 1,
     display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
-    gap: 6,
-    padding: '12px 8px',
-    borderRadius: 12,
-    border: '1px solid',
+    justifyContent: 'center',
+    padding: '8px 12px',
+    borderRadius: 6,
+    border: 'none',
     cursor: 'pointer',
-    transition: 'all 0.2s'
+    fontSize: 13,
+    fontWeight: 500,
+    transition: 'all 0.2s',
+    whiteSpace: 'nowrap'
   }
 }
