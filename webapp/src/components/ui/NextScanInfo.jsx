@@ -53,10 +53,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    padding: '10px 16px',
-    backgroundColor: '#1a1a24',
-    borderRadius: 8,
-    border: '1px solid #2a2a3a'
+    padding: '10px 16px'
   },
   label: {
     fontSize: 13,

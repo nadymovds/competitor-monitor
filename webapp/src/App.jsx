@@ -128,7 +128,7 @@ export default function App() {
       case 'competitors':
         return <CompetitorsScreen />
       case 'settings':
-        return <SettingsScreen />
+        return <SettingsScreen user={user} groups={groups} />
       default:
         return <FeedScreen onNavigateToCompetitor={navigateToCompetitorFromFeed} />
     }

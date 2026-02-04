@@ -8,7 +8,7 @@ import NextScanInfo from '../ui/NextScanInfo'
 export default function ScansScreen({ onNavigateToCompetitor }) {
   const [scanType, setScanType] = useState('competitors') // 'competitors' | 'news'
   const [scans, setScans] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(true)
   const [offset, setOffset] = useState(0)
   const loadMoreRef = useRef(null)
@@ -17,6 +17,7 @@ export default function ScansScreen({ onNavigateToCompetitor }) {
 
   useEffect(() => {
     // Сброс при смене типа
+    setLoading(true)
     setScans([])
     setOffset(0)
     setHasMore(true)
@@ -157,10 +158,11 @@ const styles = {
   },
   segmentedControl: {
     display: 'flex',
-    gap: 4,
-    padding: '0 16px 16px 16px',
+    gap: 0,
     backgroundColor: '#1a1a24',
     borderRadius: 8,
+    padding: 3,
+    border: '1px solid #2a2a3a',
     margin: '0 16px 12px 16px'
   },
   segment: {
@@ -177,7 +179,7 @@ const styles = {
   },
   segmentActive: {
     color: '#fff',
-    backgroundColor: '#2a2a3a'
+    backgroundColor: '#3b82f6'
   },
   scansList: {
     display: 'flex',
