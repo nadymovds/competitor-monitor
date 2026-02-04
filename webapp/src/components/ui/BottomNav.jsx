@@ -3,9 +3,9 @@ import { hapticFeedback } from '../../services/telegram'
 
 export default function BottomNav({ activeTab, onTabChange }) {
   const tabs = [
-    { id: 'monitoring', label: 'Мониторинг', icon: '📊' },
+    { id: 'feed', label: 'Лента', icon: '🗞️' },
+    { id: 'scans', label: 'Сканирования', icon: '🛰️' },
     { id: 'competitors', label: 'Конкуренты', icon: '👥' },
-    { id: 'news', label: 'Новости', icon: '📰' },
     { id: 'settings', label: 'Настройки', icon: '⚙️' }
   ]
 

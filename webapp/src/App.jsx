@@ -1,21 +1,21 @@
 import React, { useState, useEffect } from 'react'
 import { getTelegramUser } from './services/telegram'
 import { checkUserAccess, getGroups } from './services/supabase'
-import MonitoringScreen from './components/screens/MonitoringScreen'
+import FeedScreen from './components/screens/FeedScreen'
 import CompetitorsScreen from './components/screens/CompetitorsScreen'
 import SettingsScreen from './components/screens/SettingsScreen'
-import NewsScreen from './components/screens/NewsScreen'
+import ScansScreen from './components/screens/ScansScreen'
 import BottomNav from './components/ui/BottomNav'
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('monitoring')
+  const [activeTab, setActiveTab] = useState('feed')
   const [user, setUser] = useState(null)
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
   const [selectedCompetitorId, setSelectedCompetitorId] = useState(null)
-  const [cameFromMonitoring, setCameFromMonitoring] = useState(false)
+  const [returnTab, setReturnTab] = useState(null)
 
   useEffect(() => {
     async function init() {
@@ -44,22 +44,28 @@ export default function App() {
     init()
   }, [])
 
-  const navigateToCompetitor = (competitorId) => {
+  const navigateToCompetitor = (competitorId, originTab) => {
+    if (!competitorId) return
+    const sourceTab = originTab || activeTab || 'feed'
+    const fallbackTab = sourceTab === 'competitors' ? 'feed' : sourceTab
     setSelectedCompetitorId(competitorId)
-    setCameFromMonitoring(true)
+    setReturnTab(fallbackTab)
     setActiveTab('competitors')
   }
 
   const handleBackFromCompetitor = () => {
+    const targetTab = returnTab || 'feed'
     setSelectedCompetitorId(null)
-    setCameFromMonitoring(false)
-    setActiveTab('monitoring')
+    setReturnTab(null)
+    setActiveTab(targetTab)
   }
 
   const handleTabChange = (tab) => {
-    if (tab !== 'competitors') {
+    if (tab === 'competitors') {
+      setReturnTab(null)
+    } else {
       setSelectedCompetitorId(null)
-      setCameFromMonitoring(false)
+      setReturnTab(null)
     }
     setActiveTab(tab)
   }
@@ -102,12 +108,12 @@ export default function App() {
 
   const renderScreen = () => {
     switch (activeTab) {
-      case 'monitoring':
-        return <MonitoringScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitor} />
+      case 'feed':
+        return <FeedScreen groups={groups} onNavigateToCompetitor={navigateToCompetitor} />
       case 'competitors':
-        return <CompetitorsScreen user={user} groups={groups} selectedCompetitorId={selectedCompetitorId} cameFromMonitoring={cameFromMonitoring} onBackToMonitoring={handleBackFromCompetitor} onClearSelection={() => setSelectedCompetitorId(null)} />
-      case 'news':
-        return <NewsScreen user={user} />
+        return <CompetitorsScreen user={user} groups={groups} selectedCompetitorId={selectedCompetitorId} cameFromMonitoring={Boolean(returnTab)} onBackToMonitoring={handleBackFromCompetitor} onClearSelection={() => { setSelectedCompetitorId(null); setReturnTab(null) }} />
+      case 'scans':
+        return <ScansScreen onNavigateToCompetitor={navigateToCompetitor} />
       case 'settings':
         return <SettingsScreen user={user} groups={groups} />
       default:

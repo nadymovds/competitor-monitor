@@ -81,6 +81,107 @@ export async function getCompetitorWithHistory(competitorId) {
   }
 }
 
+
+export async function getCompetitorScans(limit = 10, offset = 0) {
+  const now = new Date()
+  const threshold = new Date(now)
+  threshold.setMonth(threshold.getMonth() - 2)
+
+  const fromDate = threshold.toISOString()
+
+  let query = supabase
+    .from('summary_reports')
+    .select('*', { count: 'exact' })
+    .gte('report_date', fromDate)
+    .order('report_date', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  const { data, count, error } = await query
+  if (error) throw error
+
+  const scans = (data || []).map(report => {
+    const totalSites = report.total_sites ?? 0
+    const successfulSites = report.successful_sites ?? 0
+    const successRate = totalSites > 0 ? Math.round((successfulSites / totalSites) * 100) : null
+
+    return {
+      id: report.id,
+      reportId: report.report_id,
+      reportDate: report.report_date,
+      totalSites,
+      successfulSites,
+      successRate,
+      changesCount: report.changes_count ?? 0,
+      problemsCount: report.problems_count ?? 0,
+      durationSeconds: report.duration_seconds ?? null,
+      overallSummary: report.overall_llm_report || '',
+    }
+  })
+
+  const hasMore = typeof count === 'number' ? offset + scans.length < count : (data || []).length === limit
+
+  return { scans, hasMore }
+}
+
+export async function getCompetitorScanDetails(summaryReportId) {
+  const changesPromise = supabase
+    .from('changes')
+    .select(`
+      id,
+      competitor_id,
+      detected_at,
+      summary,
+      category,
+      tags,
+      scanned_url,
+      url_id,
+      competitor_urls ( url, label ),
+      competitors ( id, name )
+    `)
+    .eq('report_id', summaryReportId)
+    .order('detected_at', { ascending: false })
+
+  const tgPromise = supabase
+    .from('competitor_tg_posts')
+    .select(`
+      id,
+      competitor_id,
+      competitors ( id, name ),
+      post_url,
+      post_date,
+      detected_at,
+      summary,
+      title,
+      category,
+      tags,
+      channel_username,
+      channel_title,
+      views_count
+    `)
+    .eq('report_id', summaryReportId)
+    .eq('is_processed', true)
+    .order('post_date', { ascending: false })
+
+  const [{ data: changesData, error: changesError }, { data: tgData, error: tgError }] = await Promise.all([changesPromise, tgPromise])
+
+  if (changesError) throw changesError
+  if (tgError) throw tgError
+
+  const changes = (changesData || []).map(change => ({
+    ...change,
+    competitor: change.competitors || null,
+    url: change.scanned_url || change.competitor_urls?.url || null,
+    urlLabel: change.competitor_urls?.label || null,
+  }))
+
+  const tgPosts = (tgData || []).map(post => ({
+    ...post,
+    competitor: post.competitors || null,
+  }))
+
+  return { changes, tgPosts }
+}
+
 export async function getScanReports(limit = 10) {
   const { data, error } = await supabase
     .from('summary_reports')

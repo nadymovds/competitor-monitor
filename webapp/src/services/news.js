@@ -100,6 +100,97 @@ export async function getNewsPosts({ categories = [], channels = [], sourceTypes
   return { posts: uniquePosts, count }
 }
 
+export async function getNewsDigests(limit = 10, offset = 0) {
+  const now = new Date()
+  const threshold = new Date(now)
+  threshold.setMonth(threshold.getMonth() - 2)
+
+  const fromDate = threshold.toISOString()
+
+  let query = supabase
+    .from('news_digests')
+    .select('*', { count: 'exact' })
+    .gte('period_start', fromDate)
+    .order('digest_date', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  const { data, count, error } = await query
+  if (error) throw error
+
+  const digests = (data || []).map(digest => ({
+    id: digest.id,
+    digestDate: digest.digest_date,
+    periodStart: digest.period_start,
+    periodEnd: digest.period_end,
+    totalPosts: digest.total_posts ?? 0,
+    totalChannels: digest.total_channels ?? 0,
+    pdfUrl: digest.pdf_url || null,
+    summary: digest.summary || digest.overview || '',
+  }))
+
+  const hasMore = typeof count === 'number' ? offset + digests.length < count : (data || []).length === limit
+
+  return { digests, hasMore }
+}
+
+export async function getNewsDigestDetails(digestId) {
+  const { data: digestPosts, error: digestError } = await supabase
+    .from('news_digest_posts')
+    .select('post_id, rank_in_category')
+    .eq('digest_id', digestId)
+    .order('rank_in_category')
+
+  if (digestError) throw digestError
+
+  const postIds = (digestPosts || []).map(item => item.post_id)
+  if (postIds.length === 0) {
+    return { posts: [] }
+  }
+
+  const { data: postsData, error: postsError } = await supabase
+    .from('news_posts')
+    .select(`
+      *,
+      news_channels(id, username, title, source_type),
+      news_post_categories(category_id, confidence, is_manual, news_categories(id, name, color))
+    `)
+    .in('id', postIds)
+
+  if (postsError) throw postsError
+
+  const postsById = new Map(
+    (postsData || []).map(post => {
+      const categories = (post.news_post_categories || [])
+        .map(pc => ({
+          ...pc.news_categories,
+          confidence: pc.confidence,
+          is_manual: pc.is_manual,
+        }))
+        .filter(Boolean)
+
+      return [post.id, {
+        ...post,
+        channel: post.news_channels || null,
+        categories,
+      }]
+    })
+  )
+
+  const posts = (digestPosts || [])
+    .map(item => {
+      const post = postsById.get(item.post_id)
+      if (!post) return null
+      return {
+        ...post,
+        rank: item.rank_in_category,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0))
+
+  return { posts }
+}
+
 export async function addPostCategory(postId, categoryId) {
   const { data, error } = await supabase
     .from('news_post_categories')
