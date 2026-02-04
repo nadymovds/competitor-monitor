@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { getUnifiedFeed } from '../../services/feed'
+import { getUnifiedFeed, getLastScanDate } from '../../services/feed'
 import { getNewsCategories, getNewsChannels } from '../../services/news'
 import { hapticFeedback, openLink, openTelegramLink } from '../../services/telegram'
 import FeedTypeToggle from '../ui/FeedTypeToggle'
@@ -41,16 +41,21 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const observerTarget = useRef(null)
   const initialized = useRef(false)
 
+  // Дата последнего сканирования
+  const [lastScanDate, setLastScanDate] = useState(null)
+
   // Загрузка справочников
   useEffect(() => {
     async function loadReferences() {
       try {
-        const [cats, chs] = await Promise.all([
+        const [cats, chs, lastScan] = await Promise.all([
           getNewsCategories(),
-          getNewsChannels()
+          getNewsChannels(),
+          getLastScanDate()
         ])
         setNewsCategories(cats)
         setNewsChannels(chs)
+        setLastScanDate(lastScan)
       } catch (err) {
         console.error('Failed to load references:', err)
       }
@@ -211,7 +216,14 @@ const resetCompetitorFilters = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Лента</h1>
+      <div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, marginBottom: 4 }}>Лента новостей</h1>
+        {lastScanDate && (
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            Последнее сканирование: {formatDateTime(lastScanDate)}
+          </div>
+        )}
+      </div>
 
       {/* Переключатель типа */}
       <FeedTypeToggle feedType={feedType} onChange={handleFeedTypeChange} />

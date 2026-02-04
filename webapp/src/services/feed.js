@@ -250,3 +250,51 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
       .filter(cat => cat.is_visible !== false)
   }))
 }
+
+/**
+ * Получить дату последнего сканирования (самое позднее из всех источников)
+ * @returns {Promise<string|null>} - Дата последнего сканирования в ISO формате
+ */
+export async function getLastScanDate() {
+  try {
+    // Получаем последнее изменение с сайтов конкурентов
+    const { data: lastChange } = await supabase
+      .from('changes')
+      .select('detected_at')
+      .order('detected_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    // Получаем последний пост из TG-каналов конкурентов
+    const { data: lastTgPost } = await supabase
+      .from('competitor_tg_posts')
+      .select('post_date, detected_at')
+      .order('post_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    // Получаем последнюю новость отрасли
+    const { data: lastNews } = await supabase
+      .from('news_posts')
+      .select('post_date')
+      .order('post_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    // Собираем все даты
+    const dates = []
+    if (lastChange?.detected_at) dates.push(new Date(lastChange.detected_at))
+    if (lastTgPost?.post_date) dates.push(new Date(lastTgPost.post_date))
+    if (lastTgPost?.detected_at) dates.push(new Date(lastTgPost.detected_at))
+    if (lastNews?.post_date) dates.push(new Date(lastNews.post_date))
+
+    // Находим самую позднюю дату
+    if (dates.length === 0) return null
+    
+    const latestDate = new Date(Math.max(...dates))
+    return latestDate.toISOString()
+  } catch (err) {
+    console.error('Failed to get last scan date:', err)
+    return null
+  }
+}

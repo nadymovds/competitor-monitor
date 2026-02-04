@@ -152,7 +152,7 @@ const styles = {
   },
   main: {
     flex: 1,
-    paddingBottom: 80
+    padding: '16px 16px 80px 16px'
   },
   loadingContainer: {
     display: 'flex',
