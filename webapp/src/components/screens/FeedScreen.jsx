@@ -303,6 +303,7 @@ const resetCompetitorFilters = () => {
               onChange={setSelectedGroups}
               placeholder="Все группы"
             />
+          </div>
         </div>
       )}
 
