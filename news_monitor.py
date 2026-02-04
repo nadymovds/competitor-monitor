@@ -73,7 +73,10 @@ DEFAULT_CSS_CONFIG = {
 
 
 async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSession) -> list:
-    """Извлечение новостей через LLM (fallback когда CSS не работает)."""
+    """Извлечение новостей через LLM из HTML страницы.
+
+    Возвращает список новостей с полями: title, text, post_date, article_url, content_hash.
+    """
     try:
         # Очищаем HTML от служебных элементов
         soup = BeautifulSoup(html, 'lxml')
@@ -81,8 +84,13 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
             tag.decompose()
 
         # Берём текстовое содержимое (ограничиваем размер)
-        text_content = soup.get_text(separator='\n', strip=True)[:10000]
+        text_content = soup.get_text(separator='\n', strip=True)[:12000]
+
+        # Детальное логирование входных данных
         print(f"    📝 Текст для LLM: {len(text_content)} символов")
+        print(f"    📄 Превью контента (первые 500 символов):")
+        preview = text_content[:500].replace('\n', ' ')
+        print(f"       {preview}...")
 
         if len(text_content) < 200:
             print(f"    ⚠️ Контент слишком короткий: {len(text_content)} < 200")
@@ -90,61 +98,94 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
 
         prompt = f"""Проанализируй текст веб-страницы и извлеки из него список новостей или статей.
 
+URL СТРАНИЦЫ: {base_url}
+
 ТЕКСТ СТРАНИЦЫ:
 {text_content}
 
-ЗАДАЧА: Найди все новости/статьи на странице. Для каждой извлеки заголовок и краткое описание.
+ЗАДАЧА: Найди ВСЕ новости, статьи или анонсы на странице. Для каждой извлеки:
+- title: точный заголовок новости
+- text: краткое описание или первый абзац (до 500 символов)
+- date: дата публикации если есть (формат YYYY-MM-DD), иначе null
 
-ВАЖНО:
-- Игнорируй служебные тексты (формы входа, регистрации, восстановления пароля)
-- Игнорируй меню навигации, футеры, рекламу
-- Извлекай только реальные новости/статьи о транспорте, логистике, ГЛОНАСС/GPS
+ПРАВИЛА:
+1. Извлекай ВСЕ новости/статьи, которые найдёшь на странице
+2. Игнорируй только: меню навигации, формы входа/регистрации, футеры, рекламные баннеры
+3. НЕ фильтруй по тематике — извлекай любые новости/статьи
+4. Если текст новости обрезан ("..."), всё равно включи её с доступным текстом
 
-ФОРМАТ ОТВЕТА (только JSON, без пояснений):
+ФОРМАТ ОТВЕТА (строго JSON, без markdown и пояснений):
 {{
     "news": [
-        {{"title": "Заголовок новости 1", "text": "Краткое описание (до 500 символов)"}},
-        {{"title": "Заголовок новости 2", "text": "Краткое описание"}}
+        {{"title": "Заголовок новости", "text": "Описание новости", "date": "2026-01-15"}},
+        {{"title": "Другая новость", "text": "Её описание", "date": null}}
     ]
 }}
 
-Если новостей нет — верни: {{"news": []}}
+Если на странице нет новостей — верни: {{"news": []}}
 """
 
-        response = await call_llm_async(prompt, session, max_tokens=2000)
+        print(f"    🤖 Отправляю запрос к LLM...")
+        response = await call_llm_async(prompt, session, max_tokens=3000)
 
         if not response:
-            print(f"    ⚠️ LLM вернул пустой ответ")
+            print(f"    ❌ LLM вернул пустой ответ")
             return []
 
-        # Парсим JSON ответ
-        response = response.strip()
-        response = re.sub(r'^```json?\s*', '', response)
-        response = re.sub(r'\s*```$', '', response)
+        # Логируем сырой ответ LLM
+        print(f"    📥 Ответ LLM ({len(response)} символов):")
+        print(f"       {response[:300]}...")
 
-        data = json.loads(response)
+        # Парсим JSON ответ
+        response_clean = response.strip()
+        response_clean = re.sub(r'^```json?\s*', '', response_clean)
+        response_clean = re.sub(r'\s*```$', '', response_clean)
+
+        try:
+            data = json.loads(response_clean)
+        except json.JSONDecodeError as e:
+            print(f"    ❌ JSON parse error: {e}")
+            print(f"    📄 Полный ответ LLM для диагностики:")
+            print(f"       {response_clean[:1000]}")
+            return []
+
         news_list = data.get('news', [])
 
         if not news_list:
-            print(f"    ⚠️ LLM не нашёл новостей в JSON")
+            print(f"    ⚠️ LLM вернул пустой список новостей")
             return []
 
+        print(f"    ✅ LLM нашёл {len(news_list)} новостей")
+
         result = []
-        for item in news_list[:MAX_NEWS_PER_WEBSITE]:
+        filtered_short = 0
+        filtered_no_title = 0
+
+        for i, item in enumerate(news_list[:MAX_NEWS_PER_WEBSITE]):
             title = item.get('title', '').strip()
             text = item.get('text', '').strip()
+            date_str = item.get('date')
 
-            if not title or len(text) < 30:
+            # Логируем каждую новость
+            print(f"       [{i+1}] {title[:80]}{'...' if len(title) > 80 else ''}")
+
+            if not title:
+                filtered_no_title += 1
+                print(f"           ⏭️ Пропущено: нет заголовка")
                 continue
 
-            # Проверка релевантности (транспорт/логистика)
-            combined = f"{title} {text}".lower()
-            keywords = ['транспорт', 'логистик', 'перевоз', 'груз', 'доставк', 'склад',
-                       'глонасс', 'gps', 'навигац', 'мониторинг', 'трекер', 'автопарк',
-                       'жд', 'железнодорож', 'авиа', 'морск', 'порт', 'дорог']
-            if not any(kw in combined for kw in keywords):
-                print(f"    ⏭️ Отфильтровано (нет ключевых слов): {title[:60]}...")
+            if len(text) < 20:
+                filtered_short += 1
+                print(f"           ⏭️ Пропущено: текст слишком короткий ({len(text)} < 20)")
                 continue
+
+            # Парсим дату если есть
+            post_date = None
+            if date_str:
+                try:
+                    post_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    pass
 
             # Формируем хэш для дедупликации
             content_for_hash = f"{title}\n{text}"
@@ -153,19 +194,18 @@ async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSess
             result.append({
                 'title': title[:500],
                 'text': text[:2000],
-                'post_date': None,
+                'post_date': post_date,
                 'article_url': base_url,
                 'content_hash': content_hash,
             })
 
-        print(f"    📊 LLM: всего {len(news_list)}, после фильтра {len(result)}")
+        print(f"    📊 Итого: найдено {len(news_list)}, принято {len(result)}, отклонено: без заголовка={filtered_no_title}, короткий текст={filtered_short}")
         return result
 
-    except json.JSONDecodeError as e:
-        print(f"    ⚠️ LLM вернул невалидный JSON: {e}")
-        return []
     except Exception as e:
-        print(f"    ⚠️ LLM extraction error: {e}")
+        print(f"    ❌ LLM extraction error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -613,6 +653,8 @@ async def fetch_website_news_page(url: str, browser_context) -> str:
     async with browser_semaphore:
         page = await browser_context.new_page()
         try:
+            print(f"    🌐 Playwright: открываю страницу...")
+
             # Stealth-настройки
             await page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -638,21 +680,29 @@ async def fetch_website_news_page(url: str, browser_context) -> str:
 
             # Загрузка страницы с разными стратегиями
             load_success = False
+            last_error = None
             for wait_strategy in ['domcontentloaded', 'load', 'networkidle']:
                 try:
+                    print(f"    🔄 Пробую стратегию: {wait_strategy}...")
                     await page.goto(url, timeout=WEB_PLAYWRIGHT_TIMEOUT, wait_until=wait_strategy)
                     load_success = True
+                    print(f"    ✅ Страница загружена (стратегия: {wait_strategy})")
                     break
                 except Exception as e:
+                    last_error = str(e)
+                    print(f"    ⚠️ Стратегия {wait_strategy} не удалась: {str(e)[:100]}")
                     if 'timeout' not in str(e).lower():
                         break
                     continue
 
             if not load_success:
+                print(f"    ❌ Не удалось загрузить страницу ни одной стратегией")
+                print(f"    💡 Последняя ошибка: {last_error[:200] if last_error else 'N/A'}")
                 await page.close()
                 return ""
 
             # Ждём загрузки динамического контента
+            print(f"    ⏳ Ожидаю динамический контент (2.5 сек)...")
             await page.wait_for_timeout(2500)
 
             # Скролл для активации lazy-load
@@ -663,20 +713,27 @@ async def fetch_website_news_page(url: str, browser_context) -> str:
                 pass
 
             html = await page.content()
+            print(f"    📄 Получен HTML: {len(html)} символов")
 
             # Проверка на страницу защиты
             if is_protection_page(html):
-                print(f"  ⚠️ Обнаружена защита от ботов на {url}")
+                print(f"    🛡️ Обнаружена защита от ботов!")
+                print(f"    📄 Превью HTML: {html[:300]}...")
                 await page.close()
                 return ""
+
+            # Проверка на минимальный контент
+            if len(html) < 1000:
+                print(f"    ⚠️ HTML слишком короткий ({len(html)} < 1000)")
+                print(f"    📄 Содержимое: {html[:500]}")
 
             return html
 
         except PlaywrightTimeout:
-            print(f"  ⚠️ Таймаут при загрузке {url}")
+            print(f"    ❌ Таймаут Playwright ({WEB_PLAYWRIGHT_TIMEOUT}ms)")
             return ""
         except Exception as e:
-            print(f"  ❌ Ошибка загрузки {url}: {e}")
+            print(f"    ❌ Ошибка Playwright: {type(e).__name__}: {e}")
             return ""
         finally:
             try:
@@ -816,17 +873,23 @@ async def scan_website_source(source: dict, browser_context, session: aiohttp.Cl
         'error_message': None,
         'items_found': 0,
         'items_saved': 0,
+        'items_duplicates': 0,
         'new_items': [],
     }
 
-    print(f"  🌐 Загрузка {url}...")
+    print(f"\n  {'='*60}")
+    print(f"  🌐 Сканирование: {title}")
+    print(f"  📎 URL: {url}")
+    print(f"  {'='*60}")
 
     html = await fetch_website_news_page(url, browser_context)
     if not html:
         result['error_type'] = 'fetch_error'
         result['error_message'] = 'Не удалось загрузить страницу'
-        print(f"  ❌ Не удалось загрузить страницу: {url}")
+        print(f"  ❌ ОШИБКА: Не удалось загрузить страницу")
+        print(f"  💡 Возможные причины: таймаут, блокировка, ошибка сети")
         return result
+
     print(f"  ✅ HTML загружен: {len(html)} символов")
 
     # Напрямую LLM-извлечение (без CSS-селекторов)
@@ -834,24 +897,30 @@ async def scan_website_source(source: dict, browser_context, session: aiohttp.Cl
 
     if not news_items:
         result['error_type'] = 'no_news'
-        result['error_message'] = 'LLM не нашёл новостей'
-        print(f"  ℹ️ LLM не нашёл новостей на странице")
+        result['error_message'] = 'LLM не нашёл новостей на странице'
+        print(f"  ⚠️ РЕЗУЛЬТАТ: Новости не найдены")
         return result
 
     result['items_found'] = len(news_items)
-    print(f"  📰 Найдено элементов: {len(news_items)}")
 
     # Фильтрация дубликатов по content_hash
     new_items = []
+    duplicates = 0
     for item in news_items:
         content_hash = item.get('content_hash')
         if content_hash and content_hash not in existing_hashes:
             new_items.append(item)
             existing_hashes.add(content_hash)
+        else:
+            duplicates += 1
+            print(f"    🔁 Дубликат: {item.get('title', '')[:60]}...")
 
     result['is_success'] = True
     result['new_items'] = new_items
     result['items_saved'] = len(new_items)
+    result['items_duplicates'] = duplicates
+
+    print(f"  ✅ РЕЗУЛЬТАТ: найдено {len(news_items)}, новых {len(new_items)}, дубликатов {duplicates}")
 
     return result
 
