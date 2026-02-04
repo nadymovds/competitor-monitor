@@ -23,6 +23,7 @@ export default function NewsFilters({
   customDateFrom,
   customDateTo,
   onChange,
+  hideDate = false,
 }) {
   const [collapsed, setCollapsed] = useState(false)
 

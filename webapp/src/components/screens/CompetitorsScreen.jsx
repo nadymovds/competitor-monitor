@@ -3,7 +3,7 @@ import { getCompetitors, getCompetitorWithHistory, updateCompetitor, createCompe
 import { openLink, openTelegramLink, hapticFeedback, showBackButton, hideBackButton, showAlert } from '../../services/telegram'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
 
-export default function CompetitorsScreen({ user, groups: initialGroups, selectedCompetitorId, cameFromMonitoring, onBackToMonitoring, onClearSelection }) {
+export default function CompetitorsScreen({ user, groups: initialGroups, selectedCompetitorId, cameFromMonitoring, onBackToMonitoring, onBackToFeed, onClearSelection }) {
   const [competitors, setCompetitors] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
