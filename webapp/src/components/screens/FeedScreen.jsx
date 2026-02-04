@@ -231,27 +231,6 @@ const resetCompetitorFilters = () => {
       {/* Фильтры для режима "Конкуренты" */}
       {feedType === 'competitors' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Фильтр по группам */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 14, color: '#9ca3af' }}>Группы</span>
-              {(selectedGroups.length > 0 || activeSourceFilter !== 'all' || activeCategory !== 'all') && (
-                <button
-                  onClick={resetCompetitorFilters}
-                  style={{ fontSize: 12, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer' }}
-                >
-                  Сбросить
-                </button>
-              )}
-            </div>
-            <MultiSelect
-              options={groups}
-              selectedIds={selectedGroups}
-              onChange={setSelectedGroups}
-              placeholder="Все группы"
-            />
-          </div>
-
           {/* Фильтр по источникам */}
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
             {[
@@ -280,7 +259,6 @@ const resetCompetitorFilters = () => {
               </button>
             ))}
           </div>
-
           {/* Фильтр по категориям */}
           {Object.keys(categoryCounts).length > 0 && (
             <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
@@ -305,6 +283,26 @@ const resetCompetitorFilters = () => {
               ))}
             </div>
           )}
+
+          {/* Фильтр по группам */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 14, color: '#9ca3af' }}>Группы</span>
+              {(selectedGroups.length > 0 || activeSourceFilter !== 'all' || activeCategory !== 'all') && (
+                <button
+                  onClick={resetCompetitorFilters}
+                  style={{ fontSize: 12, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer' }}
+                >
+                  Сбросить
+                </button>
+              )}
+            </div>
+            <MultiSelect
+              options={groups}
+              selectedIds={selectedGroups}
+              onChange={setSelectedGroups}
+              placeholder="Все группы"
+            />
         </div>
       )}
 
