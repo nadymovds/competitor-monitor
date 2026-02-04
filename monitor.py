@@ -778,7 +778,7 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
 
 def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, Any]:
     default_result = {
-        "category": CATEGORY_TECHNICAL,
+        "category": CATEGORY_OTHER,
         "tags": [],
         "summary": "",
         "is_meaningful": False
@@ -810,7 +810,7 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         result = json.loads(json_str)
         
         if result.get("category") not in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_TECHNICAL, CATEGORY_SERVICES, CATEGORY_OTHER]:
-            result["category"] = CATEGORY_TECHNICAL
+            result["category"] = CATEGORY_OTHER
         
         valid_tags = [t for t in result.get("tags", []) if t in TAGS]
         result["tags"] = valid_tags[:3]
@@ -827,7 +827,7 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         if summary and non_printable > len(summary) * 0.1:
             result["is_meaningful"] = False
             result["summary"] = "Ошибка анализа контента"
-            result["category"] = CATEGORY_TECHNICAL
+            result["category"] = CATEGORY_OTHER
             return result
 
         # Удаляем нерусские/неанглийские символы (оставляем кириллицу, латиницу, цифры, пунктуацию)
@@ -874,13 +874,22 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         if is_uninformative:
             result["summary"] = summary if summary else f"Обновлён контент сайта {competitor_name}"
             result["is_meaningful"] = False
-            result["category"] = CATEGORY_TECHNICAL
+            # НЕ меняем категорию - оставляем то, что вернул LLM
             return result
 
         # Проверка релевантности
-        relevant_keywords = ['транспорт', 'мониторинг', 'глонасс', 'gps', 'трекер',
-                             'тахограф', 'топлив', 'автопарк', 'навигац', 'телематик',
-                             'датчик', 'wialon', 'слежен', 'контрол']
+        relevant_keywords = [
+            # Отраслевые термины
+            'транспорт', 'мониторинг', 'глонасс', 'gps', 'трекер',
+            'тахограф', 'топлив', 'автопарк', 'навигац', 'телематик',
+            'датчик', 'wialon', 'слежен', 'контрол',
+            # Бизнес-термины
+            'цен', 'скидк', 'акци', 'тариф', 'предложени', 'бесплатн',
+            'обновлен', 'новый', 'новая', 'новое', 'запуск', 'выпуск',
+            'функци', 'возможност', 'интеграц', 'подключ',
+            'услуг', 'сервис', 'поддержк', 'обслуживан',
+            'партнёр', 'клиент', 'компани',
+        ]
 
         has_relevant = any(kw in summary_lower for kw in relevant_keywords)
 
@@ -899,7 +908,7 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', response)
         if summary_match and len(summary_match.group(1)) > 40:
             return {
-                "category": CATEGORY_TECHNICAL,
+                "category": CATEGORY_OTHER,
                 "tags": [],
                 "summary": summary_match.group(1),
                 "is_meaningful": True
