@@ -1750,15 +1750,20 @@ async def run_news_monitoring_async():
 
         print(f"✅ Обработано LLM: {processed_count} из {len(unprocessed)}")
 
-        # === ФАЗА 3: ДАЙДЖЕСТ ===
+        # === ФАЗА 3: ДАЙДЖЕСТ И СТАТИСТИКА ===
         print("\n" + "=" * 60)
-        print("ФАЗА 3: ГЕНЕРАЦИЯ ДАЙДЖЕСТА")
+        print("ФАЗА 3: ГЕНЕРАЦИЯ ДАЙДЖЕСТА И СОХРАНЕНИЕ СТАТИСТИКИ")
         print("=" * 60)
 
         # 11. Получение постов для дайджеста
         digest_posts = get_posts_for_digest(period_start, period_end)
         print(f"📰 Постов для дайджеста: {len(digest_posts)}")
 
+        # Инициализация переменных
+        pdf_path = None
+        all_post_ids = []
+        total_digest_posts = 0
+        
         if digest_posts:
             # Плоский список постов с тегами категорий (без группировки)
             posts_flat = []
@@ -1820,18 +1825,35 @@ async def run_news_monitoring_async():
                 channels_count=len(all_sources),
             )
 
-            # 13. Сохранение дайджеста в БД
+            # Сохранение ID постов для связи с дайджестом
             all_post_ids = [p.get('id') for p in digest_posts if p.get('id')]
             total_digest_posts = len(posts_flat)
 
-            digest_data = {
-                'digest_date': current_date,
-                'period_start': period_start.isoformat(),
-                'period_end': period_end.isoformat(),
-                'total_posts': total_digest_posts,
-                'total_channels': len(all_sources),
-            }
-            digest_id = save_digest(digest_data, all_post_ids)
+        # 13. Сохранение дайджеста в БД (сохраняем ВСЕГДА, даже если нет постов)
+        # Подсчет категорий для статистики
+        categories_summary = {}
+        for post in digest_posts:
+            post_categories = post.get('news_post_categories', [])
+            for pc in post_categories:
+                cat_info = pc.get('news_categories', {})
+                if cat_info and cat_info.get('is_visible', True):
+                    cat_name = cat_info['name']
+                    categories_summary[cat_name] = categories_summary.get(cat_name, 0) + 1
+
+        digest_data = {
+            'digest_date': current_date,
+            'period_start': period_start.date().isoformat(),
+            'period_end': period_end.date().isoformat(),
+            'posts_count': total_digest_posts,
+            'categories_summary': categories_summary if categories_summary else None,
+            'pdf_url': pdf_path if pdf_path else None,
+        }
+        
+        digest_id = save_digest(digest_data, all_post_ids)
+        if digest_id:
+            print(f"✅ Дайджест сохранён в БД (ID: {digest_id})")
+        else:
+            print(f"⚠️ Не удалось сохранить дайджест в БД")
 
     # Итоговая статистика
     elapsed = int(time.time() - start_time)
