@@ -72,6 +72,30 @@ DEFAULT_CSS_CONFIG = {
 }
 
 
+def repair_truncated_json(json_str: str) -> str:
+    """Пытается восстановить обрезанный JSON (когда LLM превысил max_tokens)."""
+    json_str = json_str.strip()
+
+    # Если JSON корректно закрыт — возвращаем как есть
+    if json_str.endswith('}'):
+        return json_str
+
+    # Находим последний полный элемент массива (заканчивается на },)
+    last_complete = json_str.rfind('},')
+    if last_complete > 0:
+        # Обрезаем до последнего полного элемента и закрываем JSON
+        json_str = json_str[:last_complete + 1] + ']}'
+        return json_str
+
+    # Альтернатива: находим последнюю закрывающую скобку объекта
+    last_brace = json_str.rfind('}')
+    if last_brace > 0:
+        json_str = json_str[:last_brace + 1] + ']}'
+        return json_str
+
+    return json_str
+
+
 async def extract_with_llm(html: str, base_url: str, session: aiohttp.ClientSession) -> list:
     """Извлечение новостей через LLM из HTML страницы.
 
@@ -109,10 +133,11 @@ URL СТРАНИЦЫ: {base_url}
 - date: дата публикации если есть (формат YYYY-MM-DD), иначе null
 
 ПРАВИЛА:
-1. Извлекай ВСЕ новости/статьи, которые найдёшь на странице
+1. Извлекай МАКСИМУМ 15 самых свежих новостей (не больше!)
 2. Игнорируй только: меню навигации, формы входа/регистрации, футеры, рекламные баннеры
 3. НЕ фильтруй по тематике — извлекай любые новости/статьи
-4. Если текст новости обрезан ("..."), всё равно включи её с доступным текстом
+4. Если текст новости обрезан ("...") или отсутствует — используй заголовок как текст
+5. Поле "text" обязательно должно содержать хотя бы заголовок
 
 ФОРМАТ ОТВЕТА (строго JSON, без markdown и пояснений):
 {{
@@ -126,7 +151,7 @@ URL СТРАНИЦЫ: {base_url}
 """
 
         print(f"    🤖 Отправляю запрос к LLM...")
-        response = await call_llm_async(prompt, session, max_tokens=3000)
+        response = await call_llm_async(prompt, session, max_tokens=4500)
 
         if not response:
             print(f"    ❌ LLM вернул пустой ответ")
@@ -144,10 +169,18 @@ URL СТРАНИЦЫ: {base_url}
         try:
             data = json.loads(response_clean)
         except json.JSONDecodeError as e:
-            print(f"    ❌ JSON parse error: {e}")
-            print(f"    📄 Полный ответ LLM для диагностики:")
-            print(f"       {response_clean[:1000]}")
-            return []
+            # Попытка восстановить обрезанный JSON
+            print(f"    ⚠️ JSON parse error: {e}")
+            print(f"    🔧 Пробуем восстановить обрезанный JSON...")
+            repaired = repair_truncated_json(response_clean)
+            try:
+                data = json.loads(repaired)
+                print(f"    ✅ JSON успешно восстановлен!")
+            except json.JSONDecodeError as e2:
+                print(f"    ❌ Не удалось восстановить JSON: {e2}")
+                print(f"    📄 Полный ответ LLM для диагностики:")
+                print(f"       {response_clean[:1000]}")
+                return []
 
         news_list = data.get('news', [])
 
@@ -158,8 +191,8 @@ URL СТРАНИЦЫ: {base_url}
         print(f"    ✅ LLM нашёл {len(news_list)} новостей")
 
         result = []
-        filtered_short = 0
         filtered_no_title = 0
+        used_title_as_text = 0
 
         for i, item in enumerate(news_list[:MAX_NEWS_PER_WEBSITE]):
             title = item.get('title', '').strip()
@@ -174,10 +207,11 @@ URL СТРАНИЦЫ: {base_url}
                 print(f"           ⏭️ Пропущено: нет заголовка")
                 continue
 
-            if len(text) < 20:
-                filtered_short += 1
-                print(f"           ⏭️ Пропущено: текст слишком короткий ({len(text)} < 20)")
-                continue
+            # Если текст пустой или слишком короткий — используем заголовок
+            if not text or len(text) < 10:
+                text = title
+                used_title_as_text += 1
+                print(f"           ℹ️ Текст пустой, используем заголовок")
 
             # Парсим дату если есть
             post_date = None
@@ -199,7 +233,7 @@ URL СТРАНИЦЫ: {base_url}
                 'content_hash': content_hash,
             })
 
-        print(f"    📊 Итого: найдено {len(news_list)}, принято {len(result)}, отклонено: без заголовка={filtered_no_title}, короткий текст={filtered_short}")
+        print(f"    📊 Итого: найдено {len(news_list)}, принято {len(result)}, без заголовка={filtered_no_title}, title→text={used_title_as_text}")
         return result
 
     except Exception as e:
