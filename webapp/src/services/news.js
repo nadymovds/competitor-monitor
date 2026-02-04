@@ -272,13 +272,47 @@ export async function getNewsDigests(limit = 10, offset = 0) {
 
   if (error) throw error
 
+  // Подсчитываем количество каналов для каждого дайджеста
+  const digestsWithStats = await Promise.all((data || []).map(async (digest) => {
+    // Получаем уникальные каналы из постов дайджеста
+    const { data: posts } = await supabase
+      .from('news_digest_posts')
+      .select('post_id, news_posts!inner(channel_id)')
+      .eq('digest_id', digest.id)
+    
+    const uniqueChannels = new Set(posts?.map(p => p.news_posts?.channel_id).filter(Boolean) || [])
+    
+    return {
+      ...digest,
+      total_posts: digest.posts_count || 0,
+      total_channels: uniqueChannels.size,
+      period_days: Math.ceil((new Date(digest.period_end) - new Date(digest.period_start)) / (1000 * 60 * 60 * 24))
+    }
+  }))
+
   return {
-    digests: data || [],
+    digests: digestsWithStats,
     hasMore: (count || 0) > offset + limit
   }
 }
 
 export async function getNewsDigestDetails(digestId) {
+  // Получаем посты через связующую таблицу news_digest_posts
+  const { data: digestPosts, error: digestError } = await supabase
+    .from('news_digest_posts')
+    .select('post_id, rank_in_category')
+    .eq('digest_id', digestId)
+    .order('rank_in_category', { ascending: true })
+
+  if (digestError) throw digestError
+
+  if (!digestPosts || digestPosts.length === 0) {
+    return { posts: [] }
+  }
+
+  // Получаем полную информацию о постах
+  const postIds = digestPosts.map(dp => dp.post_id)
+  
   const { data, error } = await supabase
     .from('news_posts')
     .select(`
@@ -291,8 +325,7 @@ export async function getNewsDigestDetails(digestId) {
         news_categories (id, name, color, is_visible)
       )
     `)
-    .eq('digest_id', digestId)
-    .eq('is_processed', true)
+    .in('id', postIds)
     .order('post_date', { ascending: false })
 
   if (error) throw error

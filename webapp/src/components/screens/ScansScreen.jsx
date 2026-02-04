@@ -129,7 +129,15 @@ export default function ScansScreen({ onNavigateToCompetitor }) {
 
         {!loading && scans.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>
-            Нет сканирований
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📭</div>
+            <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>
+              {scanType === 'competitors' ? 'Нет сканирований конкурентов' : 'Нет дайджестов новостей'}
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.7 }}>
+              {scanType === 'competitors' 
+                ? 'Сканирования появятся после запуска мониторинга'
+                : 'Дайджесты появятся после обработки новостей'}
+            </div>
           </div>
         )}
 
@@ -147,7 +155,7 @@ const styles = {
     backgroundColor: '#0f0f19'
   },
   header: {
-    padding: '16px 16px 12px 16px'
+    paddingBottom: 12
   },
   title: {
     fontSize: 24,
@@ -162,7 +170,7 @@ const styles = {
     borderRadius: 8,
     padding: 3,
     border: '1px solid #2a2a3a',
-    margin: '0 16px 12px 16px'
+    marginBottom: 12
   },
   segment: {
     flex: 1,
@@ -183,7 +191,6 @@ const styles = {
   scansList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 12,
-    padding: '0 16px'
+    gap: 12
   }
 }

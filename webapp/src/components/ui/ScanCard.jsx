@@ -132,11 +132,13 @@ export default function ScanCard({ scan, scanType, onExpand, onNavigateToCompeti
     )
   } else {
     // News digest
+    const digestDate = scan.digest_date || scan.created_at
+    
     return (
       <div style={styles.card}>
         {/* Заголовок */}
         <button onClick={handleToggle} style={styles.header}>
-          <span style={styles.date}>{formatDate(scan.created_at)}</span>
+          <span style={styles.date}>{formatDate(digestDate)}</span>
           <span style={{ ...styles.arrow, transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
         </button>
 
@@ -144,7 +146,7 @@ export default function ScanCard({ scan, scanType, onExpand, onNavigateToCompeti
         {!isExpanded && (
           <div style={{ ...styles.stats, gridTemplateColumns: 'repeat(3, 1fr)' }}>
             <StatBox label="Каналов" value={scan.total_channels || 0} />
-            <StatBox label="Постов" value={scan.total_posts || 0} color="#3b82f6" />
+            <StatBox label="Постов" value={scan.total_posts || scan.posts_count || 0} color="#3b82f6" />
             <StatBox label="Период" value={scan.period_days ? `${scan.period_days}д` : '7д'} />
           </div>
         )}
@@ -158,7 +160,7 @@ export default function ScanCard({ scan, scanType, onExpand, onNavigateToCompeti
               <>
                 <div style={{ ...styles.stats, gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 16 }}>
                   <StatBox label="Каналов" value={scan.total_channels || 0} />
-                  <StatBox label="Постов" value={scan.total_posts || 0} color="#3b82f6" />
+                  <StatBox label="Постов" value={scan.total_posts || scan.posts_count || 0} color="#3b82f6" />
                   <StatBox label="Период" value={scan.period_days ? `${scan.period_days}д` : '7д'} />
                 </div>
 
