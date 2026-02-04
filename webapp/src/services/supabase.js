@@ -317,8 +317,44 @@ export async function getCompetitorScans(limit = 10, offset = 0) {
 
   if (error) throw error
 
+  const scans = data || []
+
+  // Если есть отчёты, загружаем счётчики изменений
+  if (scans.length > 0) {
+    const reportIds = scans.map(r => r.id)
+
+    const [changesResult, tgPostsResult] = await Promise.all([
+      supabase
+        .from('changes')
+        .select('report_id')
+        .in('report_id', reportIds)
+        .neq('category', 'technical'),
+      supabase
+        .from('competitor_tg_posts')
+        .select('report_id')
+        .in('report_id', reportIds)
+        .eq('is_processed', true)
+        .neq('category', 'technical')
+    ])
+
+    // Подсчитываем количество изменений по report_id
+    const changeCounts = {}
+    reportIds.forEach(id => changeCounts[id] = 0)
+    changesResult.data?.forEach(item => {
+      changeCounts[item.report_id] = (changeCounts[item.report_id] || 0) + 1
+    })
+    tgPostsResult.data?.forEach(item => {
+      changeCounts[item.report_id] = (changeCounts[item.report_id] || 0) + 1
+    })
+
+    // Добавляем счётчики к отчётам
+    scans.forEach(scan => {
+      scan.total_changes = changeCounts[scan.id] || 0
+    })
+  }
+
   return {
-    scans: data || [],
+    scans,
     hasMore: (count || 0) > offset + limit
   }
 }

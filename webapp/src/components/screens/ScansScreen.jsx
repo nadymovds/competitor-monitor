@@ -16,21 +16,20 @@ export default function ScansScreen({ onNavigateToCompetitor }) {
   const PAGE_SIZE = 10
 
   useEffect(() => {
-    // Сброс при смене типа
-    setLoading(true)
+    // Сброс и загрузка при смене типа
     setScans([])
     setOffset(0)
     setHasMore(true)
-    loadScans(scanType, 0)
+    loadScans(scanType, 0, true)
   }, [scanType])
 
   useEffect(() => {
-    if (!loadMoreRef.current || !hasMore) return
+    if (!loadMoreRef.current || !hasMore || loading) return
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && !loading && hasMore) {
-          loadScans(scanType, offset)
+          loadScans(scanType, offset, false)
         }
       },
       { rootMargin: '100px' }
@@ -40,21 +39,21 @@ export default function ScansScreen({ onNavigateToCompetitor }) {
     return () => observer.disconnect()
   }, [loading, hasMore, offset, scanType])
 
-  const loadScans = async (type, currentOffset) => {
-    if (loading) return
+  const loadScans = async (type, currentOffset, isInitial = false) => {
+    if (loading && !isInitial) return
     setLoading(true)
 
     try {
       let result
       if (type === 'competitors') {
-        result = await getCompetitorScans(currentOffset, PAGE_SIZE)
+        result = await getCompetitorScans(PAGE_SIZE, currentOffset)
       } else {
-        result = await getNewsDigests(currentOffset, PAGE_SIZE)
+        result = await getNewsDigests(PAGE_SIZE, currentOffset)
       }
 
       // Извлекаем данные из объекта {scans/digests, hasMore}
       const data = type === 'competitors' ? result.scans : result.digests
-      
+
       setHasMore(result.hasMore)
       setScans(prev => currentOffset === 0 ? data : [...prev, ...data])
       setOffset(currentOffset + PAGE_SIZE)

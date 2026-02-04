@@ -284,8 +284,8 @@ const resetCompetitorFilters = () => {
             </div>
           )}
 
-          {/* Фильтр по группам */}
-          <div>
+          {/* Фильтр по группам - размещён внизу с достаточным z-index для dropdown */}
+          <div style={{ position: 'relative', zIndex: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ fontSize: 14, color: '#9ca3af' }}>Группы</span>
               {(selectedGroups.length > 0 || activeSourceFilter !== 'all' || activeCategory !== 'all') && (
