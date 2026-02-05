@@ -1,5 +1,7 @@
 # Competitor Monitor — Telegram Mini App
 
+Сокращённая версия для скоростного развёртывания
+
 ## Установка
 
 ```bash
