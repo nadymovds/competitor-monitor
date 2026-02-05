@@ -358,7 +358,7 @@ const resetCompetitorFilters = () => {
               textTransform: 'uppercase'
             }}
           >
-            <span>Дополнительные фильтры</span>
+            <span>Больше фильтров</span>
             <span style={{ fontSize: 10 }}>{newsFiltersExpanded ? '▲' : '▼'}</span>
           </button>
           {newsFiltersExpanded && (
@@ -573,8 +573,24 @@ function NewsFeedItem({ item }) {
           {item.summary}
         </div>
       ) : !item.title ? (
-        <div style={{ fontSize: 14, fontWeight: 400, color: '#6b7280', lineHeight: 1.6, marginBottom: 10, fontStyle: 'italic' }}>
-          Нет доступного контента для этого поста. <button onClick={() => isTelegram ? openTelegramLink(linkUrl) : openLink(linkUrl)} style={{ color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>Открыть в источнике</button>
+        <div style={{ 
+          fontSize: 14, fontWeight: 500, color: '#9ca3af', lineHeight: 1.6, marginBottom: 10,
+          backgroundColor: '#252532', padding: '12px', borderRadius: 8, border: '1px solid #3b3b45',
+          display: 'flex', alignItems: 'center', gap: 8
+        }}>
+          <span style={{ fontSize: 18 }}>🔗</span>
+          <span>
+            Пост в источнике.{' '}
+            <button 
+              onClick={() => isTelegram ? openTelegramLink(linkUrl) : openLink(linkUrl)}
+              style={{ 
+                color: '#3b82f6', background: 'none', border: 'none', padding: 0, 
+                cursor: 'pointer', textDecoration: 'underline', fontSize: 14, fontWeight: 600
+              }}
+            >
+              Открыть
+            </button>
+          </span>
         </div>
       ) : null}
 
