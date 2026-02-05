@@ -416,6 +416,7 @@ const resetCompetitorFilters = () => {
                 dateRange="week"
                 onChange={handleNewsFiltersChange}
                 hideDate={true}
+                hideHeader={true}
               />
             </div>
           )}
@@ -576,7 +577,11 @@ function CompetitorFeedItem({ item, onNavigate }) {
 function NewsFeedItem({ item }) {
   const isTelegram = item.source_type === 'telegram'
   const linkUrl = item.post_url
-  const hasContent = item.title || item.summary
+  
+  // Проверяем наличие реального контента (не пусто и не только пробелы)
+  const hasTitle = item.title && item.title.trim().length > 0
+  const hasSummary = item.summary && item.summary.trim().length > 0
+  const hasContent = hasTitle || hasSummary
 
   return (
     <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 14 }}>
@@ -606,17 +611,17 @@ function NewsFeedItem({ item }) {
         </span>
       </div>
 
-      {item.title && (
+      {hasTitle && (
         <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', marginBottom: 8, lineHeight: 1.4 }}>
           {item.title}
         </div>
       )}
 
-      {item.summary ? (
+      {hasSummary ? (
         <div style={{ fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6, marginBottom: 10 }}>
           {item.summary}
         </div>
-      ) : !item.title ? (
+      ) : !hasContent ? (
         <div style={{ 
           fontSize: 14, fontWeight: 500, color: '#9ca3af', lineHeight: 1.6, marginBottom: 10,
           backgroundColor: '#252532', padding: '12px', borderRadius: 8, border: '1px solid #3b3b45',

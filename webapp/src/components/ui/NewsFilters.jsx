@@ -24,6 +24,7 @@ export default function NewsFilters({
   customDateTo,
   onChange,
   hideDate = false,
+  hideHeader = false,
 }) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -108,13 +109,15 @@ export default function NewsFilters({
   return (
     <div style={styles.container}>
       {/* Заголовок */}
-      <button
-        onClick={() => { hapticFeedback('light'); setCollapsed(!collapsed) }}
-        style={styles.headerBtn}
-      >
-        <span style={styles.headerTitle}>Фильтры</span>
-        <span style={styles.headerArrow}>{collapsed ? '▼' : '▲'}</span>
-      </button>
+      {!hideHeader && (
+        <button
+          onClick={() => { hapticFeedback('light'); setCollapsed(!collapsed) }}
+          style={styles.headerBtn}
+        >
+          <span style={styles.headerTitle}>Фильтры</span>
+          <span style={styles.headerArrow}>{collapsed ? '▼' : '▲'}</span>
+        </button>
+      )}
 
       {collapsed ? (
         <div style={styles.summary}>{buildSummary()}</div>
