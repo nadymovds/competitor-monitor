@@ -25,6 +25,9 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const [hasMore, setHasMore] = useState(false)
   const [offset, setOffset] = useState(0)
   const [dateRange, setDateRange] = useState(30) // в днях, по умолчанию месяц
+  const [customDateFrom, setCustomDateFrom] = useState('')
+  const [customDateTo, setCustomDateTo] = useState('')
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false)
 
   // Фильтры для конкурентов
   const [selectedGroups, setSelectedGroups] = useState([])
@@ -86,7 +89,10 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     selectedNewsCategories,
     selectedNewsChannels,
     selectedNewsSourceTypes,
-    dateRange
+    dateRange,
+    customDateFrom,
+    customDateTo,
+    showCustomDatePicker
   ])
 
   // Infinite scroll observer
@@ -115,10 +121,17 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
         setLoadingMore(true)
       }
 
-      // Период: использует выбранный диапазон дат
-      const dateTo = new Date()
-      const dateFrom = new Date()
-      dateFrom.setDate(dateFrom.getDate() - dateRange)
+      // Период: использует выбранный диапазон дат или пользовательский
+      let dateTo, dateFrom
+      
+      if (showCustomDatePicker && customDateFrom && customDateTo) {
+        dateFrom = new Date(customDateFrom)
+        dateTo = new Date(customDateTo)
+      } else {
+        dateTo = new Date()
+        dateFrom = new Date()
+        dateFrom.setDate(dateFrom.getDate() - dateRange)
+      }
 
       const params = {
         feedType,
@@ -239,25 +252,56 @@ const resetCompetitorFilters = () => {
               { value: 7, label: 'Неделя' },
               { value: 30, label: 'Месяц' },
               { value: 90, label: 'Квартал' },
-              { value: 365, label: 'Год' }
+              { value: 365, label: 'Год' },
+              { value: 'custom', label: 'Свой...' }
             ].map(range => (
               <button
                 key={range.value}
                 onClick={() => {
                   hapticFeedback('light')
-                  setDateRange(range.value)
+                  if (range.value === 'custom') {
+                    setShowCustomDatePicker(!showCustomDatePicker)
+                  } else {
+                    setDateRange(range.value)
+                    setShowCustomDatePicker(false)
+                  }
                 }}
                 style={{
                   borderRadius: 16, padding: '6px 12px', fontSize: 13, fontWeight: 500,
                   border: 'none', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4,
-                  backgroundColor: dateRange === range.value ? '#3b82f620' : '#252532',
-                  color: dateRange === range.value ? '#3b82f6' : '#9ca3af'
+                  backgroundColor: (range.value === 'custom' && showCustomDatePicker) || (range.value !== 'custom' && !showCustomDatePicker && dateRange === range.value) ? '#3b82f620' : '#252532',
+                  color: (range.value === 'custom' && showCustomDatePicker) || (range.value !== 'custom' && !showCustomDatePicker && dateRange === range.value) ? '#3b82f6' : '#9ca3af'
                 }}
               >
                 {range.label}
               </button>
             ))}
           </div>
+          {showCustomDatePicker && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={(e) => setCustomDateFrom(e.target.value)}
+                style={{
+                  flex: 1, padding: '8px 12px', fontSize: 13, borderRadius: 8,
+                  border: '1px solid #3b3b45', backgroundColor: '#252532', color: '#e5e7eb',
+                  fontFamily: 'inherit'
+                }}
+              />
+              <span style={{ color: '#6b7280' }}>—</span>
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={(e) => setCustomDateTo(e.target.value)}
+                style={{
+                  flex: 1, padding: '8px 12px', fontSize: 13, borderRadius: 8,
+                  border: '1px solid #3b3b45', backgroundColor: '#252532', color: '#e5e7eb',
+                  fontFamily: 'inherit'
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -355,7 +399,7 @@ const resetCompetitorFilters = () => {
               width: '100%', backgroundColor: '#1a1a24', borderRadius: 12, padding: 12,
               border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between',
               alignItems: 'center', color: '#9ca3af', fontSize: 13, fontWeight: 600,
-              textTransform: 'uppercase'
+              textTransform: 'none'
             }}
           >
             <span>Больше фильтров</span>

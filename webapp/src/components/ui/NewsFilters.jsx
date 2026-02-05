@@ -199,37 +199,39 @@ export default function NewsFilters({
           </div>
 
           {/* Период */}
-          <div style={{ marginTop: 10 }}>
-            <div style={styles.sectionLabel}>Период</div>
-            <div style={styles.pillRow}>
-              {Object.entries(dateRangeLabels).map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => changeDateRange(value)}
-                  style={dateRange === value ? styles.pillActive : styles.pill}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {dateRange === 'custom' && (
-              <div style={styles.dateInputRow}>
-                <input
-                  type="date"
-                  value={customDateFrom}
-                  onChange={e => changeCustomDate('from', e.target.value)}
-                  style={styles.dateInput}
-                />
-                <span style={{ color: '#6b7280', fontSize: 13 }}>—</span>
-                <input
-                  type="date"
-                  value={customDateTo}
-                  onChange={e => changeCustomDate('to', e.target.value)}
-                  style={styles.dateInput}
-                />
+          {!hideDate && (
+            <div style={{ marginTop: 10 }}>
+              <div style={styles.sectionLabel}>Период</div>
+              <div style={styles.pillRow}>
+                {Object.entries(dateRangeLabels).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => changeDateRange(value)}
+                    style={dateRange === value ? styles.pillActive : styles.pill}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            )}
-          </div>
+              {dateRange === 'custom' && (
+                <div style={styles.dateInputRow}>
+                  <input
+                    type="date"
+                    value={customDateFrom}
+                    onChange={e => changeCustomDate('from', e.target.value)}
+                    style={styles.dateInput}
+                  />
+                  <span style={{ color: '#6b7280', fontSize: 13 }}>—</span>
+                  <input
+                    type="date"
+                    value={customDateTo}
+                    onChange={e => changeCustomDate('to', e.target.value)}
+                    style={styles.dateInput}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
