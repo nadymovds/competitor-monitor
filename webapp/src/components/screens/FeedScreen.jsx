@@ -37,6 +37,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const [selectedNewsCategories, setSelectedNewsCategories] = useState([])
   const [selectedNewsChannels, setSelectedNewsChannels] = useState([])
   const [selectedNewsSourceTypes, setSelectedNewsSourceTypes] = useState([])
+  const [newsFiltersExpanded, setNewsFiltersExpanded] = useState(false)
 
   // Ref для отслеживания скролла
   const observerTarget = useRef(null)
@@ -344,16 +345,37 @@ const resetCompetitorFilters = () => {
 
       {/* Фильтры для режима "Новости" */}
       {feedType === 'news' && (
-        <NewsFilters
-          categories={visibleNewsCategories}
-          channels={newsChannels}
-          selectedCategories={selectedNewsCategories}
-          selectedChannels={selectedNewsChannels}
-          selectedSourceTypes={selectedNewsSourceTypes}
-          dateRange="week"
-          onChange={handleNewsFiltersChange}
-          hideDate={true}
-        />
+        <div>
+          <button
+            onClick={() => {
+              hapticFeedback('light')
+              setNewsFiltersExpanded(!newsFiltersExpanded)
+            }}
+            style={{
+              width: '100%', backgroundColor: '#1a1a24', borderRadius: 12, padding: 12,
+              border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', color: '#9ca3af', fontSize: 13, fontWeight: 600,
+              textTransform: 'uppercase'
+            }}
+          >
+            <span>Дополнительные фильтры</span>
+            <span style={{ fontSize: 10 }}>{newsFiltersExpanded ? '▲' : '▼'}</span>
+          </button>
+          {newsFiltersExpanded && (
+            <div style={{ marginTop: 8 }}>
+              <NewsFilters
+                categories={visibleNewsCategories}
+                channels={newsChannels}
+                selectedCategories={selectedNewsCategories}
+                selectedChannels={selectedNewsChannels}
+                selectedSourceTypes={selectedNewsSourceTypes}
+                dateRange="week"
+                onChange={handleNewsFiltersChange}
+                hideDate={true}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Список элементов */}
@@ -510,6 +532,7 @@ function CompetitorFeedItem({ item, onNavigate }) {
 function NewsFeedItem({ item }) {
   const isTelegram = item.source_type === 'telegram'
   const linkUrl = item.post_url
+  const hasContent = item.title || item.summary
 
   return (
     <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 14 }}>
@@ -545,9 +568,15 @@ function NewsFeedItem({ item }) {
         </div>
       )}
 
-      <div style={{ fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6, marginBottom: 10 }}>
-        {item.summary}
-      </div>
+      {item.summary ? (
+        <div style={{ fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6, marginBottom: 10 }}>
+          {item.summary}
+        </div>
+      ) : !item.title ? (
+        <div style={{ fontSize: 14, fontWeight: 400, color: '#6b7280', lineHeight: 1.6, marginBottom: 10, fontStyle: 'italic' }}>
+          Нет доступного контента для этого поста. <button onClick={() => isTelegram ? openTelegramLink(linkUrl) : openLink(linkUrl)} style={{ color: '#3b82f6', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>Открыть в источнике</button>
+        </div>
+      ) : null}
 
       {item.categories?.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
