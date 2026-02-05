@@ -24,6 +24,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [offset, setOffset] = useState(0)
+  const [dateRange, setDateRange] = useState(30) // в днях, по умолчанию месяц
 
   // Фильтры для конкурентов
   const [selectedGroups, setSelectedGroups] = useState([])
@@ -83,7 +84,8 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     activeCategory,
     selectedNewsCategories,
     selectedNewsChannels,
-    selectedNewsSourceTypes
+    selectedNewsSourceTypes,
+    dateRange
   ])
 
   // Infinite scroll observer
@@ -112,10 +114,10 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
         setLoadingMore(true)
       }
 
-      // Период: последние 7 дней
+      // Период: использует выбранный диапазон дат
       const dateTo = new Date()
       const dateFrom = new Date()
-      dateFrom.setDate(dateFrom.getDate() - 7)
+      dateFrom.setDate(dateFrom.getDate() - dateRange)
 
       const params = {
         feedType,
@@ -226,6 +228,37 @@ const resetCompetitorFilters = () => {
 
       {/* Переключатель типа */}
       <FeedTypeToggle feedType={feedType} onChange={handleFeedTypeChange} />
+
+      {/* Фильтр по периоду дат */}
+      <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Период</div>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', whiteSpace: 'nowrap', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            {[
+              { value: 7, label: 'Неделя' },
+              { value: 30, label: 'Месяц' },
+              { value: 90, label: 'Квартал' },
+              { value: 365, label: 'Год' }
+            ].map(range => (
+              <button
+                key={range.value}
+                onClick={() => {
+                  hapticFeedback('light')
+                  setDateRange(range.value)
+                }}
+                style={{
+                  borderRadius: 16, padding: '6px 12px', fontSize: 13, fontWeight: 500,
+                  border: 'none', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4,
+                  backgroundColor: dateRange === range.value ? '#3b82f620' : '#252532',
+                  color: dateRange === range.value ? '#3b82f6' : '#9ca3af'
+                }}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* Фильтры для режима "Конкуренты" */}
       {feedType === 'competitors' && (
@@ -567,7 +600,7 @@ function LoadingSkeleton() {
 
 function EmptyState({ feedType }) {
   const messages = {
-    all: 'Нет обновлений за последние 7 дней',
+    all: 'Нет обновлений в выбранном периоде',
     competitors: 'Нет изменений у конкурентов',
     news: 'Новостей не найдено'
   }
