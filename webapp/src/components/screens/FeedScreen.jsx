@@ -194,8 +194,7 @@ const resetCompetitorFilters = () => {
     if (feedType !== 'competitors') return {}
     const counts = { all: items.length }
     for (const cat of Object.keys(CATEGORY_CONFIG)) {
-      const n = items.filter(item => item.category === cat).length
-      if (n > 0) counts[cat] = n
+      counts[cat] = items.filter(item => item.category === cat).length
     }
     return counts
   }
@@ -230,38 +229,42 @@ const resetCompetitorFilters = () => {
 
       {/* Фильтры для режима "Конкуренты" */}
       {feedType === 'competitors' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* Фильтр по источникам */}
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
-            {[
-              { id: 'all', label: 'Все источники' },
-              { id: 'website', label: '🌐 Web' },
-              { id: 'telegram', label: '📢 TG' }
-            ].map(src => (
-              <button
-                key={src.id}
-                onClick={() => {
-                  hapticFeedback('light')
-                  setActiveSourceFilter(src.id)
-                }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
-                  backgroundColor: activeSourceFilter === src.id ? '#8b5cf6' : '#252532',
-                  color: activeSourceFilter === src.id ? '#fff' : '#9ca3af',
-                  fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', cursor: 'pointer',
-                  border: 'none'
-                }}
-              >
-                {src.label}
-                {sourceCounts[src.id] !== undefined && (
-                  <span style={{ opacity: 0.7 }}>{sourceCounts[src.id]}</span>
-                )}
-              </button>
-            ))}
+          <div>
+            <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Источник</div>
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', whiteSpace: 'nowrap', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              {[
+                { id: 'all', label: 'Все источники' },
+                { id: 'website', label: '🌐 Web' },
+                { id: 'telegram', label: '📢 TG' }
+              ].map(src => (
+                <button
+                  key={src.id}
+                  onClick={() => {
+                    hapticFeedback('light')
+                    setActiveSourceFilter(src.id)
+                  }}
+                  style={{
+                    borderRadius: 16, padding: '6px 12px', fontSize: 13, fontWeight: 500,
+                    border: 'none', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4,
+                    backgroundColor: activeSourceFilter === src.id ? '#3b82f620' : '#252532',
+                    color: activeSourceFilter === src.id ? '#3b82f6' : '#9ca3af'
+                  }}
+                >
+                  {src.label}
+                  {sourceCounts[src.id] !== undefined && (
+                    <span style={{ opacity: 0.7 }}>({sourceCounts[src.id]})</span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
+
           {/* Фильтр по категориям */}
-          {Object.keys(categoryCounts).length > 0 && (
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Категория</div>
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', whiteSpace: 'nowrap', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
               {Object.entries(categoryCounts).map(([id, count]) => (
                 <button
                   key={id}
@@ -270,28 +273,27 @@ const resetCompetitorFilters = () => {
                     setActiveCategory(id)
                   }}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
-                    backgroundColor: activeCategory === id ? '#3b82f6' : '#252532',
-                    color: activeCategory === id ? '#fff' : '#9ca3af',
-                    fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', cursor: 'pointer',
-                    border: 'none'
+                    borderRadius: 16, padding: '6px 12px', fontSize: 13, fontWeight: 500,
+                    border: 'none', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4,
+                    backgroundColor: activeCategory === id ? '#3b82f620' : '#252532',
+                    color: activeCategory === id ? '#3b82f6' : '#9ca3af'
                   }}
                 >
-                  {id === 'all' ? 'Все' : CATEGORY_CONFIG[id]?.label || id}
-                  <span style={{ opacity: 0.7 }}>{count}</span>
+                  {id === 'all' ? <><span style={{ color: '#3b82f6' }}>●</span> Все</> : <><span style={{ color: CATEGORY_CONFIG[id]?.color || '#6b7280' }}>●</span> {CATEGORY_CONFIG[id]?.label || id}</>}
+                  <span style={{ opacity: 0.7 }}>({count})</span>
                 </button>
               ))}
             </div>
-          )}
+          </div>
 
-          {/* Фильтр по группам - размещён внизу с достаточным z-index для dropdown */}
+          {/* Фильтр по группам */}
           <div style={{ position: 'relative', zIndex: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 14, color: '#9ca3af' }}>Группы</span>
+            <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Группы</span>
               {(selectedGroups.length > 0 || activeSourceFilter !== 'all' || activeCategory !== 'all') && (
                 <button
                   onClick={resetCompetitorFilters}
-                  style={{ fontSize: 12, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer' }}
+                  style={{ fontSize: 11, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                 >
                   Сбросить
                 </button>
@@ -322,10 +324,6 @@ const resetCompetitorFilters = () => {
       )}
 
       {/* Список элементов */}
-      <div style={{ fontSize: 13, color: '#6b7280', marginTop: -8 }}>
-        Последние 7 дней • {items.length} {feedType === 'all' ? 'обновлений' : feedType === 'competitors' ? 'изменений' : 'новостей'}
-      </div>
-
       {loading ? (
         <LoadingSkeleton />
       ) : items.length === 0 ? (
