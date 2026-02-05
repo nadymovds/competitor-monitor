@@ -237,8 +237,8 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
     channel_name: post.news_channels?.title,
     channel_username: post.news_channels?.username,
     post_url: post.post_url,
-    title: post.title,
-    summary: post.summary,
+    title: post.title || '',
+    summary: post.summary || '',
     tags: post.tags || [],
     detected_at: post.post_date,
     categories: (post.news_post_categories || [])

@@ -26,7 +26,7 @@ export default function NewsFilters({
   hideDate = false,
   hideHeader = false,
 }) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
 
   const toggleCategory = (id) => {
     hapticFeedback('light')

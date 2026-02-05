@@ -40,7 +40,6 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const [selectedNewsCategories, setSelectedNewsCategories] = useState([])
   const [selectedNewsChannels, setSelectedNewsChannels] = useState([])
   const [selectedNewsSourceTypes, setSelectedNewsSourceTypes] = useState([])
-  const [newsFiltersExpanded, setNewsFiltersExpanded] = useState(false)
 
   // Ref для отслеживания скролла
   const observerTarget = useRef(null)
@@ -389,38 +388,17 @@ const resetCompetitorFilters = () => {
 
       {/* Фильтры для режима "Новости" */}
       {feedType === 'news' && (
-        <div>
-          <button
-            onClick={() => {
-              hapticFeedback('light')
-              setNewsFiltersExpanded(!newsFiltersExpanded)
-            }}
-            style={{
-              width: '100%', backgroundColor: '#1a1a24', borderRadius: 12, padding: 12,
-              border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', color: '#9ca3af', fontSize: 13, fontWeight: 600,
-              textTransform: 'none'
-            }}
-          >
-            <span>Больше фильтров</span>
-            <span style={{ fontSize: 10 }}>{newsFiltersExpanded ? '▲' : '▼'}</span>
-          </button>
-          {newsFiltersExpanded && (
-            <div style={{ marginTop: 8 }}>
-              <NewsFilters
-                categories={visibleNewsCategories}
-                channels={newsChannels}
-                selectedCategories={selectedNewsCategories}
-                selectedChannels={selectedNewsChannels}
-                selectedSourceTypes={selectedNewsSourceTypes}
-                dateRange="week"
-                onChange={handleNewsFiltersChange}
-                hideDate={true}
-                hideHeader={true}
-              />
-            </div>
-          )}
-        </div>
+        <NewsFilters
+          categories={visibleNewsCategories}
+          channels={newsChannels}
+          selectedCategories={selectedNewsCategories}
+          selectedChannels={selectedNewsChannels}
+          selectedSourceTypes={selectedNewsSourceTypes}
+          dateRange="week"
+          onChange={handleNewsFiltersChange}
+          hideDate={true}
+          hideHeader={false}
+        />
       )}
 
       {/* Список элементов */}
