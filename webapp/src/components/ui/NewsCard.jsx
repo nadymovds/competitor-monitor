@@ -95,6 +95,17 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
 
   // Если body начинается с title — не дублируем, показываем только body
   const showTitle = rawTitle && !bodyText.startsWith(rawTitle)
+
+  // Для web-источников: дополнительная проверка на дублирование
+  // Если title и body начинаются одинаково (первые 40 символов), скрываем body
+  const normalizeText = (str) => (str || '').replace(/\.{2,}$/, '').trim().slice(0, 40)
+  const isDuplicateBody = sourceType === 'website' &&
+    rawTitle &&
+    bodyText &&
+    normalizeText(rawTitle) === normalizeText(bodyText)
+
+  const displayBody = isDuplicateBody ? '' : bodyText
+
   const displayText = showTitle
     ? (bodyText ? `${rawTitle}\n${bodyText}` : rawTitle)
     : (bodyText || rawTitle || 'Без заголовка')
@@ -106,13 +117,13 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
         {expanded ? (
           <div style={styles.expandedText}>
             {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
-            {bodyText}
+            {displayBody}
           </div>
         ) : (
           <>
             <div ref={textRef} style={styles.clampedText}>
               {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
-              {bodyText}
+              {displayBody}
             </div>
             {needsExpand && (
               <div style={styles.showMore}>Показать полностью</div>
