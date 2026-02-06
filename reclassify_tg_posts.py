@@ -265,16 +265,25 @@ async def main():
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("Подключение к Supabase...")
 
+    # Загружаем маппинг конкурентов (id -> name)
+    competitors_result = supabase.table('competitors').select('id, name').execute()
+    competitors_map = {c['id']: c['name'] for c in competitors_result.data}
+    print(f"Загружено конкурентов: {len(competitors_map)}")
+
     # Получаем все посты за последние 14 дней для переклассификации
     date_from = (datetime.now() - timedelta(days=14)).isoformat()
     print(f"Загрузка постов за последние 14 дней (с {date_from[:10]})...")
 
     result = supabase.table('competitor_tg_posts') \
-        .select('id, competitor_id, competitor_name, text, category, summary, post_date') \
+        .select('id, competitor_id, content_text, category, summary, post_date') \
         .gte('post_date', date_from) \
         .execute()
 
+    # Добавляем competitor_name к каждому посту
     posts = result.data
+    for post in posts:
+        post['competitor_name'] = competitors_map.get(post.get('competitor_id'), 'Неизвестный')
+        post['text'] = post.get('content_text', '')
     total_posts = len(posts)
 
     if total_posts == 0:
