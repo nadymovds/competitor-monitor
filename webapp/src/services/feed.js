@@ -173,7 +173,7 @@ async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, ca
     post_url: item.post_url,
     channel_username: item.channel_username,
     category: item.category,
-    summary: item.summary || item.title || 'Нет описания',
+    summary: item.content_text || item.summary || item.title || 'Нет описания',
     tags: item.tags || [],
     detected_at: item.post_date || item.detected_at,
     groups: item.competitors?.competitor_groups?.map(cg => cg.groups) || []
