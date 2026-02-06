@@ -106,13 +106,13 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
         {expanded ? (
           <div style={styles.expandedText}>
             {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
-            {showTitle ? bodyText : displayText}
+            {bodyText}
           </div>
         ) : (
           <>
             <div ref={textRef} style={styles.clampedText}>
               {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
-              {showTitle ? bodyText : displayText}
+              {bodyText}
             </div>
             {needsExpand && (
               <div style={styles.showMore}>Показать полностью</div>
