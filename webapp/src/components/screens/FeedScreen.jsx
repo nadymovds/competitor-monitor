@@ -42,6 +42,9 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const [selectedNewsChannels, setSelectedNewsChannels] = useState([])
   const [selectedNewsSourceTypes, setSelectedNewsSourceTypes] = useState([])
 
+  // Счётчики для конкурентов (независимые от source/category фильтров)
+  const [baseCounts, setBaseCounts] = useState({ sources: {}, categories: {} })
+
   // Ref для отслеживания скролла
   const observerTarget = useRef(null)
   const initialized = useRef(false)
@@ -94,6 +97,55 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     customDateTo,
     showCustomDatePicker
   ])
+
+  // Загрузка базовых счётчиков для конкурентов (без source/category фильтров)
+  useEffect(() => {
+    if (feedType !== 'competitors') return
+
+    async function loadBaseCounts() {
+      try {
+        let dateTo, dateFrom
+        if (showCustomDatePicker && customDateFrom && customDateTo) {
+          dateFrom = new Date(customDateFrom)
+          dateTo = new Date(customDateTo)
+        } else {
+          dateTo = new Date()
+          dateFrom = new Date()
+          dateFrom.setDate(dateFrom.getDate() - dateRange)
+        }
+
+        const params = {
+          feedType: 'competitors',
+          dateFrom: dateFrom.toISOString(),
+          dateTo: dateTo.toISOString(),
+          groupIds: selectedGroups,
+          sourceType: 'all',
+          competitorCategory: 'all',
+          limit: 500,
+          offset: 0
+        }
+
+        const { items: allItems } = await getUnifiedFeed(params)
+
+        const sources = {
+          all: allItems.length,
+          website: allItems.filter(item => item.source_type === 'website').length,
+          telegram: allItems.filter(item => item.source_type === 'telegram').length
+        }
+
+        const categories = { all: allItems.length }
+        for (const cat of Object.keys(CATEGORY_CONFIG)) {
+          categories[cat] = allItems.filter(item => item.category === cat).length
+        }
+
+        setBaseCounts({ sources, categories })
+      } catch (err) {
+        console.error('Failed to load base counts:', err)
+      }
+    }
+
+    loadBaseCounts()
+  }, [feedType, dateRange, customDateFrom, customDateTo, showCustomDatePicker, selectedGroups])
 
   // Infinite scroll observer
   useEffect(() => {
@@ -205,28 +257,9 @@ const resetCompetitorFilters = () => {
     setSelectedNewsSourceTypes(sourceTypes || [])
   }
 
-  // Подсчёт по категориям для конкурентов
-  const getCategoryCounts = () => {
-    if (feedType !== 'competitors') return {}
-    const counts = { all: items.length }
-    for (const cat of Object.keys(CATEGORY_CONFIG)) {
-      counts[cat] = items.filter(item => item.category === cat).length
-    }
-    return counts
-  }
-
-  // Подсчёт по источникам для конкурентов
-  const getSourceCounts = () => {
-    if (feedType !== 'competitors') return {}
-    return {
-      all: items.length,
-      website: items.filter(item => item.source_type === 'website').length,
-      telegram: items.filter(item => item.source_type === 'telegram').length
-    }
-  }
-
-  const categoryCounts = getCategoryCounts()
-  const sourceCounts = getSourceCounts()
+  // Используем базовые счётчики (независимые от source/category фильтров)
+  const sourceCounts = baseCounts.sources
+  const categoryCounts = baseCounts.categories
   const visibleNewsCategories = newsCategories.filter(c => c.is_visible)
 
   return (
@@ -331,9 +364,7 @@ const resetCompetitorFilters = () => {
                   }}
                 >
                   {src.label}
-                  {sourceCounts[src.id] !== undefined && (
-                    <span style={{ opacity: 0.7 }}>({sourceCounts[src.id]})</span>
-                  )}
+                  <span style={{ opacity: 0.7 }}>({sourceCounts[src.id] ?? 0})</span>
                 </button>
               ))}
             </div>
@@ -343,22 +374,22 @@ const resetCompetitorFilters = () => {
           <div>
             <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Категория</div>
             <div style={{ display: 'flex', gap: 8, overflowX: 'auto', whiteSpace: 'nowrap', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-              {Object.entries(categoryCounts).map(([id, count]) => (
+              {[{ id: 'all', label: 'Все', color: '#3b82f6' }, ...Object.entries(CATEGORY_CONFIG).map(([id, cfg]) => ({ id, label: cfg.label, color: cfg.color }))].map(cat => (
                 <button
-                  key={id}
+                  key={cat.id}
                   onClick={() => {
                     hapticFeedback('light')
-                    setActiveCategory(id)
+                    setActiveCategory(cat.id)
                   }}
                   style={{
                     borderRadius: 16, padding: '6px 12px', fontSize: 13, fontWeight: 500,
                     border: 'none', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4,
-                    backgroundColor: activeCategory === id ? '#3b82f620' : '#252532',
-                    color: activeCategory === id ? '#3b82f6' : '#9ca3af'
+                    backgroundColor: activeCategory === cat.id ? '#3b82f620' : '#252532',
+                    color: activeCategory === cat.id ? '#3b82f6' : '#9ca3af'
                   }}
                 >
-                  {id === 'all' ? <><span style={{ color: '#3b82f6' }}>●</span> Все</> : <><span style={{ color: CATEGORY_CONFIG[id]?.color || '#6b7280' }}>●</span> {CATEGORY_CONFIG[id]?.label || id}</>}
-                  <span style={{ opacity: 0.7 }}>({count})</span>
+                  <span style={{ color: cat.color }}>●</span> {cat.label}
+                  <span style={{ opacity: 0.7 }}>({categoryCounts[cat.id] ?? 0})</span>
                 </button>
               ))}
             </div>

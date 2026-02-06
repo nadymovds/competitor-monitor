@@ -104,7 +104,11 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
     bodyText &&
     normalizeText(rawTitle) === normalizeText(bodyText)
 
-  const displayBody = isDuplicateBody ? '' : bodyText
+  // Для web-источников с дубликатом: скрываем body в свёрнутом виде, показываем при раскрытии
+  const displayBody = (isDuplicateBody && !expanded) ? '' : bodyText
+
+  // Показываем кнопку "Показать полностью" если текст обрезается ИЛИ есть скрытый дубликат
+  const canExpand = needsExpand || isDuplicateBody
 
   const displayText = showTitle
     ? (bodyText ? `${rawTitle}\n${bodyText}` : rawTitle)
@@ -125,7 +129,7 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
               {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
               {displayBody}
             </div>
-            {needsExpand && (
+            {canExpand && (
               <div style={styles.showMore}>Показать полностью</div>
             )}
           </>
