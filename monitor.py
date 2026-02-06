@@ -1367,7 +1367,7 @@ def check_duplicate_change(competitor_id: str, summary: str) -> bool:
         return False
 
 
-def save_change(competitor_id: str, category: str, summary: str, tags: List[str], report_id: str, content_hash: str) -> bool:
+def save_change(competitor_id: str, category: str, summary: str, tags: List[str], report_id: str, content_hash: str, is_meaningful: bool = True) -> bool:
     """
     Сохраняет изменение в таблицу changes используя content_hash для дедупликации.
     Возвращает True если вставлено, False если дубликат или ошибка.
@@ -1380,7 +1380,8 @@ def save_change(competitor_id: str, category: str, summary: str, tags: List[str]
             'summary': summary,
             'tags': tags,
             'content_hash': content_hash,
-            'report_id': report_id
+            'report_id': report_id,
+            'is_meaningful': is_meaningful
         }
 
         result = supabase.table('changes').insert(data).execute()
@@ -1595,7 +1596,8 @@ def save_change_for_url(
     report_id: str,
     content_hash: str,
     url_id: str = None,
-    scanned_url: str = None
+    scanned_url: str = None,
+    is_meaningful: bool = True
 ) -> bool:
     """
     Сохраняет изменение в таблицу changes с привязкой к URL.
@@ -1611,7 +1613,8 @@ def save_change_for_url(
             'content_hash': content_hash,
             'report_id': report_id,
             'url_id': url_id,
-            'scanned_url': scanned_url
+            'scanned_url': scanned_url,
+            'is_meaningful': is_meaningful
         }
 
         result = supabase.table('changes').insert(data).execute()
@@ -1866,31 +1869,37 @@ async def scan_url_async(
         print(f"   🔔 Сравнение версий: {display_name}")
         analysis = await analyze_changes_async(competitor_name, content, http_session, previous_content)
 
-        if analysis.get("is_meaningful"):
-            llm_summary = analysis['summary']
+        is_meaningful = analysis.get("is_meaningful", False)
+        llm_summary = analysis['summary']
 
-            # Сохраняем изменение с привязкой к URL
-            if url_id:
-                save_change_for_url(
-                    competitor_id=competitor_id,
-                    category=analysis['category'],
-                    summary=analysis['summary'],
-                    tags=analysis['tags'],
-                    report_id=report_id,
-                    content_hash=content_hash,
-                    url_id=url_id,
-                    scanned_url=url
-                )
-            else:
-                save_change(
-                    competitor_id=competitor_id,
-                    category=analysis['category'],
-                    summary=analysis['summary'],
-                    tags=analysis['tags'],
-                    report_id=report_id,
-                    content_hash=content_hash
-                )
+        # Сохраняем изменение ТОЛЬКО если оно было обнаружено
+        # (даже если не значимо - для аудита)
+        # НО на frontend фильтруем по is_meaningful = True
+        if url_id:
+            save_change_for_url(
+                competitor_id=competitor_id,
+                category=analysis['category'],
+                summary=analysis['summary'],
+                tags=analysis['tags'],
+                report_id=report_id if is_meaningful else None,
+                content_hash=content_hash,
+                url_id=url_id,
+                scanned_url=url,
+                is_meaningful=is_meaningful
+            )
+        else:
+            save_change(
+                competitor_id=competitor_id,
+                category=analysis['category'],
+                summary=analysis['summary'],
+                tags=analysis['tags'],
+                report_id=report_id if is_meaningful else None,
+                content_hash=content_hash,
+                is_meaningful=is_meaningful
+            )
 
+        # Возвращаем результат только если значимо
+        if is_meaningful:
             result = {
                 'competitor': competitor_name,
                 'display_name': display_name,

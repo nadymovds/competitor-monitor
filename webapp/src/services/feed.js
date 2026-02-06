@@ -94,6 +94,7 @@ async function getCompetitorWebsiteChanges({ dateFrom, dateTo, groupIds, sourceT
       ),
       competitor_urls (url, label)
     `)
+    .eq('is_meaningful', true)
     .neq('category', 'technical')
 
   if (dateFrom) query = query.gte('detected_at', dateFrom)

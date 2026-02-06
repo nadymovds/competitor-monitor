@@ -50,11 +50,12 @@ export async function getCompetitorWithHistory(competitorId) {
 
   if (compError) throw compError
 
-  // Получаем историю изменений с URL
+  // Получаем историю изменений с URL (только значимые)
   const { data: changes, error: changesError } = await supabase
     .from('changes')
     .select('*, competitor_urls(url, label)')
     .eq('competitor_id', competitorId)
+    .eq('is_meaningful', true)
     .order('detected_at', { ascending: false })
     .limit(50)
 

@@ -110,6 +110,7 @@ URL-адреса конкурентов для мониторинга.
 | report_id | uuid | FK → summary_reports.id |
 | url_id | uuid | FK → competitor_urls.id |
 | scanned_url | text | Просканированный URL |
+| is_meaningful | boolean | Значимое ли изменение (по умолчанию true) |
 
 #### `competitor_tg_posts`
 Посты конкурентов из Telegram.
