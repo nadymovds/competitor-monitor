@@ -1083,14 +1083,18 @@ def update_channel_after_scan(channel_id: int, last_message_id: int) -> None:
     except Exception as e:
         print(f"  ⚠️ Ошибка обновления канала {channel_id}: {e}")
 
-def mark_post_processed(post_id: int, title: str, summary: str) -> None:
-    """Пометка поста как обработанного LLM с заголовком и summary."""
+def mark_post_processed(post_id: int, title: str, summary: str, source_type: str = 'telegram') -> None:
+    """Пометка поста как обработанного LLM с заголовком и summary.
+    
+    Для web-новостей (source_type='website') не переписывает title, т.к. он уже установлен в save_web_post().
+    Для telegram-новостей устанавливает title из content_text.
+    """
     try:
-        supabase.table('news_posts').update({
-            'is_processed': True,
-            'title': title,
-            'summary': summary,
-        }).eq('id', post_id).execute()
+        update_data = {'is_processed': True, 'summary': summary}
+        # Только для ТГ новостей (telegram) обновляем title. Для web новостей title уже правильный.
+        if source_type == 'telegram':
+            update_data['title'] = title
+        supabase.table('news_posts').update(update_data).eq('id', post_id).execute()
     except Exception as e:
         print(f"  ⚠️ Ошибка обновления поста {post_id}: {e}")
 
@@ -1280,13 +1284,21 @@ async def generate_summary(post_text: str, session: aiohttp.ClientSession) -> st
 
 
 async def process_post_with_llm(post: dict, categories: list, session: aiohttp.ClientSession) -> dict | None:
-    """Полная обработка одного поста: категоризация + summary + сохранение в БД."""
+    """Полная обработка одного поста: категоризация + summary + сохранение в БД.
+    
+    Для web-новостей не переписывает title (он уже установлен при сохранении).
+    Для telegram-новостей автоматически извлекает title из content_text.
+    """
     post_id = post.get('id')
     post_text = post.get('content_text', '')
+    source_type = post.get('source_type', 'telegram')
+    existing_title = post.get('title', '')  # Для web-новостей уже есть title
 
     if not post_text or len(post_text.strip()) < 30:
         print(f"  ⏭️ Пост {post_id} слишком короткий, пропуск")
-        mark_post_processed(post_id, extract_title(post_text), "")
+        # Используем существующий title для web, или извлекаем для телеграма
+        title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
+        mark_post_processed(post_id, title_to_save, "", source_type)
         return None
 
     try:
@@ -1302,10 +1314,15 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
                 post_categories = [{'category_id': other_cat['id'], 'confidence': 0.5}]
                 print(f"  ℹ️ Пост {post_id}: категории не определены, назначена «Прочее»")
 
-        title = extract_title(post_text)
+        # Для telegram новостей извлекаем title из content_text
+        # Для web новостей используем уже установленный title
+        if source_type == 'website' and existing_title:
+            title = existing_title
+        else:
+            title = extract_title(post_text)
 
         # Сохранение в БД
-        mark_post_processed(post_id, title, summary)
+        mark_post_processed(post_id, title, summary, source_type)
         if post_categories:
             save_post_categories(post_id, post_categories)
 
@@ -1726,7 +1743,10 @@ async def run_news_monitoring_async():
                 h = post.get('content_hash')
                 if h:
                     if h in processed_hashes or h in seen_hashes:
-                        mark_post_processed(post['id'], extract_title(post.get('content_text', '')), '')
+                        source_type = post.get('source_type', 'telegram')
+                        # Для web новостей используем существующий title, для телеграма извлекаем
+                        title_to_save = post.get('title', '') if source_type == 'website' else extract_title(post.get('content_text', ''))
+                        mark_post_processed(post['id'], title_to_save, '', source_type)
                         skipped_duplicates += 1
                         continue
                     seen_hashes.add(h)
