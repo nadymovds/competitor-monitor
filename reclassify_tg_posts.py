@@ -9,7 +9,7 @@ import re
 import json
 import asyncio
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from supabase import create_client, Client
 
@@ -129,6 +129,10 @@ def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, An
         if result.get("category") not in VALID_CATEGORIES:
             result["category"] = CATEGORY_OTHER
 
+        # Заменяем "technical" на "other" - эта категория не должна использоваться для TG постов
+        if result.get("category") == CATEGORY_TECHNICAL:
+            result["category"] = CATEGORY_OTHER
+
         valid_tags = [t for t in result.get("tags", []) if t in TAGS]
         result["tags"] = valid_tags[:3]
 
@@ -185,12 +189,14 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 - Описывай только то, что реально содержится в посте
 - Не выдумывай информацию
 
-КАТЕГОРИИ (выбери ОДНУ):
-1. "products" — новый/обновлённый продукт, устройство, трекер, тахограф, ПО, платформа, обновление
+КАТЕГОРИИ (выбери СТРОГО ОДНУ из пяти):
+1. "products" — новый/обновлённый продукт, устройство, трекер, тахограф, ПО, платформа, обновление функций, релиз
 2. "prices" — акция, скидка, изменение цен/тарифов, спецпредложение, бесплатный период
-3. "services" — условия обслуживания, SLA, тарифные планы, техподдержка, условия работы
-4. "news" — новости компании, партнёрства, мероприятия, выставки, сертификация
-5. "other" — нерелевантный контент (поздравления, развлечения, общие репосты)
+3. "services" — условия обслуживания, SLA, тарифные планы, техподдержка, сбой системы, технические работы
+4. "news" — новости компании, партнёрства, мероприятия, выставки, сертификация, интеграции, достижения
+5. "other" — нерелевантный контент (поздравления, развлечения, общие репосты, мотивация)
+
+ВАЖНО: Категория "technical" НЕ СУЩЕСТВУЕТ. Используй только 5 категорий выше!
 
 ФОРМАТ ОТВЕТА (только JSON, без пояснений):
 {{
@@ -259,12 +265,13 @@ async def main():
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("Подключение к Supabase...")
 
-    # Получаем все посты с category='technical'
-    print("Загрузка постов с category='technical'...")
+    # Получаем все посты за последние 14 дней для переклассификации
+    date_from = (datetime.now() - timedelta(days=14)).isoformat()
+    print(f"Загрузка постов за последние 14 дней (с {date_from[:10]})...")
 
     result = supabase.table('competitor_tg_posts') \
-        .select('id, competitor_id, competitor_name, text, category, summary') \
-        .eq('category', 'technical') \
+        .select('id, competitor_id, competitor_name, text, category, summary, post_date') \
+        .gte('post_date', date_from) \
         .execute()
 
     posts = result.data

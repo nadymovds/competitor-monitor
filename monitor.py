@@ -776,40 +776,57 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
     return None
 
 
-def parse_llm_json_response(response: str, competitor_name: str) -> Dict[str, Any]:
+def parse_llm_json_response(response: str, competitor_name: str, allow_technical: bool = True) -> Dict[str, Any]:
+    """
+    Парсит JSON-ответ от LLM.
+
+    Args:
+        response: Ответ от LLM
+        competitor_name: Имя конкурента (для логирования)
+        allow_technical: Разрешить категорию "technical" (False для TG-постов)
+    """
     default_result = {
         "category": CATEGORY_OTHER,
         "tags": [],
         "summary": "",
         "is_meaningful": False
     }
-    
+
     if not response:
         return default_result
-    
+
     json_str = response.strip()
     json_str = re.sub(r'^```json?\s*', '', json_str)
     json_str = re.sub(r'\s*```$', '', json_str)
     json_str = json_str.strip()
-    
+
     json_match = re.search(r'\{[^{}]*"category"[^{}]*\}', json_str, re.DOTALL)
     if json_match:
         json_str = json_match.group()
-    
+
     if not json_str.startswith('{'):
         start = json_str.find('{')
         if start != -1:
             json_str = json_str[start:]
-    
+
     if not json_str.endswith('}'):
         end = json_str.rfind('}')
         if end != -1:
             json_str = json_str[:end+1]
-    
+
     try:
         result = json.loads(json_str)
-        
-        if result.get("category") not in [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_TECHNICAL, CATEGORY_SERVICES, CATEGORY_OTHER]:
+
+        # Валидные категории зависят от allow_technical
+        valid_categories = [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_SERVICES, CATEGORY_OTHER]
+        if allow_technical:
+            valid_categories.append(CATEGORY_TECHNICAL)
+
+        if result.get("category") not in valid_categories:
+            result["category"] = CATEGORY_OTHER
+
+        # Если technical не разрешён, заменяем на other
+        if not allow_technical and result.get("category") == CATEGORY_TECHNICAL:
             result["category"] = CATEGORY_OTHER
         
         valid_tags = [t for t in result.get("tags", []) if t in TAGS]
@@ -1057,12 +1074,14 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 - Описывай только то, что реально содержится в посте
 - Если сомневаешься в релевантности — выбери is_meaningful: false
 
-КАТЕГОРИИ (выбери ОДНУ):
-1. "products" — новый/обновлённый продукт, устройство, трекер, видео, тахограф, платформа, функция
-2. "prices" — акция, скидка, изменение цен/тарифов, спецпредложение
-3. "services" — условия обслуживания, SLA, техподдержка, сбой системы, проблема
-4. "news" — партнёрство, интеграция, мероприятие, выставка, сертификация, стандарт
-5. "other" — нерелевантный контент
+КАТЕГОРИИ (выбери СТРОГО ОДНУ из пяти):
+1. "products" — новый/обновлённый продукт, устройство, трекер, тахограф, ПО, платформа, обновление функций, релиз
+2. "prices" — акция, скидка, изменение цен/тарифов, спецпредложение, бесплатный период
+3. "services" — условия обслуживания, SLA, тарифные планы, техподдержка, сбой системы, технические работы
+4. "news" — новости компании, партнёрства, мероприятия, выставки, сертификация, интеграции, достижения
+5. "other" — нерелевантный контент (поздравления, развлечения, общие репосты, мотивация)
+
+ВАЖНО: Категория "technical" НЕ СУЩЕСТВУЕТ для TG-постов. Используй только 5 категорий выше!
 
 ФОРМАТ ОТВЕТА (только JSON, без пояснений):
 {{
@@ -1075,7 +1094,8 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 ТЕГИ: новый_продукт, видео, мониторинг, тахографы, платформа, акция, скидка, интеграция, обновление, партнёрство, сбой, выставка"""
 
     response = await call_llm_async(prompt, session, max_tokens=400)
-    return parse_llm_json_response(response, competitor_name)
+    # allow_technical=False - TG посты не должны получать категорию "technical"
+    return parse_llm_json_response(response, competitor_name, allow_technical=False)
 
 print("✅ LLM анализ настроен")
 
