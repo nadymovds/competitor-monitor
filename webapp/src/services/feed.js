@@ -234,11 +234,21 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
     type: 'industry_news',
     source_type: post.news_channels?.source_type || 'telegram',
     channel_id: post.channel_id,
-    channel_name: post.news_channels?.title,
-    channel_username: post.news_channels?.username,
+    channel: {
+      id: post.news_channels?.id,
+      title: post.news_channels?.title,
+      username: post.news_channels?.username,
+      source_type: post.news_channels?.source_type
+    },
     post_url: post.post_url,
     title: post.title || '',
+    content_text: post.content_text || '',
     summary: post.summary || '',
+    post_date: post.post_date,
+    has_photo: post.has_photo,
+    has_video: post.has_video,
+    has_document: post.has_document,
+    views_count: post.views_count,
     tags: post.tags || [],
     detected_at: post.post_date,
     categories: (post.news_post_categories || [])

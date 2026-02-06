@@ -6,6 +6,7 @@ import FeedTypeToggle from '../ui/FeedTypeToggle'
 import NewsFilters from '../ui/NewsFilters'
 import MultiSelect from '../ui/MultiSelect'
 import ScrollToTopButton from '../ui/ScrollToTopButton'
+import NewsCard from '../ui/NewsCard'
 
 const CATEGORY_CONFIG = {
   products: { label: 'Продукты', color: '#22c55e' },
@@ -551,109 +552,25 @@ function CompetitorFeedItem({ item, onNavigate }) {
   )
 }
 
-// Компонент новости отрасли
+// Компонент новости отрасли (использует NewsCard)
 function NewsFeedItem({ item }) {
-  const isTelegram = item.source_type === 'telegram'
-  const linkUrl = item.post_url
-  
-  // Проверяем наличие реального контента (не пусто и не только пробелы)
-  const hasTitle = item.title && item.title.trim().length > 0
-  const hasSummary = item.summary && item.summary.trim().length > 0
-  const hasContent = hasTitle || hasSummary
+  const post = {
+    id: item.id,
+    title: item.title,
+    content_text: item.content_text,
+    summary: item.summary,
+    post_url: item.post_url,
+    post_date: item.post_date || item.detected_at,
+    source_type: item.source_type,
+    channel: item.channel,
+    categories: item.categories || [],
+    has_photo: item.has_photo,
+    has_video: item.has_video,
+    has_document: item.has_document,
+    views_count: item.views_count
+  }
 
-  return (
-    <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-        <div style={{ flex: 1 }}>
-          <button
-            onClick={() => isTelegram ? openTelegramLink(linkUrl) : openLink(linkUrl)}
-            style={{
-              fontSize: 12, color: '#3b82f6', background: 'none',
-              border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left'
-            }}
-          >
-            {isTelegram ? `📢 ${item.channel_name || item.channel_username}` : `🌐 ${item.channel_name}`}
-          </button>
-          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-            {formatDateTime(item.detected_at)}
-          </div>
-        </div>
-        <span style={{
-          fontSize: 10, fontWeight: 500, padding: '4px 8px', borderRadius: 6,
-          backgroundColor: isTelegram ? '#8b5cf620' : '#6b728020',
-          color: isTelegram ? '#8b5cf6' : '#6b7280',
-          flexShrink: 0,
-          marginLeft: 12
-        }}>
-          {isTelegram ? 'TG' : 'Web'}
-        </span>
-      </div>
-
-      {hasTitle && (
-        <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', marginBottom: 8, lineHeight: 1.4 }}>
-          {item.title}
-        </div>
-      )}
-
-      {hasSummary ? (
-        <div style={{ fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6, marginBottom: 10 }}>
-          {item.summary}
-        </div>
-      ) : !hasContent ? (
-        <div style={{ 
-          fontSize: 14, fontWeight: 500, color: '#9ca3af', lineHeight: 1.6, marginBottom: 10,
-          backgroundColor: '#252532', padding: '12px', borderRadius: 8, border: '1px solid #3b3b45',
-          display: 'flex', alignItems: 'center', gap: 8
-        }}>
-          <span style={{ fontSize: 18 }}>🔗</span>
-          <span>
-            Пост в источнике.{' '}
-            <button 
-              onClick={() => isTelegram ? openTelegramLink(linkUrl) : openLink(linkUrl)}
-              style={{ 
-                color: '#3b82f6', background: 'none', border: 'none', padding: 0, 
-                cursor: 'pointer', textDecoration: 'underline', fontSize: 14, fontWeight: 600
-              }}
-            >
-              Открыть
-            </button>
-          </span>
-        </div>
-      ) : null}
-
-      {item.categories?.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-          {item.categories.map(cat => (
-            <span
-              key={cat.id}
-              style={{
-                fontSize: 11, padding: '4px 8px', borderRadius: 6,
-                backgroundColor: cat.color + '20', color: cat.color, fontWeight: 500
-              }}
-            >
-              {cat.name}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {item.tags?.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {item.tags.map((tag, i) => (
-            <span
-              key={i}
-              style={{
-                fontSize: 11, color: '#9ca3af', backgroundColor: '#252532',
-                padding: '4px 8px', borderRadius: 6
-              }}
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  return <NewsCard post={post} />
 }
 
 function LoadingSkeleton() {
