@@ -13,3 +13,9 @@ webapp/dist/
 # Python
 __pycache__/
 *.pyc
+.env
+
+# Prompt optimization
+optimize_news_prompt.py
+post_examples.md
+optimized_prompt.txt
