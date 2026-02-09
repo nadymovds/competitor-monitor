@@ -372,7 +372,7 @@ def _should_include_post(post, after_message_id, min_date):
 
 async def fetch_tg_channel_posts(channel_username: str, browser_context,
                                   after_message_id: int = None,
-                                  min_date: str = None,
+                                  min_date=None,
                                   max_posts: int = MAX_POSTS_PER_CHANNEL_COMPETITOR) -> list:
     """Загружает новые посты канала с пагинацией через ?before=."""
     all_posts = []
@@ -1989,7 +1989,7 @@ async def scan_tg_channels_async(
 
         try:
             # 1. Загружаем посты
-            min_date = (datetime.now(timezone.utc) - timedelta(days=TG_SCAN_PERIOD_DAYS)).isoformat()
+            min_date = datetime.now(timezone.utc) - timedelta(days=TG_SCAN_PERIOD_DAYS)
             posts = await fetch_tg_channel_posts(
                 channel_username, browser_context,
                 after_message_id=last_message_id,
