@@ -1181,58 +1181,68 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
         "temperature": 0.3,
     }
 
-    backoff_schedule = [5, 15, 30, 60]
-    for attempt in range(4):
+    backoff_schedule = [5, 15]
+    for attempt in range(2):
         try:
             async with llm_semaphore:
                 async with session.post(LLM_API_URL, headers=headers, json=payload,
                                         timeout=aiohttp.ClientTimeout(total=90)) as response:
                     if response.status == 429:
-                        wait = backoff_schedule[attempt]
-                        print(f"  ⚠️ Rate limit (429), жду {wait} сек... (попытка {attempt+1}/4)")
+                        retry_after = response.headers.get('Retry-After')
+                        if retry_after and float(retry_after) < 30:
+                            wait = float(retry_after)
+                        else:
+                            wait = backoff_schedule[attempt]
+                        print(f"  ⚠️ Rate limit (429), жду {wait} сек... (попытка {attempt+1}/2)")
                         await asyncio.sleep(wait)
                         continue
                     response.raise_for_status()
                     result = await response.json()
                     return result['choices'][0]['message']['content'].strip()
         except Exception as e:
-            if attempt < 3:
-                await asyncio.sleep(5 * (attempt + 1))
-                print(f"  ⚠️ LLM retry после ошибки: {e} (попытка {attempt+1}/4)")
+            if attempt < 1:
+                await asyncio.sleep(5)
+                print(f"  ⚠️ LLM retry после ошибки: {e} (попытка {attempt+1}/2)")
             else:
-                print(f"  ❌ LLM ошибка после 4 попыток: {e}")
+                print(f"  ❌ LLM ошибка после 2 попыток: {e}")
                 return None
     return None
 
 
-async def categorize_post(post_text: str, categories: list, session: aiohttp.ClientSession) -> list:
-    """Определение категорий поста через LLM. Возвращает список {category_id, confidence}."""
+async def categorize_and_summarize(post_text: str, categories: list, session: aiohttp.ClientSession) -> tuple[list, str]:
+    """Категоризация + summary поста в одном LLM-вызове. Возвращает (categories, summary)."""
     categories_desc = "\n".join(
         f"- ID {cat['id']}: {cat['name']}" + (f" — {cat['description']}" if cat.get('description') else "")
         for cat in categories
     )
 
-    prompt = f"""Определи категории для следующего поста из Telegram-канала о транспорте и логистике.
+    prompt = f"""Проанализируй следующий пост из Telegram-канала о транспорте и логистике. Выполни две задачи:
 
 ТЕКСТ ПОСТА:
 {post_text[:2000]}
 
+ЗАДАЧА 1 — КАТЕГОРИЗАЦИЯ:
 ДОСТУПНЫЕ КАТЕГОРИИ (ID: название — описание):
 {categories_desc}
 
-ПРАВИЛА:
 - Внимательно читай ОПИСАНИЕ каждой категории — оно определяет, какие темы к ней относятся
 - Выбери от 1 до 3 наиболее подходящих категорий
 - Для каждой категории укажи уверенность от 0.0 до 1.0
 - ВСЕГДА назначай хотя бы одну категорию. Если пост не подходит ни к одной специализированной категории, назначь категорию "Прочее"
-- Отвечай ТОЛЬКО JSON, без пояснений
 
-ФОРМАТ ОТВЕТА:
-{{"categories": [{{"category_id": N, "confidence": 0.85}}]}}"""
+ЗАДАЧА 2 — КРАТКОЕ СОДЕРЖАНИЕ:
+- 1-2 предложения, максимум 250 символов
+- Только на русском языке
+- Фокус на ключевых фактах: что произошло, кто участвует, какой результат
+- Не используй фразы "В посте говорится", "Автор сообщает" и подобные
+- Если пост рекламный — кратко опиши суть предложения
 
-    response = await call_llm_async(prompt, session, max_tokens=300)
+Отвечай ТОЛЬКО JSON, без пояснений:
+{{"categories": [{{"category_id": N, "confidence": 0.85}}], "summary": "Краткое содержание поста"}}"""
+
+    response = await call_llm_async(prompt, session, max_tokens=400)
     if not response:
-        return []
+        return [], ""
 
     try:
         # Извлечение JSON из ответа
@@ -1240,14 +1250,16 @@ async def categorize_post(post_text: str, categories: list, session: aiohttp.Cli
         json_str = re.sub(r'^```json?\s*', '', json_str)
         json_str = re.sub(r'\s*```$', '', json_str)
 
-        json_match = re.search(r'\{[^{}]*"categories"[^}]*\[.*?\]\s*\}', json_str, re.DOTALL)
+        json_match = re.search(r'\{.*"categories".*"summary".*\}', json_str, re.DOTALL)
+        if not json_match:
+            json_match = re.search(r'\{.*"summary".*"categories".*\}', json_str, re.DOTALL)
         if json_match:
             json_str = json_match.group()
 
         result = json.loads(json_str)
-        raw_categories = result.get('categories', [])
 
-        # Валидация: проверяем что category_id существует в списке категорий
+        # Парсинг категорий
+        raw_categories = result.get('categories', [])
         valid_ids = {cat['id'] for cat in categories}
         validated = []
         for cat in raw_categories:
@@ -1255,41 +1267,19 @@ async def categorize_post(post_text: str, categories: list, session: aiohttp.Cli
             confidence = cat.get('confidence', 0.0)
             if cat_id in valid_ids and 0.0 <= confidence <= 1.0:
                 validated.append({'category_id': cat_id, 'confidence': round(confidence, 2)})
+        post_categories = validated[:3]
 
-        return validated[:3]
+        # Парсинг summary
+        summary = result.get('summary', '')
+        summary = summary.strip().strip('"').strip("'")
+        summary = ' '.join(summary.split())
+        if len(summary) > 250:
+            summary = summary[:247] + "..."
+
+        return post_categories, summary
     except (json.JSONDecodeError, KeyError, TypeError) as e:
-        print(f"  ⚠️ Ошибка парсинга категорий LLM: {e}")
-        return []
-
-
-async def generate_summary(post_text: str, session: aiohttp.ClientSession) -> str:
-    """Генерация краткого содержания поста (1-2 предложения, до 250 символов)."""
-    prompt = f"""Напиши краткое содержание следующего поста из Telegram-канала о транспортно-логистической отрасли.
-
-ТЕКСТ ПОСТА:
-{post_text[:2000]}
-
-ПРАВИЛА:
-- 1-2 предложения, максимум 250 символов
-- Только на русском языке
-- Фокус на ключевых фактах: что произошло, кто участвует, какой результат
-- Не используй фразы "В посте говорится", "Автор сообщает" и подобные
-- Если пост рекламный — кратко опиши суть предложения
-- Отвечай ТОЛЬКО текстом summary, без кавычек и пояснений"""
-
-    response = await call_llm_async(prompt, session, max_tokens=200)
-    if not response:
-        return ""
-
-    # Очистка ответа
-    summary = response.strip().strip('"').strip("'")
-    summary = re.sub(r'^```.*?```$', '', summary, flags=re.DOTALL).strip()
-    summary = ' '.join(summary.split())
-
-    if len(summary) > 250:
-        summary = summary[:247] + "..."
-
-    return summary
+        print(f"  ⚠️ Ошибка парсинга LLM ответа: {e}")
+        return [], ""
 
 
 async def process_post_with_llm(post: dict, categories: list, session: aiohttp.ClientSession) -> dict | None:
@@ -1311,10 +1301,8 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
         return None
 
     try:
-        # Параллельно: категоризация + генерация summary
-        cat_task = categorize_post(post_text, categories, session)
-        sum_task = generate_summary(post_text, session)
-        post_categories, summary = await asyncio.gather(cat_task, sum_task)
+        # Категоризация + summary в одном LLM-вызове
+        post_categories, summary = await categorize_and_summarize(post_text, categories, session)
 
         # Фоллбек: если категории не назначены — назначаем "Прочее"
         if not post_categories:
@@ -1773,7 +1761,7 @@ async def run_news_monitoring_async():
                 except Exception as e:
                     print(f"  ❌ Исключение при обработке: {e}")
                 if i < len(unique_posts) - 1:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(4)
 
         print(f"✅ Обработано LLM: {processed_count} из {len(unprocessed)}")
 
