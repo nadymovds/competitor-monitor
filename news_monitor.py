@@ -14,7 +14,7 @@ import aiohttp
 import asyncio
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
@@ -54,7 +54,7 @@ NEWS_PLAYWRIGHT_TIMEOUT = 30000
 MAX_POSTS_PER_CHANNEL = 50
 DELAY_BETWEEN_CHANNELS = 3
 MAX_POSTS_IN_DIGEST = 100
-MAX_CONCURRENT_LLM_NEWS = 3
+MAX_CONCURRENT_LLM_NEWS = 1
 DEFAULT_DIGEST_PERIOD_DAYS = 7
 
 # === ВЕБ-СКАНИРОВАНИЕ ===
@@ -998,7 +998,7 @@ def save_post(channel_id: int, post_data: dict, source_type: str = 'telegram') -
             'message_id': post_data['message_id'],
             'post_url': post_data['post_url'],
             'content_text': post_data.get('text', ''),
-            'post_date': post_data['post_date'].isoformat() if post_data.get('post_date') else None,
+            'post_date': post_data['post_date'].isoformat() if post_data.get('post_date') else datetime.now(timezone.utc).isoformat(),
             'has_photo': post_data.get('has_photo', False),
             'has_video': post_data.get('has_video', False),
             'has_document': post_data.get('has_document', False),
@@ -1043,7 +1043,7 @@ def save_web_post(channel_id: int, post_data: dict) -> int | None:
             'post_url': post_data.get('article_url', ''),
             'title': post_data.get('title', ''),
             'content_text': post_data.get('text', ''),
-            'post_date': post_data['post_date'].isoformat() if post_data.get('post_date') else None,
+            'post_date': post_data['post_date'].isoformat() if post_data.get('post_date') else datetime.now(timezone.utc).isoformat(),
             'has_photo': False,
             'has_video': False,
             'has_document': False,
@@ -1181,20 +1181,26 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
         "temperature": 0.3,
     }
 
-    for attempt in range(2):
+    backoff_schedule = [5, 15, 30, 60]
+    for attempt in range(4):
         try:
             async with llm_semaphore:
                 async with session.post(LLM_API_URL, headers=headers, json=payload,
                                         timeout=aiohttp.ClientTimeout(total=90)) as response:
+                    if response.status == 429:
+                        wait = backoff_schedule[attempt]
+                        print(f"  ⚠️ Rate limit (429), жду {wait} сек... (попытка {attempt+1}/4)")
+                        await asyncio.sleep(wait)
+                        continue
                     response.raise_for_status()
                     result = await response.json()
                     return result['choices'][0]['message']['content'].strip()
         except Exception as e:
-            if attempt < 1:
-                print(f"  ⚠️ LLM retry после ошибки: {e}")
-                await asyncio.sleep(3)
+            if attempt < 3:
+                await asyncio.sleep(5 * (attempt + 1))
+                print(f"  ⚠️ LLM retry после ошибки: {e} (попытка {attempt+1}/4)")
             else:
-                print(f"  ❌ LLM ошибка после 2 попыток: {e}")
+                print(f"  ❌ LLM ошибка после 4 попыток: {e}")
                 return None
     return None
 
@@ -1758,18 +1764,16 @@ async def run_news_monitoring_async():
             if skipped_duplicates > 0:
                 print(f"⏭️ Пропущено дубликатов по content_hash: {skipped_duplicates}")
 
-            # 10. Параллельная обработка через asyncio.gather + llm_semaphore
-            tasks = [
-                process_post_with_llm(post, categories, http_session)
-                for post in unique_posts
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result in results:
-                if isinstance(result, Exception):
-                    print(f"  ❌ Исключение при обработке: {result}")
-                elif result is not None:
-                    processed_count += 1
+            # 10. Последовательная обработка с задержкой между LLM-вызовами
+            for i, post in enumerate(unique_posts):
+                try:
+                    result = await process_post_with_llm(post, categories, http_session)
+                    if result is not None:
+                        processed_count += 1
+                except Exception as e:
+                    print(f"  ❌ Исключение при обработке: {e}")
+                if i < len(unique_posts) - 1:
+                    await asyncio.sleep(2)
 
         print(f"✅ Обработано LLM: {processed_count} из {len(unprocessed)}")
 
