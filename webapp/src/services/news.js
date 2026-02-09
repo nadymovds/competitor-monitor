@@ -28,7 +28,7 @@ export async function getAllNewsChannels() {
   return data
 }
 
-export async function getNewsPosts({ categories = [], channels = [], sourceTypes = [], dateFrom, dateTo, limit = 20, offset = 0 } = {}) {
+export async function getNewsPosts({ categories = [], channels = [], sourceTypes = [], searchQuery = '', dateFrom, dateTo, limit = 20, offset = 0 } = {}) {
   const categoryJoin = categories.length > 0
     ? 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
     : 'news_post_categories(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
@@ -65,6 +65,12 @@ export async function getNewsPosts({ categories = [], channels = [], sourceTypes
 
   if (dateTo) {
     query = query.lte('post_date', dateTo)
+  }
+
+  // Добавляем фильтр поиска
+  if (searchQuery.trim()) {
+    const searchTerm = `%${searchQuery}%`
+    query = query.or(`title.ilike.${searchTerm},content_text.ilike.${searchTerm},summary.ilike.${searchTerm}`, { foreignTable: '' })
   }
 
   query = query

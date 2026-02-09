@@ -42,6 +42,9 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   const [selectedNewsChannels, setSelectedNewsChannels] = useState([])
   const [selectedNewsSourceTypes, setSelectedNewsSourceTypes] = useState([])
 
+  // Поиск
+  const [searchQuery, setSearchQuery] = useState('')
+
   // Счётчики для конкурентов (независимые от source/category фильтров)
   const [baseCounts, setBaseCounts] = useState({ sources: {}, categories: {} })
 
@@ -95,7 +98,8 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     dateRange,
     customDateFrom,
     customDateTo,
-    showCustomDatePicker
+    showCustomDatePicker,
+    searchQuery
   ])
 
   // Загрузка базовых счётчиков для конкурентов (без source/category фильтров)
@@ -208,6 +212,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
           : newsCategories.filter(c => c.is_visible).map(c => c.id)
         params.newsChannels = selectedNewsChannels
         params.newsSourceTypes = selectedNewsSourceTypes
+        params.searchQuery = searchQuery
       }
 
       const { items: newItems, hasMore: more } = await getUnifiedFeed(params)
@@ -242,6 +247,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     setSelectedNewsCategories([])
     setSelectedNewsChannels([])
     setSelectedNewsSourceTypes([])
+    setSearchQuery('')
   }
 
 const resetCompetitorFilters = () => {
@@ -275,6 +281,29 @@ const resetCompetitorFilters = () => {
 
       {/* Переключатель типа */}
       <FeedTypeToggle feedType={feedType} onChange={handleFeedTypeChange} />
+
+      {/* Поиск по новостям (только для режима "Новости") */}
+      {feedType === 'news' && (
+        <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 12 }}>
+          <input
+            type="text"
+            placeholder="🔍 Поиск по новостям..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              fontSize: 13,
+              borderRadius: 8,
+              border: '1px solid #3b3b45',
+              backgroundColor: '#252532',
+              color: '#e5e7eb',
+              fontFamily: 'inherit',
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
+      )}
 
       {/* Фильтр по периоду дат */}
       <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>

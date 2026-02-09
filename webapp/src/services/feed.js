@@ -14,6 +14,7 @@ import { supabase } from './supabase.js'
  * @param {number[]} [params.newsCategories] - ID категорий новостей (для feedType='news')
  * @param {number[]} [params.newsChannels] - ID каналов новостей (для feedType='news')
  * @param {string[]} [params.newsSourceTypes] - ['telegram', 'website'] (для feedType='news')
+ * @param {string} [params.searchQuery] - Текст поиска (для feedType='news')
  * @returns {Promise<{items: FeedItem[], hasMore: boolean}>}
  */
 export async function getUnifiedFeed({
@@ -27,7 +28,8 @@ export async function getUnifiedFeed({
   competitorCategory = 'all',
   newsCategories = [],
   newsChannels = [],
-  newsSourceTypes = []
+  newsSourceTypes = [],
+  searchQuery = ''
 }) {
   let allItems = []
 
@@ -60,7 +62,8 @@ export async function getUnifiedFeed({
       dateTo,
       categories: newsCategories,
       channels: newsChannels,
-      sourceTypes: newsSourceTypes
+      sourceTypes: newsSourceTypes,
+      searchQuery
     })
 
     allItems = [...allItems, ...newsPosts]
@@ -184,7 +187,7 @@ async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, ca
 /**
  * Получить новости отрасли
  */
-async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceTypes }) {
+async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceTypes, searchQuery = '' }) {
   const categoryJoin = categories.length > 0
     ? 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
     : 'news_post_categories(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
@@ -216,6 +219,13 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
 
   if (dateFrom) query = query.gte('post_date', dateFrom)
   if (dateTo) query = query.lte('post_date', dateTo)
+
+  // Добавляем фильтр поиска
+  if (searchQuery.trim()) {
+    // Ищем в заголовке, тексте контента и саммари
+    const searchTerm = `%${searchQuery}%`
+    query = query.or(`title.ilike.${searchTerm},content_text.ilike.${searchTerm},summary.ilike.${searchTerm}`, { foreignTable: '' })
+  }
 
   const { data, error } = await query
   if (error) throw error
