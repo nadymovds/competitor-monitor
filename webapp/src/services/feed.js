@@ -40,7 +40,8 @@ export async function getUnifiedFeed({
       dateTo,
       groupIds,
       sourceType: sourceType === 'telegram' ? null : 'website',
-      category: competitorCategory
+      category: competitorCategory,
+      searchQuery
     })
 
     // Получаем посты из TG-каналов конкурентов
@@ -49,7 +50,8 @@ export async function getUnifiedFeed({
       dateTo,
       groupIds,
       sourceType: sourceType === 'website' ? null : 'telegram',
-      category: competitorCategory
+      category: competitorCategory,
+      searchQuery
     })
 
     allItems = [...websiteChanges, ...tgPosts]
@@ -82,7 +84,7 @@ export async function getUnifiedFeed({
 /**
  * Получить изменения с веб-сайтов конкурентов
  */
-async function getCompetitorWebsiteChanges({ dateFrom, dateTo, groupIds, sourceType, category }) {
+async function getCompetitorWebsiteChanges({ dateFrom, dateTo, groupIds, sourceType, category, searchQuery = '' }) {
   if (!sourceType || sourceType !== 'website') return []
 
   let query = supabase
@@ -103,6 +105,12 @@ async function getCompetitorWebsiteChanges({ dateFrom, dateTo, groupIds, sourceT
   if (dateFrom) query = query.gte('detected_at', dateFrom)
   if (dateTo) query = query.lte('detected_at', dateTo)
   if (category && category !== 'all') query = query.eq('category', category)
+
+  // Добавляем фильтр поиска
+  if (searchQuery.trim()) {
+    const searchTerm = `%${searchQuery}%`
+    query = query.or(`summary.ilike.${searchTerm}`, { foreignTable: '' })
+  }
 
   const { data, error } = await query
   if (error) throw error
@@ -136,7 +144,7 @@ async function getCompetitorWebsiteChanges({ dateFrom, dateTo, groupIds, sourceT
 /**
  * Получить посты из Telegram-каналов конкурентов
  */
-async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, category }) {
+async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, category, searchQuery = '' }) {
   if (!sourceType || sourceType !== 'telegram') return []
 
   let query = supabase
@@ -155,6 +163,12 @@ async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, ca
   if (dateFrom) query = query.gte('post_date', dateFrom)
   if (dateTo) query = query.lte('post_date', dateTo)
   if (category && category !== 'all') query = query.eq('category', category)
+
+  // Добавляем фильтр поиска
+  if (searchQuery.trim()) {
+    const searchTerm = `%${searchQuery}%`
+    query = query.or(`content_text.ilike.${searchTerm},summary.ilike.${searchTerm},title.ilike.${searchTerm}`, { foreignTable: '' })
+  }
 
   const { data, error } = await query
   if (error) throw error

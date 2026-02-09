@@ -282,12 +282,12 @@ const resetCompetitorFilters = () => {
       {/* Переключатель типа */}
       <FeedTypeToggle feedType={feedType} onChange={handleFeedTypeChange} />
 
-      {/* Поиск по новостям (только для режима "Новости") */}
-      {feedType === 'news' && (
+      {/* Поиск по новостям и конкурентам */}
+      {(feedType === 'news' || feedType === 'competitors' || feedType === 'all') && (
         <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, padding: 12 }}>
           <input
             type="text"
-            placeholder="🔍 Поиск по новостям..."
+            placeholder={feedType === 'news' ? '🔍 Поиск по новостям...' : '🔍 Поиск по обновлениям...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
