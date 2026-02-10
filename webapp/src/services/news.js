@@ -84,13 +84,18 @@ export async function getNewsPosts({ categories = [], channels = [], sourceTypes
     ...post,
     channel: post.news_channels,
     source_type: post.news_channels?.source_type || 'telegram',
-    categories: (post.news_post_categories || [])
-      .map(pc => ({
-        ...pc.news_categories,
-        confidence: pc.confidence,
-        is_manual: pc.is_manual,
-      }))
-      .filter(cat => cat.is_visible !== false)
+    categories: (() => {
+      const visible = (post.news_post_categories || [])
+        .map(pc => ({
+          ...pc.news_categories,
+          confidence: pc.confidence,
+          is_manual: pc.is_manual,
+        }))
+        .filter(cat => cat.is_visible !== false)
+      return visible.length > 0
+        ? visible
+        : [{ id: null, name: 'Прочее', color: '#888888', is_visible: true }]
+    })()
   }))
 
   // Дедупликация по content_hash — одинаковый контент показываем только один раз
@@ -341,13 +346,18 @@ export async function getNewsDigestDetails(digestId) {
     ...post,
     channel: post.news_channels,
     source_type: post.news_channels?.source_type || 'telegram',
-    categories: (post.news_post_categories || [])
-      .map(pc => ({
-        ...pc.news_categories,
-        confidence: pc.confidence,
-        is_manual: pc.is_manual
-      }))
-      .filter(cat => cat.is_visible !== false)
+    categories: (() => {
+      const visible = (post.news_post_categories || [])
+        .map(pc => ({
+          ...pc.news_categories,
+          confidence: pc.confidence,
+          is_manual: pc.is_manual
+        }))
+        .filter(cat => cat.is_visible !== false)
+      return visible.length > 0
+        ? visible
+        : [{ id: null, name: 'Прочее', color: '#888888', is_visible: true }]
+    })()
   }))
 
   return { posts }

@@ -1304,12 +1304,19 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
         # Категоризация + summary в одном LLM-вызове
         post_categories, summary = await categorize_and_summarize(post_text, categories, session)
 
-        # Фоллбек: если категории не назначены — назначаем "Прочее"
+        # Фоллбек: если категории не назначены или все невидимые — добавляем "Прочее"
+        other_cat = next((c for c in categories if c['name'] == 'Прочее'), None)
         if not post_categories:
-            other_cat = next((c for c in categories if c['name'] == 'Прочее'), None)
             if other_cat:
                 post_categories = [{'category_id': other_cat['id'], 'confidence': 0.5}]
                 print(f"  ℹ️ Пост {post_id}: категории не определены, назначена «Прочее»")
+        elif other_cat:
+            # Проверяем, есть ли хоть одна видимая категория
+            visible_cats = {c['id'] for c in categories if c.get('is_visible', True)}
+            has_visible = any(pc['category_id'] in visible_cats for pc in post_categories)
+            if not has_visible:
+                post_categories.append({'category_id': other_cat['id'], 'confidence': 0.5})
+                print(f"  ℹ️ Пост {post_id}: все категории невидимые, добавлена «Прочее»")
 
         # Для telegram новостей извлекаем title из content_text
         # Для web новостей используем уже установленный title
@@ -1348,7 +1355,7 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
 # ============================================================================
 
 def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_end: datetime,
-                              posts: list, channels_count: int) -> str:
+                              posts: list, channels_count: int, stats_extra: dict = None) -> str:
     """Генерация PDF-дайджеста новостей, отсортированных по дате публикации.
 
     posts: плоский список постов с полем category_tags.
@@ -1436,6 +1443,20 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
     total_posts = len(cleaned_posts)
     stats = f"Источников: {channels_count} | Новостей: {total_posts}"
     content.append(Paragraph(stats, styles['subtitle']))
+
+    if stats_extra:
+        no_cat = stats_extra.get('without_categories', 0)
+        dupes = stats_extra.get('duplicates', 0)
+        if no_cat or dupes:
+            total_db = stats_extra.get('total_from_db', 0)
+            filter_parts = []
+            if no_cat:
+                filter_parts.append(f"без категорий: {no_cat}")
+            if dupes:
+                filter_parts.append(f"дубликатов: {dupes}")
+            filter_info = f"Всего из БД: {total_db} | " + " | ".join(filter_parts)
+            content.append(Paragraph(filter_info, styles['subtitle']))
+
     content.append(Spacer(1, 10))
 
     for post_number, post in enumerate(cleaned_posts, start=1):
@@ -1778,15 +1799,19 @@ async def run_news_monitoring_async():
         pdf_path = None
         all_post_ids = []
         total_digest_posts = 0
+        posts_without_categories = 0
         
         if digest_posts:
             # Плоский список постов с тегами категорий (без группировки)
             posts_flat = []
             seen_urls = set()
+            posts_without_categories = 0
+            duplicate_urls = 0
 
             for post in digest_posts:
                 post_url = post.get('post_url', '')
                 if post_url in seen_urls:
+                    duplicate_urls += 1
                     continue
                 seen_urls.add(post_url)
 
@@ -1803,7 +1828,9 @@ async def run_news_monitoring_async():
                     })
 
                 if not category_tags:
-                    continue
+                    posts_without_categories += 1
+                    print(f"  ℹ️ Пост без видимых категорий, назначена «Прочее»: {post.get('title', post_url)[:80]}")
+                    category_tags = [{'name': 'Прочее', 'color': '#888888'}]
 
                 channel_info = post.get('news_channels', {})
                 source_type = post.get('source_type', 'telegram')
@@ -1818,6 +1845,8 @@ async def run_news_monitoring_async():
                     'category_tags': category_tags,
                     'source_type': source_type,
                 })
+
+            print(f"📊 Дайджест: {len(posts_flat)} постов (без категорий: {posts_without_categories}, дубликатов: {duplicate_urls})")
 
             # Сортировка по дате (свежие первыми)
             def parse_date_for_sort(d):
@@ -1838,6 +1867,11 @@ async def run_news_monitoring_async():
                 period_end=period_end,
                 posts=posts_flat,
                 channels_count=len(all_sources),
+                stats_extra={
+                    'total_from_db': len(digest_posts),
+                    'without_categories': posts_without_categories,
+                    'duplicates': duplicate_urls,
+                },
             )
 
             # Сохранение ID постов для связи с дайджестом
@@ -1887,7 +1921,10 @@ async def run_news_monitoring_async():
 🌐 Веб-сайтов: <b>{web_sources_scanned}</b> из {len(web_sources)}
 📝 Новых записей: <b>{total_all_new}</b> (📱 {total_new_posts} + 🌐 {total_web_posts})
 🤖 Обработано LLM: <b>{processed_count}</b>
-📰 Постов в дайджесте: <b>{total_digest}</b>"""
+📰 Постов в дайджесте: <b>{total_digest_posts}</b>"""
+
+    if posts_without_categories > 0:
+        summary_msg += f"\n  ℹ️ Из них без категорий: {posts_without_categories}"
 
     # Общая статистика ошибок
     if tg_channels_with_errors or web_sources_with_errors:
