@@ -190,23 +190,27 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
   if (mediaIcons.length > 0) metaParts.push(mediaIcons.join(' '))
 
   const rawTitle = post.title || ''
-  const bodyText = post.content_text || post.summary || ''
+  const contentText = post.content_text || ''
+  const summaryText = post.summary || ''
 
   const normalizeText = (str) => (str || '').replace(/\.{2,}$/, '').trim().slice(0, 40)
-  const bodyStartsWithTitle = rawTitle && bodyText && bodyText.startsWith(rawTitle)
-  const isDuplicateBody = rawTitle && bodyText && normalizeText(rawTitle) === normalizeText(bodyText)
+  const isDuplicateBody = rawTitle && contentText && normalizeText(rawTitle) === normalizeText(contentText)
 
-  // Заголовок показываем как bold-хедер, если body не начинается с него
-  const showTitle = rawTitle && !bodyStartsWithTitle
+  // Если content_text совпадает с title, используем summary как основной текст
+  const bodyText = isDuplicateBody ? (summaryText || contentText) : (contentText || summaryText)
 
-  // В свёрнутом виде скрываем body-дубликат, в развёрнутом — показываем всегда
-  const displayBody = (isDuplicateBody && !expanded) ? '' : bodyText
+  // Заголовок показываем если body не начинается с него
+  const showTitle = rawTitle && !bodyText.startsWith(rawTitle)
 
-  // Fallback: если и title скрыт, и body скрыт — принудительно показываем title
+  // В свёрнутом виде: показываем title как обычный текст если body пустой или совпадает
+  const displayBody = bodyText
+
+  // Fallback: если и title скрыт, и body пуст — показываем title
   const showFallbackTitle = !showTitle && !displayBody && rawTitle
 
-  // Показываем "Показать полностью" если текст обрезается ИЛИ есть скрытый дубликат
-  const canExpand = needsExpand || isDuplicateBody
+  // Показываем "Показать полностью" если текст обрезается ИЛИ есть summary для показа
+  const hasSummaryToShow = isDuplicateBody && summaryText && summaryText !== rawTitle
+  const canExpand = needsExpand || hasSummaryToShow
 
   return (
     <div style={styles.card}>
@@ -332,7 +336,6 @@ const styles = {
     wordBreak: 'break-word',
   },
   titleText: {
-    fontWeight: 600,
     color: '#fff',
     fontSize: 15,
   },
