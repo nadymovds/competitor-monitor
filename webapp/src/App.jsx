@@ -122,7 +122,7 @@ export default function App() {
 
     switch (activeTab) {
       case 'feed':
-        return <FeedScreen groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
+        return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
       case 'scans':
         return <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} />
       case 'competitors':
@@ -130,7 +130,7 @@ export default function App() {
       case 'settings':
         return <SettingsScreen user={user} groups={groups} />
       default:
-        return <FeedScreen groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
+        return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
     }
   }
 

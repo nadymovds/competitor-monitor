@@ -18,6 +18,8 @@ const CATEGORY_CONFIG = {
 const PAGE_SIZE = 10
 
 export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
+  const isAdmin = user?.role === 'admin'
+
   // Основное состояние
   const [feedType, setFeedType] = useState('all')
   const [items, setItems] = useState([])
@@ -502,7 +504,7 @@ function FeedItem({ item, onNavigateToCompetitor }) {
   }
 
   if (isNews) {
-    return <NewsFeedItem item={item} />
+    return <NewsFeedItem item={item} isAdmin={isAdmin} />
   }
 
   return null
@@ -613,7 +615,7 @@ function CompetitorFeedItem({ item, onNavigate }) {
 }
 
 // Компонент новости отрасли (использует NewsCard)
-function NewsFeedItem({ item }) {
+function NewsFeedItem({ item, isAdmin }) {
   const post = {
     id: item.id,
     title: item.title,
@@ -630,7 +632,7 @@ function NewsFeedItem({ item }) {
     views_count: item.views_count
   }
 
-  return <NewsCard post={post} />
+  return <NewsCard post={post} isAdmin={isAdmin} />
 }
 
 function LoadingSkeleton() {
