@@ -15,10 +15,67 @@ function formatViews(count) {
   return String(count)
 }
 
+function prepareTextForCopy(post) {
+  const lines = []
+  
+  // Добавляем заголовок если есть
+  const rawTitle = post.title || ''
+  if (rawTitle) {
+    lines.push(rawTitle)
+  }
+  
+  // Добавляем содержимое если есть
+  const bodyText = post.content_text || post.summary || ''
+  if (bodyText) {
+    // Проверяем, не дублирует ли bodyText заголовок
+    const normalizeText = (str) => (str || '').replace(/\.{2,}$/, '').trim().slice(0, 40)
+    const isDuplicate = rawTitle && normalizeText(rawTitle) === normalizeText(bodyText)
+    
+    if (!isDuplicate && !bodyText.startsWith(rawTitle)) {
+      lines.push(bodyText)
+    } else if (isDuplicate && !rawTitle) {
+      lines.push(bodyText)
+    }
+  }
+  
+  // Объединяем с пустой строкой для разделения
+  return lines.filter(line => line.trim()).join('\n\n')
+}
+
+function prepareLinkForCopy(url) {
+  if (!url) return ''
+  
+  // Используем Markdown формат для гиперссылки
+  // [Ссылка](url) - будет работать в приложениях, поддерживающих Markdown
+  // В приложениях без Markdown поддержки будет просто текст и URL
+  return `[Ссылка](${url})`
+}
+
+function copyToClipboard(text) {
+  // Проверяем наличие Clipboard API
+  if (!navigator.clipboard) {
+    // Fallback для старых браузеров
+    return Promise.reject(new Error('Clipboard API не поддерживается'))
+  }
+  
+  // Используем Clipboard API для копирования текста
+  return navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      return { success: true }
+    })
+    .catch((error) => {
+      console.error('Ошибка при копировании в буфер обмена:', error)
+      return { success: false, error }
+    })
+}
+
 export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, onCategoryRemove }) {
   const [expanded, setExpanded] = useState(false)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [needsExpand, setNeedsExpand] = useState(false)
+  const [toastMessage, setToastMessage] = useState('')
+  const toastTimeoutRef = useRef(null)
   const textRef = useRef(null)
   const pickerRef = useRef(null)
 
@@ -42,6 +99,27 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showCategoryPicker])
 
+  // Очистка тоста при размонтировании компонента
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const showToast = (message, duration = 2000) => {
+    // Очищаем предыдущий таймер если существует
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current)
+    }
+    
+    setToastMessage(message)
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage('')
+    }, duration)
+  }
+
   const handleToggleExpand = () => {
     hapticFeedback('light')
     setExpanded(!expanded)
@@ -53,6 +131,27 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
       hapticFeedback('light')
       openLink(post.post_url)
     }
+  }
+
+  const handleCopy = (e) => {
+    e.stopPropagation()
+    hapticFeedback('light')
+    
+    // Подготавливаем текст для копирования
+    const text = prepareTextForCopy(post)
+    const link = prepareLinkForCopy(post.post_url)
+    
+    // Объединяем текст и ссылку
+    const fullText = link ? `${text}\n\n${link}` : text
+    
+    // Копируем в буфер обмена
+    copyToClipboard(fullText).then((result) => {
+      if (result.success) {
+        showToast('Скопировано')
+      } else {
+        showToast('Ошибка копирования')
+      }
+    })
   }
 
   const handlePickCategory = (categoryId) => {
@@ -111,6 +210,13 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
 
   return (
     <div style={styles.card}>
+      {/* Toast уведомление */}
+      {toastMessage && (
+        <div style={styles.toast}>
+          {toastMessage}
+        </div>
+      )}
+
       {/* Текст: заголовок + тело, кликабельный для expand/collapse */}
       <div onClick={handleToggleExpand} style={{ cursor: 'pointer' }}>
         {expanded ? (
@@ -172,6 +278,11 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
               Оригинал ↗
             </button>
           )}
+          {isAdmin && post.post_url && (
+            <button onClick={handleCopy} style={styles.copyBtn}>
+              Копировать
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -185,6 +296,22 @@ const styles = {
     padding: 16,
     border: '1px solid #2a2a3a',
     animation: 'slideUp 0.3s ease',
+    position: 'relative',
+  },
+  toast: {
+    position: 'absolute',
+    top: 10,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    backgroundColor: '#10b981',
+    color: '#fff',
+    padding: '8px 16px',
+    borderRadius: 6,
+    fontSize: 13,
+    fontWeight: 500,
+    zIndex: 100,
+    animation: 'slideDown 0.3s ease',
+    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
   },
   clampedText: {
     fontSize: 14,
@@ -276,6 +403,16 @@ const styles = {
     background: 'none',
     border: 'none',
     color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: 'pointer',
+    padding: '4px 0',
+    whiteSpace: 'nowrap',
+  },
+  copyBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#10b981',
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
