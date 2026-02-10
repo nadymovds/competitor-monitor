@@ -93,26 +93,21 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
   const rawTitle = post.title || ''
   const bodyText = post.content_text || post.summary || ''
 
-  // Если body начинается с title — не дублируем, показываем только body
-  const showTitle = rawTitle && !bodyText.startsWith(rawTitle)
-
-  // Для web-источников: дополнительная проверка на дублирование
-  // Если title и body начинаются одинаково (первые 40 символов), скрываем body
   const normalizeText = (str) => (str || '').replace(/\.{2,}$/, '').trim().slice(0, 40)
-  const isDuplicateBody = sourceType === 'website' &&
-    rawTitle &&
-    bodyText &&
-    normalizeText(rawTitle) === normalizeText(bodyText)
+  const bodyStartsWithTitle = rawTitle && bodyText && bodyText.startsWith(rawTitle)
+  const isDuplicateBody = rawTitle && bodyText && normalizeText(rawTitle) === normalizeText(bodyText)
 
-  // Для web-источников с дубликатом: скрываем body в свёрнутом виде, показываем при раскрытии
+  // Заголовок показываем как bold-хедер, если body не начинается с него
+  const showTitle = rawTitle && !bodyStartsWithTitle
+
+  // В свёрнутом виде скрываем body-дубликат, в развёрнутом — показываем всегда
   const displayBody = (isDuplicateBody && !expanded) ? '' : bodyText
 
-  // Показываем кнопку "Показать полностью" если текст обрезается ИЛИ есть скрытый дубликат
-  const canExpand = needsExpand || isDuplicateBody
+  // Fallback: если и title скрыт, и body скрыт — принудительно показываем title
+  const showFallbackTitle = !showTitle && !displayBody && rawTitle
 
-  const displayText = showTitle
-    ? (bodyText ? `${rawTitle}\n${bodyText}` : rawTitle)
-    : (bodyText || rawTitle || 'Без заголовка')
+  // Показываем "Показать полностью" если текст обрезается ИЛИ есть скрытый дубликат
+  const canExpand = needsExpand || isDuplicateBody
 
   return (
     <div style={styles.card}>
@@ -120,13 +115,13 @@ export default function NewsCard({ post, isAdmin, allCategories, onCategoryAdd, 
       <div onClick={handleToggleExpand} style={{ cursor: 'pointer' }}>
         {expanded ? (
           <div style={styles.expandedText}>
-            {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
+            {(showTitle || showFallbackTitle) && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
             {displayBody}
           </div>
         ) : (
           <>
             <div ref={textRef} style={styles.clampedText}>
-              {showTitle && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
+              {(showTitle || showFallbackTitle) && <><span style={styles.titleText}>{rawTitle}</span>{'\n'}</>}
               {displayBody}
             </div>
             {canExpand && (
