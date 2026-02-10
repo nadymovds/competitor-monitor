@@ -475,6 +475,7 @@ const resetCompetitorFilters = () => {
             <FeedItem
               key={item.id}
               item={item}
+              isAdmin={isAdmin}
               onNavigateToCompetitor={onNavigateToCompetitor}
             />
           ))}
@@ -494,7 +495,7 @@ const resetCompetitorFilters = () => {
 }
 
 // Компонент элемента ленты
-function FeedItem({ item, onNavigateToCompetitor }) {
+function FeedItem({ item, isAdmin, onNavigateToCompetitor }) {
   const isCompetitor = item.type === 'competitor_change' || item.type === 'competitor_tg'
   const isNews = item.type === 'industry_news'
   const isTelegram = item.source_type === 'telegram'
