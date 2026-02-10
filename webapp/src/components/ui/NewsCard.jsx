@@ -16,28 +16,28 @@ function formatViews(count) {
 }
 
 function prepareTextForCopy(post) {
-  const lines = []
-  
-  // Добавляем заголовок если есть
   const rawTitle = post.title || ''
+  const contentText = post.content_text || ''
+  const summaryText = post.summary || ''
+
+  // Если content_text начинается с заголовка — используем content_text целиком (он уже содержит заголовок)
+  if (contentText && rawTitle && contentText.startsWith(rawTitle)) {
+    return contentText
+  }
+
+  const lines = []
+
+  // Добавляем заголовок если есть
   if (rawTitle) {
     lines.push(rawTitle)
   }
-  
-  // Добавляем содержимое если есть
-  const bodyText = post.content_text || post.summary || ''
-  if (bodyText) {
-    // Проверяем, не дублирует ли bodyText заголовок
-    const normalizeText = (str) => (str || '').replace(/\.{2,}$/, '').trim().slice(0, 40)
-    const isDuplicate = rawTitle && normalizeText(rawTitle) === normalizeText(bodyText)
-    
-    if (!isDuplicate && !bodyText.startsWith(rawTitle)) {
-      lines.push(bodyText)
-    } else if (isDuplicate && !rawTitle) {
-      lines.push(bodyText)
-    }
+
+  // Добавляем содержимое если есть и не дублирует заголовок
+  const bodyText = contentText || summaryText
+  if (bodyText && bodyText !== rawTitle) {
+    lines.push(bodyText)
   }
-  
+
   // Объединяем с пустой строкой для разделения
   return lines.filter(line => line.trim()).join('\n\n')
 }
