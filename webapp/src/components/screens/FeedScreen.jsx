@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { getUnifiedFeed, getLastScanDate } from '../../services/feed'
 import { getNewsCategories, getNewsChannels } from '../../services/news'
 import { hapticFeedback, openLink, openTelegramLink } from '../../services/telegram'
@@ -514,6 +514,22 @@ function FeedItem({ item, isAdmin, onNavigateToCompetitor }) {
 
 // Компонент изменения конкурента
 function CompetitorFeedItem({ item, onNavigate }) {
+  const [expanded, setExpanded] = useState(false)
+  const [needsExpand, setNeedsExpand] = useState(false)
+  const textRef = useRef(null)
+
+  useLayoutEffect(() => {
+    const el = textRef.current
+    if (el && !expanded) {
+      setNeedsExpand(el.scrollHeight > el.clientHeight + 1)
+    }
+  })
+
+  const handleToggleExpand = () => {
+    hapticFeedback('light')
+    setExpanded(!expanded)
+  }
+
   const typeColors = {
     products: '#22c55e',
     services: '#3b82f6',
@@ -577,8 +593,27 @@ function CompetitorFeedItem({ item, onNavigate }) {
         </div>
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6, marginBottom: 10 }}>
-        {item.summary}
+      <div onClick={handleToggleExpand} style={{ cursor: 'pointer', marginBottom: 10 }}>
+        {expanded ? (
+          <div style={{ fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {item.summary}
+          </div>
+        ) : (
+          <>
+            <div ref={textRef} style={{
+              fontSize: 14, fontWeight: 400, color: '#e5e7eb', lineHeight: 1.6,
+              display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden', wordBreak: 'break-word'
+            }}>
+              {item.summary}
+            </div>
+            {needsExpand && (
+              <div style={{ color: '#3b82f6', fontSize: 13, fontWeight: 500, marginTop: 4 }}>
+                Показать полностью
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {item.tags?.length > 0 && (
