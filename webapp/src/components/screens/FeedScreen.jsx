@@ -12,7 +12,8 @@ const CATEGORY_CONFIG = {
   products: { label: 'Продукты', color: '#22c55e' },
   prices: { label: 'Цены', color: '#ef4444' },
   services: { label: 'Условия', color: '#3b82f6' },
-  news: { label: 'Новости', color: '#f59e0b' }
+  news: { label: 'Новости', color: '#f59e0b' },
+  promotion: { label: 'Продвижение', color: '#8b5cf6' }
 }
 
 const PAGE_SIZE = 10

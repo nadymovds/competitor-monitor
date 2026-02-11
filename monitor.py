@@ -86,6 +86,7 @@ CATEGORY_PRICES = "prices"
 CATEGORY_NEWS = "news"
 CATEGORY_TECHNICAL = "technical"
 CATEGORY_SERVICES = "services"
+CATEGORY_PROMOTION = "promotion"
 CATEGORY_OTHER = "other"
 
 # === TELEGRAM CHANNEL SCANNING ===
@@ -776,7 +777,7 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
     return None
 
 
-def parse_llm_json_response(response: str, competitor_name: str, allow_technical: bool = True) -> Dict[str, Any]:
+def parse_llm_json_response(response: str, competitor_name: str, allow_technical: bool = True, is_tg_post: bool = False) -> Dict[str, Any]:
     """
     Парсит JSON-ответ от LLM.
 
@@ -784,6 +785,7 @@ def parse_llm_json_response(response: str, competitor_name: str, allow_technical
         response: Ответ от LLM
         competitor_name: Имя конкурента (для логирования)
         allow_technical: Разрешить категорию "technical" (False для TG-постов)
+        is_tg_post: True для TG-постов (пропускает фильтры сайтов)
     """
     default_result = {
         "category": CATEGORY_OTHER,
@@ -818,7 +820,7 @@ def parse_llm_json_response(response: str, competitor_name: str, allow_technical
         result = json.loads(json_str)
 
         # Валидные категории зависят от allow_technical
-        valid_categories = [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_SERVICES, CATEGORY_OTHER]
+        valid_categories = [CATEGORY_PRODUCTS, CATEGORY_PRICES, CATEGORY_NEWS, CATEGORY_SERVICES, CATEGORY_PROMOTION, CATEGORY_OTHER]
         if allow_technical:
             valid_categories.append(CATEGORY_TECHNICAL)
 
@@ -866,81 +868,84 @@ def parse_llm_json_response(response: str, competitor_name: str, allow_technical
         if len(summary) > 500:
             summary = summary[:497] + '...'
 
-        # Проверяем на неинформативные ответы
-        uninformative_patterns = [
-            r'^обновлён\s*(контент|содержимое)?\s*сайт',
-            r'^контент\s*сайта\s*(был\s*)?(обновлён|изменён)',
-            r'^сайт\s*(был\s*)?(обновлён|изменён)',
-            r'^изменения\s*на\s*сайте',
-            r'^зафиксированы\s*изменения',
-            r'^обнаружены\s*изменения',
-            r'^технические\s*изменения',
-            r'^незначительные\s*изменения',
-        ]
-        
-        summary_lower = summary.lower()
-        is_uninformative = False
-        for pattern in uninformative_patterns:
-            if re.match(pattern, summary_lower):
+        # Фильтры ниже применяются только к веб-изменениям, не к TG-постам.
+        # Для TG-постов доверяем классификации LLM.
+        if not is_tg_post:
+            # Проверяем на неинформативные ответы
+            uninformative_patterns = [
+                r'^обновлён\s*(контент|содержимое)?\s*сайт',
+                r'^контент\s*сайта\s*(был\s*)?(обновлён|изменён)',
+                r'^сайт\s*(был\s*)?(обновлён|изменён)',
+                r'^изменения\s*на\s*сайте',
+                r'^зафиксированы\s*изменения',
+                r'^обнаружены\s*изменения',
+                r'^технические\s*изменения',
+                r'^незначительные\s*изменения',
+            ]
+
+            summary_lower = summary.lower()
+            is_uninformative = False
+            for pattern in uninformative_patterns:
+                if re.match(pattern, summary_lower):
+                    is_uninformative = True
+                    break
+
+            if not summary or len(summary) < 40:
                 is_uninformative = True
-                break
-        
-        if not summary or len(summary) < 40:
-            is_uninformative = True
-        
-        if is_uninformative:
-            result["summary"] = summary if summary else f"Обновлён контент сайта {competitor_name}"
-            result["is_meaningful"] = False
-            # НЕ меняем категорию - оставляем то, что вернул LLM
-            return result
 
-        # Проверка релевантности
-        # === ИСКЛЮЧАЕМЫЕ ТЕМЫ (не наша отрасль) ===
-        exclude_keywords = [
-            # Медицина (розничные услуги)
-            'клиник', 'лечен', 'болез', 'пациент', 'врач', 'диагнос', 'медицинск',
-            'анализ крови', 'прием врача', 'аптек',
-            # Туризм
-            'тур', 'отель', 'туристич', 'путешеств', 'отпуск', 'виза',
-            # Авиация, ж/д, морской транспорт
-            'авиа', 'самолет', 'полет', 'аэропорт', 'железная дорога', 'поезд', 'вагон',
-            'корабль', 'судно', 'мор',
-            # Социальные программы и развлечение
-            'благотворит', 'благодар', 'поздравл', 'праздник', 'юбилей', 'день рожден',
-            'развлечен', 'концерт', 'спектакль', 'выставк искусств',
-            # Общий PR без конкретики
-            'награда', 'рейтинг', 'лучш компани', 'топ компани',
-        ]
-        
-        summary_lower = summary.lower()
-        is_excluded = any(kw in summary_lower for kw in exclude_keywords)
-        
-        if is_excluded:
-            result["summary"] = summary
-            result["is_meaningful"] = False
-            print(f"   ⚠️ Исключена по отрасли: {summary[:50]}...")
-            return result
+            if is_uninformative:
+                result["summary"] = summary if summary else f"Обновлён контент сайта {competitor_name}"
+                result["is_meaningful"] = False
+                # НЕ меняем категорию - оставляем то, что вернул LLM
+                return result
 
-        relevant_keywords = [
-            # Отраслевые термины
-            'транспорт', 'мониторинг', 'глонасс', 'gps', 'трекер',
-            'тахограф', 'топлив', 'автопарк', 'навигац', 'телематик',
-            'датчик', 'wialon', 'слежен', 'контрол', 'видео',
-            # Бизнес-термины
-            'цен', 'скидк', 'акци', 'тариф', 'предложени', 'бесплатн',
-            'обновлен', 'новый', 'новая', 'новое', 'запуск', 'выпуск',
-            'функци', 'возможност', 'интеграц', 'подключ',
-            'услуг', 'сервис', 'поддержк', 'обслуживан',
-            'партнёр', 'клиент', 'компани',
-        ]
+            # Проверка релевантности
+            # === ИСКЛЮЧАЕМЫЕ ТЕМЫ (не наша отрасль) ===
+            exclude_keywords = [
+                # Медицина (розничные услуги)
+                'клиник', 'лечен', 'болез', 'пациент', 'врач', 'диагнос', 'медицинск',
+                'анализ крови', 'прием врача', 'аптек',
+                # Туризм
+                'тур', 'отель', 'туристич', 'путешеств', 'отпуск', 'виза',
+                # Авиация, ж/д, морской транспорт
+                'авиа', 'самолет', 'полет', 'аэропорт', 'железная дорога', 'поезд', 'вагон',
+                'корабль', 'судно', 'мор',
+                # Социальные программы и развлечение
+                'благотворит', 'благодар', 'поздравл', 'праздник', 'юбилей', 'день рожден',
+                'развлечен', 'концерт', 'спектакль', 'выставк искусств',
+                # Общий PR без конкретики
+                'награда', 'рейтинг', 'лучш компани', 'топ компани',
+            ]
 
-        has_relevant = any(kw in summary_lower for kw in relevant_keywords)
+            summary_lower = summary.lower()
+            is_excluded = any(kw in summary_lower for kw in exclude_keywords)
 
-        if not has_relevant:
-            result["summary"] = summary
-            result["is_meaningful"] = False
-            print(f"   ⚠️ Нерелевантный контент: {summary[:50]}...")
-            return result
+            if is_excluded:
+                result["summary"] = summary
+                result["is_meaningful"] = False
+                print(f"   ⚠️ Исключена по отрасли: {summary[:50]}...")
+                return result
+
+            relevant_keywords = [
+                # Отраслевые термины
+                'транспорт', 'мониторинг', 'глонасс', 'gps', 'трекер',
+                'тахограф', 'топлив', 'автопарк', 'навигац', 'телематик',
+                'датчик', 'wialon', 'слежен', 'контрол', 'видео',
+                # Бизнес-термины
+                'цен', 'скидк', 'акци', 'тариф', 'предложени', 'бесплатн',
+                'обновлен', 'новый', 'новая', 'новое', 'запуск', 'выпуск',
+                'функци', 'возможност', 'интеграц', 'подключ',
+                'услуг', 'сервис', 'поддержк', 'обслуживан',
+                'партнёр', 'клиент', 'компани',
+            ]
+
+            has_relevant = any(kw in summary_lower for kw in relevant_keywords)
+
+            if not has_relevant:
+                result["summary"] = summary
+                result["is_meaningful"] = False
+                print(f"   ⚠️ Нерелевантный контент: {summary[:50]}...")
+                return result
 
         result["summary"] = summary
         result["is_meaningful"] = True
@@ -1049,53 +1054,53 @@ async def analyze_tg_post_async(competitor_name: str, post_text: str,
 {post_text[:2000]}
 
 ОТРАСЛЬ: Телематика, видеоаналитика, телемедицина и безопасность на КОММЕРЧЕСКОМ ТРАНСПОРТЕ.
-ВАЖНО: Отслеживаем только B2B услуги для корпоративных автопарков, дорожных перевозчиков и логистических компаний.
+ВАЖНО: Отслеживаем B2B услуги для корпоративных автопарков, дорожных перевозчиков и логистических компаний.
 
-ЗАДАЧА: Определи категорию и кратко опиши суть поста.
+ЗАДАЧА: Определи категорию, кратко опиши суть поста. ВСЕГДА пиши summary — даже если пост не очень важный.
 
-ВАЖНО (is_meaningful: true) — только посты про:
-- Продукты/услуги: новые устройства, трекеры, видеорегистраторы, тахографы, платформы мониторинга, обновления функций
-- Цены/тарифы: акции, скидки, изменение цен для корпоративных клиентов, спецпредложения
-- Условия обслуживания: SLA, тарифные планы, техподдержка, условия работы, сервисные пакеты
-- Операционные изменения: сбои систем, важные обновления, проблемы в работе платформы
-- Партнёрства: интеграция с логистическим ПО, автопарк-системами, дорожными сервисами
-- Новости: выставки для транспорта/логистики, сертификация, стандарты
+ВАЖНО (is_meaningful: true) — посты про:
+- Продукты/услуги: новые устройства, трекеры, видеорегистраторы, тахографы, платформы мониторинга, обновления функций, релизы ПО
+- Цены/тарифы: акции, скидки, изменение цен, спецпредложения
+- Условия обслуживания: SLA, тарифные планы, техподдержка, сбой системы, технические работы
+- Партнёрства и интеграции: с логистическим ПО, автопарк-системами, дорожными сервисами
+- Новости: выставки, конференции, форумы, сертификация, стандарты, участие в мероприятиях
+- Продвижение: маркетинговые посты, кейсы клиентов, демонстрации продукта, промо-видео, обзоры функций, результаты/достижения с продуктом, экономия с продуктом, обучающий контент по продукту
 
 ИГНОРИРУЙ (is_meaningful: false):
-- РОЗНИЧНЫЕ МЕДИЦИНСКИЕ услуги (лечение, диагностика, клиника)
-- Туризм, авиация, ж/д, морской транспорт (если не связано с автоперевозками)
-- Благотворительность, социальные программы, поздравления
-- Развлекательный контент, репосты без конкретики
-- Общие новости о компании без отношения к B2B продуктам
-- Нерелевантное законодательство
+- Поздравления с праздниками, мотивационные цитаты
+- Благотворительность, социальные программы
+- Развлекательный контент без связи с продуктами компании
+- Анонсы переезда в другой мессенджер/соцсеть без конкретики о продуктах
+- Нерелевантное законодательство (не про транспорт/телематику)
+- Посты без текста (только фото/видео без описания)
 
-ВАЖНЫЕ ПРАВИЛА:
+ПРАВИЛА:
 - Отвечай ТОЛЬКО на русском языке
-- Описывай только то, что реально содержится в посте
-- Если сомневаешься в релевантности — выбери is_meaningful: false
+- ВСЕГДА заполняй summary — 1-2 предложения о сути поста
+- Если сомневаешься между "other" и другой категорией — выбери другую категорию, если пост хоть как-то связан с продуктами/услугами компании
 
-КАТЕГОРИИ (выбери СТРОГО ОДНУ из пяти):
-1. "products" — новый/обновлённый продукт, устройство, трекер, тахограф, ПО, платформа, обновление функций, релиз
+КАТЕГОРИИ (выбери СТРОГО ОДНУ из шести):
+1. "products" — обновление продукта, новая функция, релиз ПО, новый датчик/фильтр, доработка платформы
 2. "prices" — акция, скидка, изменение цен/тарифов, спецпредложение, бесплатный период
 3. "services" — условия обслуживания, SLA, тарифные планы, техподдержка, сбой системы, технические работы
-4. "news" — новости компании, партнёрства, мероприятия, выставки, сертификация, интеграции, достижения
-5. "other" — нерелевантный контент (поздравления, развлечения, общие репосты, мотивация)
-
-ВАЖНО: Категория "technical" НЕ СУЩЕСТВУЕТ для TG-постов. Используй только 5 категорий выше!
+4. "news" — участие в выставках/конференциях/форумах, партнёрства, сертификация, интеграции, отраслевые новости
+5. "promotion" — маркетинг, кейсы, промо-видео, демонстрация продукта, обзоры, обучающие материалы, результаты/экономия клиентов
+6. "other" — ТОЛЬКО для действительно нерелевантного контента (поздравления, мотивация, переезд в другой мессенджер)
 
 ФОРМАТ ОТВЕТА (только JSON, без пояснений):
 {{
-    "category": "products|prices|services|news|other",
+    "category": "products|prices|services|news|promotion|other",
     "summary": "Краткое описание сути поста. 1-2 предложения.",
     "tags": ["тег1", "тег2"],
     "is_meaningful": true/false
 }}
 
-ТЕГИ: новый_продукт, видео, мониторинг, тахографы, платформа, акция, скидка, интеграция, обновление, партнёрство, сбой, выставка"""
+ТЕГИ: новый_продукт, видео, мониторинг, тахографы, платформа, акция, скидка, интеграция, обновление, партнёрство, сбой, выставка, кейс, промо"""
 
     response = await call_llm_async(prompt, session, max_tokens=400)
     # allow_technical=False - TG посты не должны получать категорию "technical"
-    return parse_llm_json_response(response, competitor_name, allow_technical=False)
+    # is_tg_post=True - пропускаем фильтры сайтов (uninformative patterns, keyword relevance)
+    return parse_llm_json_response(response, competitor_name, allow_technical=False, is_tg_post=True)
 
 print("✅ LLM анализ настроен")
 
@@ -1196,6 +1201,7 @@ def generate_pdf_report(
         (CATEGORY_PRODUCTS, "🏷️ НОВЫЕ ПРОДУКТЫ И УСЛУГИ"),
         (CATEGORY_PRICES, "💰 ЦЕНЫ И АКЦИИ"),
         (CATEGORY_NEWS, "📰 НОВОСТИ"),
+        (CATEGORY_PROMOTION, "📣 ПРОДВИЖЕНИЕ"),
     ]
     
     for category, title in sections:
@@ -2170,6 +2176,7 @@ async def run_monitoring_async():
         CATEGORY_NEWS: [],
         CATEGORY_TECHNICAL: [],
         CATEGORY_SERVICES: [],
+        CATEGORY_PROMOTION: [],
         CATEGORY_OTHER: [],
     }
     failed_sites = []
@@ -2318,6 +2325,7 @@ async def run_monitoring_async():
    🏷️ Продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}
    💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
+   📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}
 
 🔁 <b>Пропущено дубликатов: {duplicates_count}</b>
 🆕 <b>Первых сканирований: {first_scans_count}</b>

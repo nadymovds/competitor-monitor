@@ -159,6 +159,7 @@ async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, ca
     `)
     .eq('is_processed', true)
     .neq('category', 'technical')
+    .neq('category', 'other')
 
   if (dateFrom) query = query.gte('post_date', dateFrom)
   if (dateTo) query = query.lte('post_date', dateTo)
