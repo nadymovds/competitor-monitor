@@ -45,7 +45,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
 
-LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "llama-3.1-8b-instant"
 LLM_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # === ТАЙМАУТЫ И RETRY ===
@@ -75,7 +75,7 @@ USER_AGENT = USER_AGENTS[0]
 
 MAX_CONCURRENT_REQUESTS = 15
 MAX_CONCURRENT_BROWSER = 8
-MAX_CONCURRENT_LLM = 5
+MAX_CONCURRENT_LLM = 2
 
 # Batch-обработка для стабильности
 BATCH_SIZE = 50
@@ -768,12 +768,17 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
                                         timeout=aiohttp.ClientTimeout(total=90)) as response:
                     if response.status == 429:
                         retry_after = int(response.headers.get('retry-after', 10))
+                        if retry_after > 60:
+                            print(f"   ⚠️ LLM rate limit (429), retry-after={retry_after}с — квота исчерпана, пропуск")
+                            return None
                         print(f"   ⚠️ LLM rate limit (429), ждём {retry_after}с (попытка {attempt+1}/3)")
                         await asyncio.sleep(retry_after)
                         continue
                     response.raise_for_status()
                     result = await response.json()
-                    return result['choices'][0]['message']['content'].strip()
+                    content = result['choices'][0]['message']['content'].strip()
+                    await asyncio.sleep(2)  # пауза между вызовами для rate limit
+                    return content
         except aiohttp.ClientResponseError as e:
             wait_time = 5 * (attempt + 1)
             print(f"   ⚠️ LLM HTTP ошибка {e.status}: {str(e)[:80]} (попытка {attempt+1}/3, ждём {wait_time}с)")
@@ -882,6 +887,25 @@ def parse_llm_json_response(response: str, competitor_name: str, allow_technical
         if len(summary) > 500:
             summary = summary[:497] + '...'
 
+        # Удаляем "водные" фразы из summary
+        filler_patterns = [
+            r'\s*Однако,?\s*эти изменения не связаны напрямую[^.]*\.',
+            r'\s*Это единственное изменение между старой и новой версиями сайта\.?',
+            r'\s*Остальные изменения не значимы\.?',
+            r'\s*Он[аои|] не был[аои]? присутствовал[аои]? в старой версии сайта\.?',
+            r'\s*Это указывает на [^.]*\.',
+            r'\s*Это свидетельствует о [^.]*\.',
+            r'\s*Это говорит о [^.]*\.',
+            r'\s*Это может свидетельствовать о [^.]*\.',
+            r'\s*Других? значимых изменений не обнаружено\.?',
+            r'\s*Других? изменений не выявлено\.?',
+            r'\s*Обе версии содержат одинаковый контент[^.]*\.?',
+            r'\s*Не обнаружено новых продуктов[^.]*\.?',
+        ]
+        for fp in filler_patterns:
+            summary = re.sub(fp, '', summary, flags=re.IGNORECASE)
+        summary = summary.strip()
+
         # Фильтры ниже применяются только к веб-изменениям, не к TG-постам.
         # Для TG-постов доверяем классификации LLM.
         if not is_tg_post:
@@ -895,6 +919,10 @@ def parse_llm_json_response(response: str, competitor_name: str, allow_technical
                 r'^обнаружены\s*изменения',
                 r'^технические\s*изменения',
                 r'^незначительные\s*изменения',
+                r'^нет\s*значимых\s*изменений',
+                r'^нет\s*важных\s*изменений',
+                r'^значимых\s*изменений\s*не\s*(обнаружено|выявлено|найдено)',
+                r'^изменения\s*коснулись\s*(только\s*)?(контактн|email|телефон|адрес)',
             ]
 
             summary_lower = summary.lower()
@@ -1029,6 +1057,15 @@ async def analyze_changes_async(competitor_name: str, new_content: str, session:
 - Отвечай ТОЛЬКО на русском языке
 - Описывай только реальные изменения, не выдумывай
 - Если сомневаешься — лучше отметь is_meaningful: false
+- НЕ ПИШИ "воду" и выводы. Только факты. Запрещено писать:
+  * "Однако, эти изменения не связаны напрямую с..." и подобные оговорки
+  * "Это единственное изменение между старой и новой версиями сайта"
+  * "Остальные изменения не значимы"
+  * "Она не была присутствовала в старой версии сайта"
+  * "Это указывает на расширение/развитие/рост компании" и подобные выводы
+  * Любые пояснения о том, что НЕ изменилось
+- Если нет значимых изменений — верни is_meaningful: false, не описывай пустоту
+- Изменения контактных данных (email, телефон, адрес) — НЕ значимые (is_meaningful: false)
 
 КАТЕГОРИИ (выбери ОДНУ):
 1. "products" — новый продукт, устройство, трекер, тахограф, ПО, платформа, обновление функций
