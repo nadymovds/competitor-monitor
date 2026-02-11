@@ -612,6 +612,19 @@ function CompetitorFeedItem({ item, onNavigate }) {
           ))}
         </div>
       )}
+
+      {isTelegram && item.post_url && (
+        <button
+          onClick={() => { hapticFeedback('light'); openTelegramLink(item.post_url) }}
+          style={{
+            background: 'none', border: 'none', color: '#3b82f6',
+            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            padding: '4px 0', whiteSpace: 'nowrap', marginTop: 8
+          }}
+        >
+          Оригинал ↗
+        </button>
+      )}
     </div>
   )
 }
