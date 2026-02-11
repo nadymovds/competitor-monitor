@@ -93,7 +93,7 @@ CATEGORY_OTHER = "other"
 TG_PLAYWRIGHT_TIMEOUT = 30000
 MAX_POSTS_PER_CHANNEL_COMPETITOR = 30
 DELAY_BETWEEN_TG_CHANNELS = 3
-MAX_CONCURRENT_LLM_TG = 3
+MAX_CONCURRENT_LLM_TG = 1
 TG_SCAN_PERIOD_DAYS = 8
 
 TAGS = {
@@ -761,17 +761,31 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
         "temperature": 0.3
     }
     
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             async with llm_semaphore:
                 async with session.post(LLM_API_URL, headers=headers, json=payload,
                                         timeout=aiohttp.ClientTimeout(total=90)) as response:
+                    if response.status == 429:
+                        retry_after = int(response.headers.get('retry-after', 10))
+                        print(f"   ⚠️ LLM rate limit (429), ждём {retry_after}с (попытка {attempt+1}/3)")
+                        await asyncio.sleep(retry_after)
+                        continue
                     response.raise_for_status()
                     result = await response.json()
                     return result['choices'][0]['message']['content'].strip()
-        except Exception:
-            if attempt < 1:
-                await asyncio.sleep(3)
+        except aiohttp.ClientResponseError as e:
+            wait_time = 5 * (attempt + 1)
+            print(f"   ⚠️ LLM HTTP ошибка {e.status}: {str(e)[:80]} (попытка {attempt+1}/3, ждём {wait_time}с)")
+            if attempt < 2:
+                await asyncio.sleep(wait_time)
+            else:
+                return None
+        except Exception as e:
+            wait_time = 3 * (attempt + 1)
+            print(f"   ⚠️ LLM ошибка: {str(e)[:80]} (попытка {attempt+1}/3)")
+            if attempt < 2:
+                await asyncio.sleep(wait_time)
             else:
                 return None
     return None
