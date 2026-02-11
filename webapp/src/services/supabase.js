@@ -125,7 +125,17 @@ export async function checkUserAccess(telegramUser) {
   }
   if (error) throw error
 
-  // Пользователь найден - обновляем last_seen_at
+  // Пользователь найден - устанавливаем роль в auth metadata для JWT
+  const userRole = data.role || 'viewer'
+  const { error: updateError } = await supabase.auth.updateUser({
+    data: { user_role: userRole }
+  })
+  
+  if (updateError) {
+    console.error('Failed to set user role in auth metadata:', updateError)
+  }
+
+  // Обновляем last_seen_at
   await supabase
     .from('users')
     .update({ last_seen_at: new Date().toISOString() })
