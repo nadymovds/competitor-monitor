@@ -58,6 +58,25 @@
    - Генерация PDF (опционально)
    - Отправка в Telegram
 
+#### CSS-селекторы для веб-парсинга
+
+Для web-источников новостей система использует `css_config` в таблице `news_channels`:
+```json
+{
+  "title_selector": "h1.post-title",
+  "content_selector": ".post-content",
+  "date_selector": ".post-date",
+  "pagination_selector": "a.next-page"
+}
+```
+
+#### Здоровье URL
+
+Система отслеживает состояние каждого URL через `url_health`:
+- Счётчик последовательных ошибок
+- Время последнего успешного сканирования
+- Тип последней ошибки (timeout, 404, etc.)
+
 #### Зависимости
 
 ```
@@ -68,6 +87,7 @@ openai / groq - LLM для анализа
 reportlab - генерация PDF
 beautifulsoup4 - парсинг HTML
 aiohttp - асинхронные HTTP-запросы
+python-dotenv - управление переменными окружения
 ```
 
 ### 2. База данных (Supabase/PostgreSQL)
@@ -92,13 +112,33 @@ aiohttp - асинхронные HTTP-запросы
 
 ### 3. Web Application
 
+#### Аутентификация
+
+Система использует Telegram Web App для аутентификации:
+1. Пользователь открывает Web App через Telegram Bot
+2. Передаётся `initData` (JWT токен от Telegram)
+3. Проверяется подпись и извлекается `user_id`
+4. Создаётся/обновляется запись в таблице `users`
+5. Проверяется роль пользователя (admin/editor/viewer)
+
+См. `webapp/src/services/telegram.js` для деталей.
+
+#### Управление ролями
+
+| Роль | Права |
+|------|-------|
+| **admin** | Полный доступ. Управление конкурентами, каналами, категориями. |
+| **editor** | Редактирование конкурентов и каналов. Просмотр статистики. |
+| **viewer** | Только просмотр ленты и статистики. Нет редактирования. |
+
 #### Технологии
 
 ```
 React 18 - UI фреймворк
 Vite - сборщик и dev-сервер
-Supabase JS Client - работа с БД
+Supabase JS Client - работа с БД и RLS
 Telegram Web App SDK - интеграция с Telegram
+React Router - навигация между экранами
 ```
 
 #### Структура
@@ -164,24 +204,42 @@ const { data, error } = await supabase
 
 ### 4. Telegram Bot
 
-Простой бот для управления системой через Telegram.
+Бот для управления системой, запуска сканирований и отправки отчетов.
 
 #### Функции
 
-- Запуск сканирования по требованию
-- Получение уведомлений о завершении
-- Просмотр отчетов через Web App
+- **Запуск сканирования** по требованию (создание записи в `scan_requests`)
+- **Управление расписанием** (сохранение в `bot_settings`)
+- **Отправка отчетов** - PDF-файлы и сводки дайджестов
+- **Просмотр статистики** через Web App inline-кнопок
+- **Управление ролями** - назначение прав доступа пользователям
 
 #### Интеграция
 
 - Bot API для команд и сообщений
-- Web App для UI (`webapp/`)
-- Inline кнопки для быстрых действий
+- Web App Telegram (UI через `webapp/`)
+- Запись в `bot_settings` для управления интервалами
+- Запись в `scan_requests` для запросов на сканирование
+- Запись `telegram_message_id` при отправке дайджестов
+
+#### Команды
+
+```
+/start - Инициализация пользователя
+/scan - Запустить сканирование конкурентов
+/news - Запустить сканирование новостей
+/status - Статус текущего сканирования
+/settings - Управление расписанием
+/users - Управление ролями (admin)
+```
 
 ### 5. Автоматизация (GitHub Actions)
 
 #### Расписание
 
+Система поддерживает два режима запуска:
+
+**1. По расписанию (автоматический):**
 ```yaml
 # Мониторинг конкурентов - каждый понедельник 15:30 МСК
 schedule:
@@ -192,13 +250,23 @@ schedule:
   - cron: '0 12 * * 1'  # UTC
 ```
 
+**2. По требованию (через Telegram Bot):**
+- Пользователь отправляет `/scan` или `/news`
+- Bot создаёт запись в `scan_requests`
+- GitHub Actions webhook срабатывает на новую запись
+- После выполнения обновляется `status` (pending → running → completed/failed)
+
 #### Процесс
 
 1. Checkout кода
-2. Установка зависимостей
-3. Запуск Python скрипта
-4. Сохранение результатов в Supabase
-5. Отправка уведомлений в Telegram
+2. Установка зависимостей (Python + Playwright)
+3. Запуск Python скрипта (`monitor.py` или `news_monitor.py`)
+4. Сохранение результатов в Supabase:
+   - Новые записи в таблицы `changes`, `scan_results`, `news_posts`
+   - Создание `summary_reports` и `news_digests`
+5. Генерация PDF-отчетов
+6. Отправка уведомлений в Telegram
+7. Обновление `scan_requests.status`
 
 ---
 
@@ -367,6 +435,50 @@ VITE_SUPABASE_ANON_KEY=xxx
 - **Backend**: GitHub Actions (автоматический запуск)
 - **Frontend**: Vercel / Netlify (для prod) или Telegram Web App (текущий)
 - **База данных**: Supabase (managed PostgreSQL)
+
+---
+
+## Управление пользователями
+
+### Таблица users
+
+Каждый пользователь, зашедший в Web App, создаёт или обновляет запись в `users`:
+
+```sql
+create table public.users (
+  id uuid primary key default gen_random_uuid(),
+  telegram_id bigint unique not null,
+  telegram_username text,
+  display_name text,
+  role text default 'viewer' check (role in ('admin', 'editor', 'viewer')),
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  last_seen_at timestamptz
+);
+```
+
+### RLS Политики
+
+Все таблицы защищены RLS политиками:
+- Авторизованные пользователи могут читать основные таблицы
+- Редактирование доступно только для admin/editor
+- Отслеживание `last_seen_at` при каждом запросе
+
+---
+
+## Мониторинг здоровья системы
+
+### Отслеживание ошибок
+
+Для каждого конкурента и URL система отслеживает:
+- `consecutive_failures` - счетчик подряд идущих ошибок
+- `last_success_at` - время последнего успешного сканирования
+- `last_error_type` - тип последней ошибки (timeout, connection_error, parse_error, etc.)
+
+Это позволяет:
+1. **Пропускать проблемные URL** временно
+2. **Отправлять алерты** при достижении порога ошибок
+3. **Анализировать тренды** в логах сканирования
 
 ---
 

@@ -96,21 +96,21 @@ URL-адреса конкурентов для мониторинга.
 | scanned_url | text | Просканированный URL |
 
 #### `changes`
-Обнаруженные изменения.
+Обнаруженные изменения конкурентов.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | uuid | PK |
 | competitor_id | uuid | FK → competitors.id |
-| detected_at | timestamp | Время обнаружения |
+| detected_at | timestamptz | Время обнаружения |
 | category | text | Категория (products/prices/services/news) |
-| summary | text | Описание изменения |
-| tags | text[] | Теги |
-| content_hash | text | Хэш контента |
+| summary | text | Описание изменения (от LLM) |
+| tags | text[] | Теги (массив) |
+| content_hash | text | Хэш измененного контента |
 | report_id | uuid | FK → summary_reports.id |
-| url_id | uuid | FK → competitor_urls.id |
+| url_id | uuid | FK → competitor_urls.id (какой URL изменился) |
 | scanned_url | text | Просканированный URL |
-| is_meaningful | boolean | Значимое ли изменение (по умолчанию true) |
+| is_meaningful | boolean | Значимое ли изменение (true по умолчанию, может фильтроваться) |
 
 #### `competitor_tg_posts`
 Посты конкурентов из Telegram.
@@ -157,23 +157,23 @@ URL-адреса конкурентов для мониторинга.
 ### Мониторинг здоровья
 
 #### `competitor_health`
-Здоровье конкурентов (отслеживание ошибок).
+Здоровье конкурентов (отслеживание последовательных ошибок).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | competitor_id | uuid | PK, FK → competitors.id |
-| consecutive_failures | integer | Количество последовательных сбоев |
-| last_success_at | timestamp | Время последнего успеха |
-| last_error_type | text | Тип последней ошибки |
+| consecutive_failures | integer | Счётчик последовательных ошибок при сканировании |
+| last_success_at | timestamp | Дата/время последнего успешного сканирования |
+| last_error_type | text | Тип последней ошибки (timeout, connection_error, etc.) |
 
 #### `url_health`
-Здоровье URL (отслеживание ошибок).
+Здоровье отдельных URL (отслеживание ошибок).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | url_id | uuid | PK, FK → competitor_urls.id |
-| consecutive_failures | integer | Количество последовательных сбоев |
-| last_success_at | timestamp | Время последнего успеха |
+| consecutive_failures | integer | Счётчик последовательных ошибок |
+| last_success_at | timestamp | Дата/время последнего успешного сканирования |
 | last_error_type | text | Тип последней ошибки |
 
 ### Группировка
@@ -204,23 +204,23 @@ URL-адреса конкурентов для мониторинга.
 ## Новостной мониторинг
 
 ### `news_channels`
-Каналы и источники новостей.
+Каналы и источники новостей (Telegram каналы и веб-сайты).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | serial | PK |
-| username | varchar | Username канала (уникальный) |
-| title | varchar | Название канала |
+| username | varchar | Username канала (уникальный) или домен сайта |
+| title | varchar | Название канала/сайта |
 | description | text | Описание |
-| is_active | boolean | Активен ли канал |
-| competitor_id | uuid | FK → competitors.id (опционально) |
-| last_message_id | bigint | ID последнего сообщения |
+| is_active | boolean | Активен ли источник для сканирования |
+| competitor_id | uuid | FK → competitors.id (опционально, если это источник конкурента) |
+| last_message_id | bigint | ID последнего сообщения (для Telegram) |
 | last_scan_at | timestamptz | Время последнего сканирования |
 | created_at | timestamptz | Дата создания |
 | updated_at | timestamptz | Дата обновления |
 | source_type | text | 'telegram' или 'website' |
-| url | text | URL (для website) |
-| css_config | jsonb | Конфигурация CSS-селекторов |
+| url | text | URL (для website, например https://site.com/news) |
+| css_config | jsonb | Конфигурация CSS-селекторов для парсинга (title, content, date, pagination) |
 
 ### `news_categories`
 Категории новостей.
@@ -297,47 +297,49 @@ URL-адреса конкурентов для мониторинга.
 
 ---
 
-## Пользователи и права доступа
+## Пользователи и управление доступом
 
 ### `users`
-Пользователи системы.
+Пользователи системы с поддержкой ролей.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | uuid | PK |
-| telegram_id | bigint | Telegram ID (уникальный) |
-| telegram_username | text | Username в Telegram |
-| display_name | text | Отображаемое имя |
-| role | text | Роль (admin/editor/viewer) |
-| is_active | boolean | Активен ли пользователь |
-| created_at | timestamptz | Дата создания |
-| last_seen_at | timestamptz | Последняя активность |
+| telegram_id | bigint | Telegram ID (уникальный) для идентификации |
+| telegram_username | text | Username в Telegram (@username) |
+| display_name | text | Отображаемое имя пользователя |
+| role | text | Роль: admin (полный доступ), editor (редактирование), viewer (только чтение) |
+| is_active | boolean | Активен ли пользователь (можно заблокировать) |
+| created_at | timestamptz | Дата первого входа |
+| last_seen_at | timestamptz | Время последней активности в приложении |
+
+**Примечание:** Запись создаётся автоматически при первом входе через Telegram Web App.
 
 ---
 
 ## Telegram Bot
 
 ### `bot_settings`
-Настройки бота.
+Настройки Telegram Bot для управления расписанием.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | serial | PK |
-| chat_id | bigint | ID чата (уникальный) |
-| schedule_hours | integer | Интервал сканирования (часы) |
-| is_active | boolean | Активны ли настройки |
-| created_at | timestamp | Дата создания |
+| chat_id | bigint | ID чата (уникальный) - в каком чате управлять ботом |
+| schedule_hours | integer | Интервал между автоматическими сканированиями (в часах) |
+| is_active | boolean | Активны ли автоматические сканирования |
+| created_at | timestamp | Дата создания записи |
 
 ### `scan_requests`
-Запросы на сканирование.
+История запросов на сканирование (для отслеживания по требованию запусков).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | serial | PK |
-| chat_id | bigint | ID чата |
-| github_run_id | bigint | ID запуска GitHub Actions |
-| status | text | Статус (pending/running/completed/failed) |
-| requested_at | timestamp | Время запроса |
+| chat_id | bigint | ID чата, откуда был сделан запрос |
+| github_run_id | bigint | ID запуска GitHub Actions workflow |
+| status | text | Статус: pending → running → completed/failed |
+| requested_at | timestamp | Время запроса пользователем |
 
 ---
 
@@ -394,10 +396,56 @@ competitors (1) ──< news_channels (N)  [опционально]
 
 ---
 
-## Примечания
+## Ключевые принципы проектирования
 
-1. **Дедупликация контента**: Использование `content_hash` для избежания дубликатов
-2. **Мягкое удаление**: Использование флага `is_active` вместо физического удаления
-3. **Временные метки**: Все таблицы имеют `created_at` для аудита
-4. **Связи**: Используются UUID для основных сущностей, serial для служебных таблиц
-5. **JSONB**: Используется для гибких структур (комментарии, конфигурация, сводки)
+### Типы первичных ключей
+
+1. **UUID** - для основных сущностей (конкуренты, изменения, новости)
+   - Позволяет безопасно репликировать и менять глобальные ID
+   - Примеры: `competitors`, `changes`, `scan_results`, `users`, `groups`
+
+2. **Serial/INT** - для служебных таблиц (новостные посты, категории, дайджесты)
+   - Меньший размер в памяти
+   - Подходит для быстроразвёртывающихся последовательностей
+   - Примеры: `news_posts`, `news_categories`, `news_digests`
+
+### Дедупликация
+
+- **content_hash** (SHA256 или MD5) используется для:
+  - Поиска дубликатов контента (`news_posts.content_hash`, `competitor_tg_posts.content_hash`)
+  - Фильтрации ранее виденного контента
+  - Откладывания обновления только при изменении хеша
+
+### Мягкое удаление
+
+Вместо удаления используются флаги `is_active`:
+- Позволяет восстанавливать данные
+- Сохраняет историю и связи
+- Пример: `competitors.is_active`, `competitor_urls.is_active`, `news_channels.is_active`
+
+### Временные метки
+
+- **created_at** (timestamptz) - дата создания (никогда не меняется)
+- **updated_at** (timestamptz) - дата последнего обновления
+- **last_scan_at** - для источников новостей
+- **last_seen_at** - для отслеживания активности пользователей
+
+### Гибкие структуры (JSONB)
+
+- **comment** в `competitors` - массив комментариев
+- **css_config** в `news_channels` - конфигурация парсинга
+- **categories_summary** в `news_digests` - статистика по категориям
+
+Это позволяет не пересоздавать таблицы при изменении структуры данных.
+
+### Foreign Keys и целостность
+
+Все связи между таблицами защищены через `CONSTRAINT` с `FOREIGN KEY`:
+```sql
+CONSTRAINT changes_competitor_id_fkey FOREIGN KEY (competitor_id) REFERENCES public.competitors(id)
+```
+
+Это обеспечивает:
+- Невозможность создать изменение без конкурента
+- Автоматическое каскадное удаление (если настроено)
+- Контроль данных на уровне БД
