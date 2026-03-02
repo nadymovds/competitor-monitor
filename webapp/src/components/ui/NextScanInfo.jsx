@@ -5,26 +5,16 @@ export default function NextScanInfo({ scanType }) {
   const getNextScanTime = () => {
     const now = new Date()
     const nextScan = new Date()
+    const targetDay = scanType === 'competitors' ? 4 : 5 // 4 = четверг, 5 = пятница
+    const targetHour = scanType === 'competitors' ? 18 : 9
+    const targetMinute = 0
     
-    // Устанавливаем следующий понедельник
-    const daysUntilMonday = (1 - now.getDay() + 7) % 7 || 7
-    nextScan.setDate(now.getDate() + daysUntilMonday)
+    const daysUntilTarget = (targetDay - now.getDay() + 7) % 7
+    nextScan.setDate(now.getDate() + daysUntilTarget)
+    nextScan.setHours(targetHour, targetMinute, 0, 0)
     
-    if (scanType === 'competitors') {
-      // Конкуренты: Понедельник 15:30 МСК
-      nextScan.setHours(15, 30, 0, 0)
-    } else {
-      // Новости: Понедельник 15:00 МСК
-      nextScan.setHours(15, 0, 0, 0)
-    }
-    
-    // Если сегодня понедельник и время уже прошло, берём следующий понедельник
-    if (now.getDay() === 1) {
-      const targetHour = scanType === 'competitors' ? 15 : 15
-      const targetMinute = scanType === 'competitors' ? 30 : 0
-      if (now.getHours() > targetHour || (now.getHours() === targetHour && now.getMinutes() >= targetMinute)) {
-        nextScan.setDate(nextScan.getDate() + 7)
-      }
+    if (daysUntilTarget === 0 && now >= nextScan) {
+      nextScan.setDate(nextScan.getDate() + 7)
     }
     
     return nextScan
