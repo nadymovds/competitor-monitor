@@ -1139,7 +1139,9 @@ def get_posts_for_digest(period_start: datetime, period_end: datetime) -> list:
                   .order('post_date', desc=True)
                   .limit(MAX_POSTS_IN_DIGEST)
                   .execute())
-        return result.data or []
+        # Исключаем нерелевантные посты (без категорий)
+        posts = [p for p in (result.data or []) if p.get('news_post_categories')]
+        return posts
     except Exception as e:
         print(f"❌ Ошибка получения постов для дайджеста: {e}")
         return []
@@ -1209,19 +1211,43 @@ async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens
     return None
 
 
-async def categorize_and_summarize(post_text: str, categories: list, session: aiohttp.ClientSession) -> tuple[list, str]:
-    """Категоризация + summary поста в одном LLM-вызове. Возвращает (categories, summary)."""
+async def categorize_and_summarize(post_text: str, categories: list, session: aiohttp.ClientSession) -> tuple[list, str, bool]:
+    """Категоризация + summary + проверка релевантности в одном LLM-вызове.
+
+    Возвращает (categories, summary, is_relevant).
+    """
     categories_desc = "\n".join(
         f"- ID {cat['id']}: {cat['name']}" + (f" — {cat['description']}" if cat.get('description') else "")
         for cat in categories
     )
 
-    prompt = f"""Проанализируй следующий пост из Telegram-канала о транспорте и логистике. Выполни две задачи:
+    prompt = f"""Проанализируй следующий пост из Telegram-канала о транспорте и логистике. Выполни три задачи:
 
 ТЕКСТ ПОСТА:
 {post_text[:2000]}
 
-ЗАДАЧА 1 — КАТЕГОРИЗАЦИЯ:
+ЗАДАЧА 0 — ПРОВЕРКА РЕЛЕВАНТНОСТИ:
+Определи, стоит ли включать этот пост в дайджест новостей автотранспортной отрасли.
+
+ВКЛЮЧАТЬ:
+✅ Беспилотные/автономные транспортные средства (грузовики, такси, шаттлы, дроны-доставщики)
+✅ ИИ и технологии, применяемые в автотранспорте (телематика, весогабаритный контроль, умные камеры)
+✅ Федеральное законодательство, прямо касающееся автоперевозчиков (режим труда водителей, лицензирование, ВАТС, реестры)
+✅ Рынок и тренды: статистика автопарков, лизинг, продажи грузовиков, такси
+✅ Ключевые решения крупных игроков (Яндекс, Navio, EvoCargo, федеральные ритейлеры)
+✅ Цифровизация логистики, ЭДО, платформы для грузоперевозок
+✅ ДТП с грузовиками/автобусами федерального масштаба
+
+НЕ ВКЛЮЧАТЬ:
+❌ Развлекательный/зрелищный контент (интересные видео, любопытные факты) — даже если тема транспорт
+❌ Только железнодорожная, авиационная или морская тематика (без связи с автоперевозками)
+❌ Слухи и анонимные источники (#Закулисье, "птичка принесла", без подтверждения)
+❌ Региональные новости, касающиеся только одного субъекта РФ
+❌ Юбилеи, поздравления, членство в ассоциациях
+❌ Анонсы конкурсов, премий, конференций (без самой новости)
+❌ Общеэкономическая политика без прямой связи с автотранспортом (экспорт топлива, иностранные инвестиции)
+
+ЗАДАЧА 1 — КАТЕГОРИЗАЦИЯ (только если is_relevant=true):
 ДОСТУПНЫЕ КАТЕГОРИИ (ID: название — описание):
 {categories_desc}
 
@@ -1230,7 +1256,7 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
 - Для каждой категории укажи уверенность от 0.0 до 1.0
 - ВСЕГДА назначай хотя бы одну категорию. Если пост не подходит ни к одной специализированной категории, назначь категорию "Прочее"
 
-ЗАДАЧА 2 — КРАТКОЕ СОДЕРЖАНИЕ:
+ЗАДАЧА 2 — КРАТКОЕ СОДЕРЖАНИЕ (только если is_relevant=true):
 - 1-2 предложения, максимум 250 символов
 - Только на русском языке
 - Фокус на ключевых фактах: что произошло, кто участвует, какой результат
@@ -1238,11 +1264,12 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
 - Если пост рекламный — кратко опиши суть предложения
 
 Отвечай ТОЛЬКО JSON, без пояснений:
-{{"categories": [{{"category_id": N, "confidence": 0.85}}], "summary": "Краткое содержание поста"}}"""
+{{"is_relevant": true, "categories": [{{"category_id": N, "confidence": 0.85}}], "summary": "Краткое содержание поста"}}
+Если нерелевантен: {{"is_relevant": false, "categories": [], "summary": ""}}"""
 
-    response = await call_llm_async(prompt, session, max_tokens=400)
+    response = await call_llm_async(prompt, session, max_tokens=500)
     if not response:
-        return [], ""
+        return [], "", True  # При ошибке считаем релевантным (безопаснее)
 
     try:
         # Извлечение JSON из ответа
@@ -1250,13 +1277,20 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
         json_str = re.sub(r'^```json?\s*', '', json_str)
         json_str = re.sub(r'\s*```$', '', json_str)
 
-        json_match = re.search(r'\{.*"categories".*"summary".*\}', json_str, re.DOTALL)
+        json_match = re.search(r'\{.*"is_relevant".*\}', json_str, re.DOTALL)
+        if not json_match:
+            json_match = re.search(r'\{.*"categories".*"summary".*\}', json_str, re.DOTALL)
         if not json_match:
             json_match = re.search(r'\{.*"summary".*"categories".*\}', json_str, re.DOTALL)
         if json_match:
             json_str = json_match.group()
 
         result = json.loads(json_str)
+
+        # Парсинг релевантности
+        is_relevant = bool(result.get('is_relevant', True))
+        if not is_relevant:
+            return [], "", False
 
         # Парсинг категорий
         raw_categories = result.get('categories', [])
@@ -1276,10 +1310,10 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
         if len(summary) > 250:
             summary = summary[:247] + "..."
 
-        return post_categories, summary
+        return post_categories, summary, True
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         print(f"  ⚠️ Ошибка парсинга LLM ответа: {e}")
-        return [], ""
+        return [], "", True  # При ошибке считаем релевантным
 
 
 async def process_post_with_llm(post: dict, categories: list, session: aiohttp.ClientSession) -> dict | None:
@@ -1300,9 +1334,23 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
         mark_post_processed(post_id, title_to_save, "", source_type)
         return None
 
+    # Предфильтр: короткая подпись к видео без фактов (развлекательный контент)
+    content_only = re.sub(r'[^\w\s]', '', post_text or '').strip()
+    if len(content_only) < 50 and post.get('has_video'):
+        title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
+        mark_post_processed(post_id, title_to_save, "", source_type)
+        print(f"  ⏭️ Пост {post_id}: короткий видео-пост без фактов, пропущен")
+        return None
+
     try:
-        # Категоризация + summary в одном LLM-вызове
-        post_categories, summary = await categorize_and_summarize(post_text, categories, session)
+        # Категоризация + summary + проверка релевантности в одном LLM-вызове
+        post_categories, summary, is_relevant = await categorize_and_summarize(post_text, categories, session)
+
+        if not is_relevant:
+            title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
+            mark_post_processed(post_id, title_to_save, "", source_type)
+            print(f"  ⏭️ Пост {post_id}: нерелевантен, пропущен")
+            return None
 
         # Фоллбек: если категории не назначены или все невидимые — добавляем "Прочее"
         other_cat = next((c for c in categories if c['name'] == 'Прочее'), None)

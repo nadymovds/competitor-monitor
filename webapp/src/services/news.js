@@ -29,9 +29,8 @@ export async function getAllNewsChannels() {
 }
 
 export async function getNewsPosts({ categories = [], channels = [], sourceTypes = [], searchQuery = '', dateFrom, dateTo, limit = 20, offset = 0 } = {}) {
-  const categoryJoin = categories.length > 0
-    ? 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
-    : 'news_post_categories(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
+  // Всегда используем inner join — посты без категорий (нерелевантные) не показываем
+  const categoryJoin = 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
 
   // Use inner join when filtering by source_type
   const channelsJoin = sourceTypes.length > 0

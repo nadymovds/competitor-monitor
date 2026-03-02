@@ -203,9 +203,8 @@ async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, ca
  * Получить новости отрасли
  */
 async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceTypes, searchQuery = '' }) {
-  const categoryJoin = categories.length > 0
-    ? 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
-    : 'news_post_categories(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
+  // Всегда используем inner join — посты без категорий (нерелевантные) не показываем
+  const categoryJoin = 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
 
   const channelsJoin = sourceTypes.length > 0
     ? 'news_channels!inner(id, username, title, source_type)'
