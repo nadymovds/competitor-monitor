@@ -146,7 +146,7 @@ export default function ScanCard({ scan, scanType, onExpand, onNavigateToCompeti
         {/* Свернутая статистика */}
         {!isExpanded && (
           <div style={{ ...styles.stats, gridTemplateColumns: 'repeat(3, 1fr)' }}>
-            <StatBox label="Каналов" value={scan.total_channels || 0} />
+            <StatBox label="Источников" value={scan.total_sources || scan.total_channels || 0} />
             <StatBox label="Постов" value={scan.total_posts || scan.posts_count || 0} color="#3b82f6" />
             <StatBox label="Период" value={scan.period_days ? `${scan.period_days}д` : '7д'} />
           </div>
@@ -160,7 +160,7 @@ export default function ScanCard({ scan, scanType, onExpand, onNavigateToCompeti
             ) : (
               <>
                 <div style={{ ...styles.stats, gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 16 }}>
-                  <StatBox label="Каналов" value={scan.total_channels || 0} />
+                  <StatBox label="Источников" value={scan.total_sources || scan.total_channels || 0} />
                   <StatBox label="Постов" value={scan.total_posts || scan.posts_count || 0} color="#3b82f6" />
                   <StatBox label="Период" value={scan.period_days ? `${scan.period_days}д` : '7д'} />
                 </div>

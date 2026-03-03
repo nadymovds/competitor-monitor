@@ -273,6 +273,17 @@ export async function getNewsDigests(limit = 10, offset = 0) {
   const twoMonthsAgo = new Date()
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
 
+  const getWebsiteSourceKey = (post) => {
+    const rawUrl = post?.article_url || post?.post_url
+    if (!rawUrl) return null
+
+    try {
+      return new URL(rawUrl).hostname
+    } catch {
+      return rawUrl
+    }
+  }
+
   const { data, error, count } = await supabase
     .from('news_digests')
     .select('*', { count: 'exact' })
@@ -282,20 +293,39 @@ export async function getNewsDigests(limit = 10, offset = 0) {
 
   if (error) throw error
 
-  // Подсчитываем количество каналов для каждого дайджеста
+  // Подсчитываем количество источников (TG-каналы + web-источники) для каждого дайджеста
   const digestsWithStats = await Promise.all((data || []).map(async (digest) => {
-    // Получаем уникальные каналы из постов дайджеста
+    // Получаем источники из постов дайджеста
     const { data: posts } = await supabase
       .from('news_digest_posts')
-      .select('post_id, news_posts!inner(channel_id)')
+      .select('post_id, news_posts!inner(channel_id, source_type, article_url, post_url)')
       .eq('digest_id', digest.id)
-    
-    const uniqueChannels = new Set(posts?.map(p => p.news_posts?.channel_id).filter(Boolean) || [])
+
+    const uniqueSources = new Set(
+      (posts || [])
+        .map((item) => {
+          const post = item.news_posts
+          if (!post) return null
+
+          if (post.channel_id) {
+            return `${post.source_type || 'telegram'}:${post.channel_id}`
+          }
+
+          if (post.source_type === 'website') {
+            const websiteSource = getWebsiteSourceKey(post)
+            return websiteSource ? `website:${websiteSource}` : null
+          }
+
+          return null
+        })
+        .filter(Boolean)
+    )
     
     return {
       ...digest,
       total_posts: digest.posts_count || 0,
-      total_channels: uniqueChannels.size,
+      total_sources: uniqueSources.size,
+      total_channels: uniqueSources.size,
       period_days: Math.ceil((new Date(digest.period_end) - new Date(digest.period_start)) / (1000 * 60 * 60 * 24))
     }
   }))
