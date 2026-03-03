@@ -1132,15 +1132,15 @@ def get_posts_for_digest(period_start: datetime, period_end: datetime) -> list:
     """Выборка обработанных постов с видимыми категориями для дайджеста."""
     try:
         result = (supabase.table('news_posts')
-                  .select('*, news_channels(username, title), news_post_categories(category_id, confidence, news_categories(id, name, color, sort_order, is_visible))')
+                  .select('*, news_channels(username, title), news_post_categories!inner(category_id, confidence, news_categories(id, name, color, sort_order, is_visible))')
                   .eq('is_processed', True)
                   .gte('post_date', period_start.isoformat())
                   .lte('post_date', period_end.isoformat())
                   .order('post_date', desc=True)
                   .limit(MAX_POSTS_IN_DIGEST)
                   .execute())
-        # Исключаем нерелевантные посты (без категорий)
-        posts = [p for p in (result.data or []) if p.get('news_post_categories')]
+        # inner join уже отфильтровал посты без категорий
+        posts = result.data or []
         return posts
     except Exception as e:
         print(f"❌ Ошибка получения постов для дайджеста: {e}")
@@ -1246,6 +1246,15 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
 ❌ Юбилеи, поздравления, членство в ассоциациях
 ❌ Анонсы конкурсов, премий, конференций (без самой новости)
 ❌ Общеэкономическая политика без прямой связи с автотранспортом (экспорт топлива, иностранные инвестиции)
+❌ Технологический развлекательный контент — роботы в необычных ситуациях, 3D-печать экзотических вещей, красивые кадры транспорта, зрелищные видео ("смотрим и наслаждаемся", "невероятные кадры", "ждём таких в России") — даже если тема технологии или роботы
+❌ Зарубежные любопытные факты без прямого влияния на российский рынок автотранспорта
+
+ПРОВЕРКА СУЩЕСТВЕННОСТИ: is_relevant=true допустимо ТОЛЬКО если пост содержит хотя бы одно из:
+- конкретное решение/действие компании (Яндекс, Navio, EvoCargo, Natcar, Wildberries, Магнит и др.)
+- конкретный российский закон/нормативный акт/государственное решение
+- конкретную статистику или рыночные данные (цифры, объёмы, проценты)
+- конкретный технический продукт/внедрение с деловым применением в РФ
+Общий интерес / визуальный эффект / "посмотри на это" — НЕ делают пост релевантным.
 
 ЗАДАЧА 1 — КАТЕГОРИЗАЦИЯ (только если is_relevant=true):
 ДОСТУПНЫЕ КАТЕГОРИИ (ID: название — описание):
@@ -1313,7 +1322,7 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
         return post_categories, summary, True
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         print(f"  ⚠️ Ошибка парсинга LLM ответа: {e}")
-        return [], "", True  # При ошибке считаем релевантным
+        return [], "", False  # При ошибке парсинга считаем нерелевантным
 
 
 async def process_post_with_llm(post: dict, categories: list, session: aiohttp.ClientSession) -> dict | None:
@@ -1342,6 +1351,18 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
         print(f"  ⏭️ Пост {post_id}: короткий видео-пост без фактов, пропущен")
         return None
 
+    # Предфильтр: развлекательные паттерны — пропустить без LLM-вызова
+    ENTERTAINMENT_RE = re.compile(
+        r'(?i)(смотрим и наслаждаемся|невероятные кадры|как вам такое|'
+        r'что ж[,\s]?(ждём|ждем)|просто посмотри|#закулисье|птичка принесла)',
+        re.UNICODE
+    )
+    if ENTERTAINMENT_RE.search(post_text):
+        title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
+        mark_post_processed(post_id, title_to_save, "", source_type)
+        print(f"  ⏭️ Пост {post_id}: развлекательный паттерн в тексте, пропущен")
+        return None
+
     try:
         # Категоризация + summary + проверка релевантности в одном LLM-вызове
         post_categories, summary, is_relevant = await categorize_and_summarize(post_text, categories, session)
@@ -1352,12 +1373,23 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
             print(f"  ⏭️ Пост {post_id}: нерелевантен, пропущен")
             return None
 
+        # Отклонить посты с единственной категорией "Прочее"
+        other_cat_local = next((c for c in categories if c['name'] == 'Прочее'), None)
+        if len(post_categories) == 1 and other_cat_local:
+            only_id = post_categories[0].get('category_id')
+            if only_id == other_cat_local['id']:
+                title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
+                mark_post_processed(post_id, title_to_save, "", source_type)
+                print(f"  ⏭️ Пост {post_id}: только категория 'Прочее', нерелевантен")
+                return None
+
         # Фоллбек: если категории не назначены или все невидимые — добавляем "Прочее"
-        other_cat = next((c for c in categories if c['name'] == 'Прочее'), None)
+        other_cat = other_cat_local
         if not post_categories:
-            if other_cat:
-                post_categories = [{'category_id': other_cat['id'], 'confidence': 0.5}]
-                print(f"  ℹ️ Пост {post_id}: категории не определены, назначена «Прочее»")
+            title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
+            mark_post_processed(post_id, title_to_save, "", source_type)
+            print(f"  ⏭️ Пост {post_id}: LLM не назначил категории, считается нерелевантным")
+            return None
         elif other_cat:
             # Проверяем, есть ли хоть одна видимая категория
             visible_cats = {c['id'] for c in categories if c.get('is_visible', True)}
