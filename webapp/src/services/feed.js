@@ -244,17 +244,13 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
   const { data, error } = await query
   if (error) throw error
 
-  // Дедупликация: сначала по id (на случай дублей от INNER JOIN), затем по content_hash (одинаковый контент из разных источников)
-  const seenIds = new Set()
+  // Дедупликация по content_hash
   const seenHashes = new Set()
   const uniquePosts = (data || []).filter(post => {
-    if (seenIds.has(post.id)) return false
-    seenIds.add(post.id)
     const hash = post.content_hash
-    if (hash) {
-      if (seenHashes.has(hash)) return false
-      seenHashes.add(hash)
-    }
+    if (!hash) return true
+    if (seenHashes.has(hash)) return false
+    seenHashes.add(hash)
     return true
   })
 
