@@ -1325,12 +1325,25 @@ async def categorize_and_summarize(post_text: str, categories: list, session: ai
         return [], "", False  # При ошибке парсинга считаем нерелевантным
 
 
-async def process_post_with_llm(post: dict, categories: list, session: aiohttp.ClientSession) -> dict | None:
+ENTERTAINMENT_RE = re.compile(
+    r'(?i)(смотрим и наслаждаемся|невероятные кадры|как вам такое|'
+    r'что ж[,\s]?(ждём|ждем)|просто посмотри|#закулисье|птичка принесла)',
+    re.UNICODE
+)
+
+
+async def process_post_with_llm(post: dict, categories: list, session: aiohttp.ClientSession,
+                                 filter_stats: dict | None = None) -> dict | None:
     """Полная обработка одного поста: категоризация + summary + сохранение в БД.
-    
+
     Для web-новостей не переписывает title (он уже установлен при сохранении).
     Для telegram-новостей автоматически извлекает title из content_text.
+    filter_stats — опциональный dict для подсчёта причин отсева.
     """
+    def inc(key: str):
+        if filter_stats is not None:
+            filter_stats[key] = filter_stats.get(key, 0) + 1
+
     post_id = post.get('id')
     post_text = post.get('content_text', '')
     source_type = post.get('source_type', 'telegram')
@@ -1338,9 +1351,9 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
 
     if not post_text or len(post_text.strip()) < 30:
         print(f"  ⏭️ Пост {post_id} слишком короткий, пропуск")
-        # Используем существующий title для web, или извлекаем для телеграма
         title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
         mark_post_processed(post_id, title_to_save, "", source_type)
+        inc('short')
         return None
 
     # Предфильтр: короткая подпись к видео без фактов (развлекательный контент)
@@ -1349,18 +1362,15 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
         title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
         mark_post_processed(post_id, title_to_save, "", source_type)
         print(f"  ⏭️ Пост {post_id}: короткий видео-пост без фактов, пропущен")
+        inc('video')
         return None
 
     # Предфильтр: развлекательные паттерны — пропустить без LLM-вызова
-    ENTERTAINMENT_RE = re.compile(
-        r'(?i)(смотрим и наслаждаемся|невероятные кадры|как вам такое|'
-        r'что ж[,\s]?(ждём|ждем)|просто посмотри|#закулисье|птичка принесла)',
-        re.UNICODE
-    )
     if ENTERTAINMENT_RE.search(post_text):
         title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
         mark_post_processed(post_id, title_to_save, "", source_type)
         print(f"  ⏭️ Пост {post_id}: развлекательный паттерн в тексте, пропущен")
+        inc('entertainment')
         return None
 
     try:
@@ -1371,6 +1381,7 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
             title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
             mark_post_processed(post_id, title_to_save, "", source_type)
             print(f"  ⏭️ Пост {post_id}: нерелевантен, пропущен")
+            inc('llm_irrelevant')
             return None
 
         # Отклонить посты с единственной категорией "Прочее"
@@ -1381,6 +1392,7 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
                 title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
                 mark_post_processed(post_id, title_to_save, "", source_type)
                 print(f"  ⏭️ Пост {post_id}: только категория 'Прочее', нерелевантен")
+                inc('only_other')
                 return None
 
         # Фоллбек: если категории не назначены или все невидимые — добавляем "Прочее"
@@ -1389,6 +1401,7 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
             title_to_save = existing_title if source_type == 'website' and existing_title else extract_title(post_text)
             mark_post_processed(post_id, title_to_save, "", source_type)
             print(f"  ⏭️ Пост {post_id}: LLM не назначил категории, считается нерелевантным")
+            inc('no_categories')
             return None
         elif other_cat:
             # Проверяем, есть ли хоть одна видимая категория
@@ -1830,6 +1843,8 @@ async def run_news_monitoring_async():
         unprocessed = get_unprocessed_posts(period_start)
         print(f"📝 Необработанных постов: {len(unprocessed)}")
 
+        filter_stats: dict = {}
+
         if unprocessed:
             # 9.1 Дедупликация по content_hash — пропуск постов с уже обработанным контентом
             processed_hashes = get_processed_content_hashes(period_start)
@@ -1856,7 +1871,7 @@ async def run_news_monitoring_async():
             # 10. Последовательная обработка с задержкой между LLM-вызовами
             for i, post in enumerate(unique_posts):
                 try:
-                    result = await process_post_with_llm(post, categories, http_session)
+                    result = await process_post_with_llm(post, categories, http_session, filter_stats)
                     if result is not None:
                         processed_count += 1
                 except Exception as e:
@@ -2002,6 +2017,20 @@ async def run_news_monitoring_async():
 📝 Новых записей: <b>{total_all_new}</b> (📱 {total_new_posts} + 🌐 {total_web_posts})
 🤖 Обработано LLM: <b>{processed_count}</b>
 📰 Постов в дайджесте: <b>{total_digest_posts}</b>"""
+
+    # Добавить разбивку по причинам отсева (если что-то отсеяно)
+    if filter_stats:
+        labels = {
+            'short': 'кор.',
+            'video': 'видео',
+            'entertainment': 'разв.',
+            'llm_irrelevant': 'LLM нерел.',
+            'only_other': 'только «Прочее»',
+            'no_categories': 'без категорий',
+        }
+        parts = [f"{v} {labels.get(k, k)}" for k, v in filter_stats.items() if v]
+        if parts:
+            summary_msg += f"\n🔍 Отсеяно: {', '.join(parts)}"
 
     if posts_without_categories > 0:
         summary_msg += f"\n  ℹ️ Из них без категорий: {posts_without_categories}"
