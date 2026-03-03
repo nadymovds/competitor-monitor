@@ -97,13 +97,17 @@ export async function getNewsPosts({ categories = [], channels = [], sourceTypes
     })()
   }))
 
-  // Дедупликация по content_hash — одинаковый контент показываем только один раз
+  // Дедупликация: сначала по id (на случай дублей от INNER JOIN), затем по content_hash (одинаковый контент из разных источников)
+  const seenIds = new Set()
   const seenHashes = new Set()
   const uniquePosts = posts.filter(post => {
+    if (seenIds.has(post.id)) return false
+    seenIds.add(post.id)
     const hash = post.content_hash
-    if (!hash) return true
-    if (seenHashes.has(hash)) return false
-    seenHashes.add(hash)
+    if (hash) {
+      if (seenHashes.has(hash)) return false
+      seenHashes.add(hash)
+    }
     return true
   })
 
