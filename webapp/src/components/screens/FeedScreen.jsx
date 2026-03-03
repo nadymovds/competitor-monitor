@@ -209,10 +209,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
 
       // Фильтры новостей
       if (feedType === 'news') {
-        // Если не выбраны конкретные категории, используем все видимые
-        params.newsCategories = selectedNewsCategories.length > 0
-          ? selectedNewsCategories
-          : newsCategories.filter(c => c.is_visible).map(c => c.id)
+        params.newsCategories = selectedNewsCategories
         params.newsChannels = selectedNewsChannels
         params.newsSourceTypes = selectedNewsSourceTypes
         params.searchQuery = searchQuery
@@ -269,7 +266,7 @@ const resetCompetitorFilters = () => {
   // Используем базовые счётчики (независимые от source/category фильтров)
   const sourceCounts = baseCounts.sources
   const categoryCounts = baseCounts.categories
-  const visibleNewsCategories = newsCategories.filter(c => c.is_visible)
+  const visibleNewsCategories = newsCategories
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

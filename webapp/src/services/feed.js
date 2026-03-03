@@ -276,18 +276,11 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
     views_count: post.views_count,
     tags: post.tags || [],
     detected_at: post.post_date,
-    categories: (() => {
-      const visible = (post.news_post_categories || [])
-        .map(pc => ({
-          ...pc.news_categories,
-          confidence: pc.confidence,
-          is_manual: pc.is_manual
-        }))
-        .filter(cat => cat.is_visible !== false)
-      return visible.length > 0
-        ? visible
-        : [{ id: null, name: 'Прочее', color: '#888888', is_visible: true }]
-    })()
+    categories: (post.news_post_categories || []).map(pc => ({
+      ...pc.news_categories,
+      confidence: pc.confidence,
+      is_manual: pc.is_manual
+    }))
   }))
 }
 
