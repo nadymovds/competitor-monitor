@@ -102,7 +102,9 @@ export default function NewsFilters({
         .map(c => c.title || `@${c.username}`)
       parts.push(names.join(', '))
     }
-    parts.push(dateRangeLabels[dateRange] || dateRange)
+    if (!hideDate) {
+      parts.push(dateRangeLabels[dateRange] || dateRange)
+    }
     return parts.join(' · ')
   }
 
