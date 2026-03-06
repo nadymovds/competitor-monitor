@@ -31,7 +31,10 @@ threading.Thread(target=_loop.run_forever, daemon=True).start()
 
 async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass  # callback query истёк — не критично
 
     parts = query.data.split(":")
     digest_id = int(parts[1])
