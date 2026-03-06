@@ -4,6 +4,7 @@ import FeedScreen from './components/screens/FeedScreen'
 import ScansScreen from './components/screens/ScansScreen'
 import CompetitorsScreen from './components/screens/CompetitorsScreen'
 import SettingsScreen from './components/screens/SettingsScreen'
+import MentionsScreen from './components/screens/MentionsScreen'
 import BottomNav from './components/ui/BottomNav'
 import { getTelegramUser } from './services/telegram'
 import { checkUserAccess, getGroups } from './services/supabase'
@@ -65,7 +66,14 @@ export default function App() {
     setActiveTab('feed')
   }
 
+  const isAdmin = user?.role === 'admin'
+
   const handleTabChange = (tab) => {
+    if (tab === 'scans' && !isAdmin) {
+      setActiveTab('feed')
+      return
+    }
+
     if (tab !== 'competitors') {
       setSelectedCompetitorId(null)
       setCameFromFeed(false)
@@ -124,9 +132,13 @@ export default function App() {
       case 'feed':
         return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
       case 'scans':
-        return <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} />
+        return isAdmin
+          ? <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} />
+          : <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
       case 'competitors':
         return <CompetitorsScreen />
+      case 'mentions':
+        return <MentionsScreen />
       case 'settings':
         return <SettingsScreen user={user} groups={groups} />
       default:
@@ -137,7 +149,7 @@ export default function App() {
   return (
     <div style={styles.container}>
       <main style={styles.main}>{renderScreen()}</main>
-      <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+      <BottomNav activeTab={activeTab} onTabChange={handleTabChange} isAdmin={isAdmin} />
     </div>
   )
 }

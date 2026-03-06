@@ -370,6 +370,106 @@ export async function getCompetitorScans(limit = 10, offset = 0) {
   }
 }
 
+// === Функции для упоминаний (mention_search_terms) ===
+
+export async function getMentionSearchTerms() {
+  const { data, error } = await supabase
+    .from('mention_search_terms')
+    .select('*')
+    .order('id')
+  if (error) throw error
+  return data
+}
+
+export async function createMentionSearchTerm({ term, description }) {
+  const { data, error } = await supabase
+    .from('mention_search_terms')
+    .insert({ term, description: description || null })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateMentionSearchTerm(id, { term, isActive }) {
+  const updates = { updated_at: new Date().toISOString() }
+  if (term !== undefined) updates.term = term
+  if (isActive !== undefined) updates.is_active = isActive
+
+  const { data, error } = await supabase
+    .from('mention_search_terms')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteMentionSearchTerm(id) {
+  const { error } = await supabase
+    .from('mention_search_terms')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
+// === Функции для упоминаний (mention_sources) ===
+
+export async function getMentionSources() {
+  const { data, error } = await supabase
+    .from('mention_sources')
+    .select('*')
+    .order('title')
+  if (error) throw error
+  return data
+}
+
+export async function createMentionSource({ sourceType, username, title, url, cssConfig }) {
+  const insertData = { source_type: sourceType, title }
+
+  if (sourceType === 'telegram') {
+    insertData.username = username?.replace(/^@/, '') || null
+  } else {
+    insertData.url = url || null
+    insertData.css_config = cssConfig || null
+  }
+
+  const { data, error } = await supabase
+    .from('mention_sources')
+    .insert(insertData)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateMentionSource(id, { username, title, isActive, url, cssConfig }) {
+  const updates = { updated_at: new Date().toISOString() }
+  if (username !== undefined) updates.username = username?.replace(/^@/, '') || null
+  if (title !== undefined) updates.title = title
+  if (isActive !== undefined) updates.is_active = isActive
+  if (url !== undefined) updates.url = url
+  if (cssConfig !== undefined) updates.css_config = cssConfig
+
+  const { data, error } = await supabase
+    .from('mention_sources')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteMentionSource(id) {
+  const { error } = await supabase
+    .from('mention_sources')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
 export async function getCompetitorScanDetails(reportId) {
   // Получаем изменения на сайтах
   const { data: changes, error: changesError } = await supabase

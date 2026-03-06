@@ -1,0 +1,1007 @@
+# -*- coding: utf-8 -*-
+
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+import os
+import hashlib
+import json
+import re
+import asyncio
+import random
+import time
+from datetime import datetime, timezone
+from urllib.parse import urljoin
+
+import requests
+import aiohttp
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+from supabase import create_client, Client
+
+print("✅ Зависимости импортированы")
+
+# ============================================================================
+# КОНФИГУРАЦИЯ
+# ============================================================================
+
+SUPABASE_URL        = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY        = os.environ.get("SUPABASE_KEY")
+GROQ_API_KEY        = os.environ.get("GROQ_API_KEY")
+TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
+
+YANDEX_API_KEY      = os.environ.get("YANDEX_SEARCH_API_KEY")
+YANDEX_FOLDER_ID    = os.environ.get("YANDEX_SEARCH_FOLDER_ID")
+GOOGLE_CSE_API_KEY  = os.environ.get("GOOGLE_CSE_API_KEY")
+GOOGLE_CSE_ID       = os.environ.get("GOOGLE_CSE_ID")
+
+# === LLM ===
+LLM_MODEL   = "llama-3.3-70b-versatile"
+LLM_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# === ТАЙМАУТЫ И ЛИМИТЫ ===
+REQUEST_TIMEOUT        = 30
+PLAYWRIGHT_TIMEOUT     = 30000
+MAX_POSTS_PER_CHANNEL  = 100
+DELAY_BETWEEN_SOURCES  = 3
+MAX_PAGES_PER_WEBSITE  = 2
+LLM_BATCH_PAUSE        = 4      # сек между LLM-вызовами
+
+DEFAULT_CSS_CONFIG = {
+    "item":  "article, .news-item, .post, .news, .entry",
+    "title": "h1, h2, h3, .title, .headline",
+    "text":  "p, .content, .excerpt, .summary, .description",
+    "date":  "time, .date, [datetime], .published, .timestamp",
+    "link":  "a[href]",
+}
+
+# === USER-AGENTS ===
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+]
+
+def get_random_user_agent():
+    return random.choice(USER_AGENTS)
+
+# === SUPABASE ===
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# === СЕМАФОРЫ (инициализируются в main) ===
+browser_semaphore = None
+llm_semaphore     = None
+
+def init_semaphores():
+    global browser_semaphore, llm_semaphore
+    browser_semaphore = asyncio.Semaphore(1)
+    llm_semaphore     = asyncio.Semaphore(1)
+
+print("✅ Конфигурация загружена")
+
+
+# ============================================================================
+# УТИЛИТЫ
+# ============================================================================
+
+def calculate_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def clean_text(html_or_text: str) -> str:
+    if not html_or_text:
+        return ""
+    soup = BeautifulSoup(html_or_text, "lxml")
+    text = soup.get_text(separator="\n", strip=True)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
+def contains_any_term(text: str, terms: list[str]) -> bool:
+    text_lower = text.lower()
+    return any(t.lower() in text_lower for t in terms)
+
+
+MONTHS_RU = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
+    "мая": 5, "июня": 6, "июля": 7, "августа": 8,
+    "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+}
+
+
+def parse_date(date_str: str) -> datetime | None:
+    if not date_str:
+        return None
+    s = date_str.strip().lower()
+    now = datetime.now()
+    try:
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    m = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", s)
+    if m:
+        try:
+            return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), 12, 0, 0)
+        except ValueError:
+            pass
+    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), 12, 0, 0)
+        except ValueError:
+            pass
+    for month_name, month_num in MONTHS_RU.items():
+        if month_name in s:
+            m = re.search(rf"(\d{{1,2}})\s*{month_name}[а-я]*\s*(\d{{4}})?", s)
+            if m:
+                try:
+                    day  = int(m.group(1))
+                    year = int(m.group(2)) if m.group(2) else now.year
+                    return datetime(year, month_num, day, 12, 0, 0)
+                except ValueError:
+                    pass
+            break
+    return None
+
+
+# ============================================================================
+# TELEGRAM УВЕДОМЛЕНИЯ
+# ============================================================================
+
+def get_notification_recipients() -> list:
+    recipients = []
+    for chat_id in [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]:
+        if chat_id:
+            recipients.append(chat_id)
+    try:
+        result = supabase.table("users").select("telegram_id").execute()
+        for row in result.data or []:
+            tid = str(row["telegram_id"])
+            if tid not in recipients:
+                recipients.append(tid)
+    except:
+        pass
+    return recipients
+
+
+def send_telegram_message(message: str) -> bool:
+    success = False
+    for chat_id in get_notification_recipients():
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=30)
+            success = True
+        except:
+            pass
+    return success
+
+
+# ============================================================================
+# LLM
+# ============================================================================
+
+async def call_llm_async(prompt: str, session: aiohttp.ClientSession, max_tokens: int = 500) -> str | None:
+    """Вызов Groq API с семафором и retry (паттерн из news_monitor.py)."""
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+    }
+    backoff = [5, 15]
+    for attempt in range(2):
+        try:
+            async with llm_semaphore:
+                async with session.post(
+                    LLM_API_URL, headers=headers, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=90)
+                ) as resp:
+                    if resp.status == 429:
+                        retry_after = resp.headers.get("Retry-After")
+                        wait = float(retry_after) if retry_after and float(retry_after) < 30 else backoff[attempt]
+                        print(f"  ⚠️ Rate limit (429), жду {wait} сек... (попытка {attempt+1}/2)")
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            if attempt < 1:
+                await asyncio.sleep(5)
+                print(f"  ⚠️ LLM retry: {e}")
+            else:
+                print(f"  ❌ LLM ошибка после 2 попыток: {e}")
+                return None
+    return None
+
+
+def parse_llm_json(response: str) -> dict | None:
+    """Извлечение JSON из ответа LLM."""
+    if not response:
+        return None
+    s = response.strip()
+    s = re.sub(r"^```json?\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    m = re.search(r"\{.*\}", s, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            pass
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        return None
+
+
+async def analyze_mention(text: str, url: str, session: aiohttp.ClientSession) -> tuple[str, str]:
+    """Определяет тональность и summary упоминания через Groq.
+
+    Returns: (sentiment, summary) — ('positive'|'negative'|'neutral', str)
+    """
+    if not text or len(text.strip()) < 20:
+        return "neutral", ""
+
+    prompt = f"""Проанализируй текст упоминания компании.
+
+URL: {url}
+ТЕКСТ: {text[:2000]}
+
+Выполни две задачи:
+1. ТОНАЛЬНОСТЬ: определи тональность упоминания компании.
+   - positive — позитивная (похвала, успех, достижения)
+   - negative — негативная (критика, проблемы, жалобы)
+   - neutral — нейтральная (факты, новости без оценки)
+
+2. РЕЗЮМЕ: краткое описание сути упоминания, максимум 200 символов, на русском языке.
+   Не используй фразы "В тексте говорится", "Автор пишет".
+
+Отвечай ТОЛЬКО JSON без пояснений:
+{{"sentiment": "neutral", "summary": "Краткое описание"}}"""
+
+    response = await call_llm_async(prompt, session, max_tokens=200)
+    data = parse_llm_json(response)
+    if not data:
+        return "neutral", ""
+
+    sentiment = data.get("sentiment", "neutral")
+    if sentiment not in ("positive", "negative", "neutral"):
+        sentiment = "neutral"
+    summary = str(data.get("summary", "")).strip()[:200]
+    return sentiment, summary
+
+
+# ============================================================================
+# SUPABASE — ОПЕРАЦИИ
+# ============================================================================
+
+def get_search_terms() -> list[str]:
+    """Возвращает активные поисковые термины."""
+    try:
+        result = supabase.table("mention_search_terms").select("term").eq("is_active", True).execute()
+        return [row["term"] for row in (result.data or []) if row.get("term")]
+    except Exception as e:
+        print(f"❌ Ошибка получения поисковых терминов: {e}")
+        return []
+
+
+def get_mention_sources() -> list:
+    """Возвращает активные источники (TG-каналы и веб-порталы)."""
+    try:
+        result = supabase.table("mention_sources").select("*").eq("is_active", True).execute()
+        return result.data or []
+    except Exception as e:
+        print(f"❌ Ошибка получения источников: {e}")
+        return []
+
+
+def create_scan() -> int | None:
+    """Создаёт запись о запуске скрипта. Возвращает scan_id."""
+    try:
+        result = supabase.table("mention_scans").insert({
+            "scan_date": datetime.now().date().isoformat(),
+            "status": "running",
+        }).execute()
+        if result.data:
+            scan_id = result.data[0]["id"]
+            print(f"✅ Скан создан (ID: {scan_id})")
+            return scan_id
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка создания скана: {e}")
+        return None
+
+
+def complete_scan(scan_id: int, mentions_count: int) -> None:
+    """Помечает скан завершённым."""
+    try:
+        supabase.table("mention_scans").update({
+            "status": "completed",
+            "mentions_found": mentions_count,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", scan_id).execute()
+    except Exception as e:
+        print(f"⚠️ Ошибка завершения скана: {e}")
+
+
+def fail_scan(scan_id: int, error: str) -> None:
+    """Помечает скан как упавший."""
+    try:
+        supabase.table("mention_scans").update({
+            "status": "failed",
+            "error_message": error[:500],
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", scan_id).execute()
+    except:
+        pass
+
+
+def save_mention(data: dict) -> bool:
+    """INSERT с ON CONFLICT (url) DO NOTHING. Возвращает True если новая запись."""
+    try:
+        result = supabase.table("mentions").insert(data).execute()
+        return bool(result.data)
+    except Exception as e:
+        err = str(e)
+        # Supabase возвращает 409/23505 при конфликте уникального ключа
+        if "23505" in err or "duplicate" in err.lower() or "already exists" in err.lower():
+            return False
+        print(f"  ⚠️ Ошибка сохранения упоминания: {e}")
+        return False
+
+
+def get_unprocessed_mentions() -> list:
+    """Выборка необработанных упоминаний для LLM-анализа."""
+    try:
+        result = (supabase.table("mentions")
+                  .select("id, url, title, content_snippet")
+                  .eq("is_processed", False)
+                  .order("created_at", desc=False)
+                  .execute())
+        return result.data or []
+    except Exception as e:
+        print(f"❌ Ошибка получения необработанных упоминаний: {e}")
+        return []
+
+
+def update_mention_analysis(mention_id: int, sentiment: str, summary: str) -> None:
+    """Сохраняет результат LLM-анализа."""
+    try:
+        supabase.table("mentions").update({
+            "sentiment": sentiment,
+            "summary": summary,
+            "is_processed": True,
+        }).eq("id", mention_id).execute()
+    except Exception as e:
+        print(f"  ⚠️ Ошибка обновления упоминания {mention_id}: {e}")
+
+
+# ============================================================================
+# ПОИСК: GOOGLE CSE
+# ============================================================================
+
+async def search_google(term: str, session: aiohttp.ClientSession) -> list[dict]:
+    """Поиск через Google Custom Search Engine."""
+    if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_ID:
+        print("  ⚠️ Google CSE не настроен, пропуск")
+        return []
+
+    params = {
+        "key":          GOOGLE_CSE_API_KEY,
+        "cx":           GOOGLE_CSE_ID,
+        "q":            f'"{term}"',
+        "num":          10,
+        "dateRestrict": "w1",
+    }
+
+    try:
+        async with session.get(
+            "https://www.googleapis.com/customsearch/v1",
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+        ) as resp:
+            if resp.status == 429:
+                print("  ⚠️ Google CSE: rate limit")
+                return []
+            resp.raise_for_status()
+            data = await resp.json()
+
+        items = data.get("items", [])
+        results = []
+        for item in items:
+            url = item.get("link", "")
+            if not url:
+                continue
+            pagemap  = item.get("pagemap", {})
+            metatags = (pagemap.get("metatags") or [{}])[0]
+            date_str = (
+                metatags.get("article:published_time")
+                or metatags.get("og:updated_time")
+                or ""
+            )
+            results.append({
+                "title":         item.get("title", "")[:500],
+                "url":           url,
+                "content_snippet": item.get("snippet", "")[:1000],
+                "post_date":     parse_date(date_str),
+                "source_type":   "yandex",   # will override below
+                "search_term":   term,
+                "source_name":   "Google",
+            })
+            results[-1]["source_type"] = "website"  # Google возвращает веб-страницы
+
+        print(f"  🔵 Google CSE «{term}»: {len(results)} результатов")
+        return results
+
+    except Exception as e:
+        print(f"  ❌ Ошибка Google CSE: {e}")
+        return []
+
+
+# ============================================================================
+# ПОИСК: YANDEX SEARCH API
+# ============================================================================
+
+async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]:
+    """Поиск через Yandex Search API v2 (асинхронный режим)."""
+    if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
+        print("  ⚠️ Yandex Search API не настроен, пропуск")
+        return []
+
+    headers = {
+        "Authorization": f"Api-Key {YANDEX_API_KEY}",
+        "Content-Type":  "application/json",
+    }
+    body = {
+        "folderId": YANDEX_FOLDER_ID,
+        "query": {
+            "searchType": "SEARCH_TYPE_RU",
+            "queryText":  f'"{term}"',
+            "maxPassages": 1,
+            "page": 0,
+        },
+        "sortSpec": {"sortMode": "SORT_MODE_BY_TIME", "sortOrder": "SORT_ORDER_DESC"},
+        "maxPassages": 1,
+        "groupsOnPage": 10,
+    }
+
+    # 1. Запускаем асинхронный поиск
+    try:
+        async with session.post(
+            "https://searchapi.api.cloud.yandex.net/v2/web/searchAsync",
+            headers=headers,
+            json=body,
+            timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+        ) as resp:
+            resp.raise_for_status()
+            operation = await resp.json()
+    except Exception as e:
+        print(f"  ❌ Yandex Search (запуск): {e}")
+        return []
+
+    operation_id = operation.get("id")
+    if not operation_id:
+        print(f"  ❌ Yandex Search: не получен operation_id")
+        return []
+
+    # 2. Опрашиваем операцию (макс 30 сек)
+    op_url = f"https://operation.api.cloud.yandex.net/operations/{operation_id}"
+    result_data = None
+    for _ in range(10):
+        await asyncio.sleep(3)
+        try:
+            async with session.get(
+                op_url, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+            ) as resp:
+                resp.raise_for_status()
+                op = await resp.json()
+        except Exception as e:
+            print(f"  ⚠️ Yandex Operation poll: {e}")
+            break
+
+        if op.get("done"):
+            result_data = op.get("response") or op.get("result")
+            break
+
+    if not result_data:
+        print(f"  ⚠️ Yandex Search «{term}»: операция не завершилась или пустой ответ")
+        return []
+
+    # 3. Парсим результаты
+    # Ответ Yandex Search API v2 содержит XML в поле rawData или структурированный JSON
+    results = []
+    groups = result_data.get("grouping", [{}])
+    for group in groups:
+        for doc in group.get("docGroup", [{}]):
+            for d in doc.get("doc", []):
+                url = d.get("url", "")
+                if not url:
+                    continue
+                title    = d.get("title", {}).get("#text", "") if isinstance(d.get("title"), dict) else str(d.get("title", ""))
+                snippet  = ""
+                passages = d.get("passages", {}).get("passage", [])
+                if isinstance(passages, list) and passages:
+                    snippet = str(passages[0])[:1000]
+                elif isinstance(passages, str):
+                    snippet = passages[:1000]
+
+                date_str = d.get("modtime") or d.get("pubDate") or ""
+                results.append({
+                    "title":           title[:500],
+                    "url":             url,
+                    "content_snippet": snippet,
+                    "post_date":       parse_date(date_str),
+                    "source_type":     "yandex",
+                    "search_term":     term,
+                    "source_name":     "Яндекс",
+                })
+
+    print(f"  🔴 Yandex «{term}»: {len(results)} результатов")
+    return results
+
+
+# ============================================================================
+# СКАНИРОВАНИЕ TG-КАНАЛОВ (через t.me/s/ + Playwright)
+# ============================================================================
+
+async def fetch_tg_page(username: str, browser_context, before_id: int = None) -> str:
+    url = f"https://t.me/s/{username}"
+    if before_id:
+        url += f"?before={before_id}"
+
+    async with browser_semaphore:
+        page = await browser_context.new_page()
+        try:
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                window.chrome = { runtime: {} };
+            """)
+            await page.route("**/*.{mp4,webm,mp3,wav}", lambda route: route.abort())
+            await page.route("**/*google-analytics*", lambda route: route.abort())
+            await page.goto(url, wait_until="domcontentloaded", timeout=PLAYWRIGHT_TIMEOUT)
+            try:
+                await page.wait_for_selector("div.tgme_widget_message_wrap", timeout=15000)
+            except PlaywrightTimeout:
+                return ""
+            return await page.content()
+        except Exception as e:
+            print(f"  ❌ TG fetch @{username}: {e}")
+            return ""
+        finally:
+            await page.close()
+
+
+def parse_tg_posts(html: str, username: str) -> list[dict]:
+    if not html:
+        return []
+    soup  = BeautifulSoup(html, "lxml")
+    wraps = soup.find_all("div", class_="tgme_widget_message_wrap")
+    posts = []
+    for wrap in wraps:
+        try:
+            msg = wrap.find("div", class_="tgme_widget_message")
+            if not msg:
+                continue
+            data_post = msg.get("data-post", "")
+            if "/" not in data_post:
+                continue
+            message_id = int(data_post.split("/")[-1])
+
+            text_div = msg.find("div", class_="tgme_widget_message_text")
+            text = clean_text(str(text_div)) if text_div else ""
+
+            time_tag = msg.find("time")
+            post_date = None
+            if time_tag and time_tag.get("datetime"):
+                post_date = parse_date(time_tag["datetime"])
+
+            posts.append({
+                "message_id": message_id,
+                "post_url":   f"https://t.me/{username}/{message_id}",
+                "text":       text,
+                "post_date":  post_date,
+            })
+        except Exception:
+            continue
+    return sorted(posts, key=lambda p: p["message_id"])
+
+
+async def scan_tg_channel(source: dict, search_terms: list[str], browser_context) -> list[dict]:
+    """Сканирует TG-канал, фильтрует посты по вхождению search_terms."""
+    username = source.get("username", "").lstrip("@")
+    if not username:
+        return []
+
+    print(f"\n  📱 TG-канал @{username}")
+    all_posts   = []
+    before_id   = None
+    pages_done  = 0
+
+    while pages_done < 5:
+        html = await fetch_tg_page(username, browser_context, before_id)
+        if not html:
+            break
+        page_posts = parse_tg_posts(html, username)
+        if not page_posts:
+            break
+        all_posts.extend(page_posts)
+        if len(parse_tg_posts(html, username)) < 10:
+            break
+        before_id  = min(p["message_id"] for p in page_posts)
+        pages_done += 1
+        await asyncio.sleep(1)
+
+    # Фильтрация по вхождению search_terms
+    matched = [
+        p for p in all_posts
+        if p.get("text") and contains_any_term(p["text"], search_terms)
+    ]
+
+    results = []
+    for p in matched[:MAX_POSTS_PER_CHANNEL]:
+        snippet = p["text"][:1000]
+        results.append({
+            "url":             p["post_url"],
+            "title":           p["text"][:150].split("\n")[0],
+            "content_snippet": snippet,
+            "post_date":       p["post_date"],
+            "source_type":     "telegram",
+            "source_name":     source.get("title") or f"@{username}",
+            "search_term":     next((t for t in search_terms if t.lower() in p["text"].lower()), search_terms[0] if search_terms else ""),
+        })
+
+    print(f"    ✅ Найдено постов: {len(all_posts)}, с упоминаниями: {len(results)}")
+    return results
+
+
+# ============================================================================
+# СКАНИРОВАНИЕ ВЕБ-ПОРТАЛОВ (CSS-скрейпинг + Playwright)
+# ============================================================================
+
+async def fetch_web_page(url: str, browser_context) -> str:
+    async with browser_semaphore:
+        page = await browser_context.new_page()
+        try:
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                window.chrome = { runtime: {} };
+            """)
+            await page.route("**/*.{mp4,webm,mp3,wav,avi,mov}", lambda route: route.abort())
+            await page.route("**/*google-analytics*", lambda route: route.abort())
+            await page.goto(url, wait_until="domcontentloaded", timeout=PLAYWRIGHT_TIMEOUT)
+            await page.wait_for_timeout(2000)
+            html = await page.content()
+            return html if len(html) > 500 else ""
+        except Exception as e:
+            print(f"    ❌ Fetch {url}: {e}")
+            return ""
+        finally:
+            try:
+                await page.close()
+            except:
+                pass
+
+
+def parse_articles_from_html(html: str, base_url: str, css_config: dict) -> list[dict]:
+    """Парсит статьи из HTML по CSS-селекторам (паттерн из news_monitor.py)."""
+    if not html:
+        return []
+
+    cfg  = css_config or DEFAULT_CSS_CONFIG
+    soup = BeautifulSoup(html, "lxml")
+
+    item_selectors = [s.strip() for s in cfg.get("item", "").split(",")]
+    items = []
+    for sel in item_selectors:
+        if sel:
+            items.extend(soup.select(sel))
+    if not items:
+        return []
+
+    results = []
+    for item in items[:30]:
+        try:
+            title = ""
+            for sel in [s.strip() for s in cfg.get("title", "").split(",")]:
+                el = sel and item.select_one(sel)
+                if el:
+                    title = el.get_text(strip=True)
+                    break
+
+            text = ""
+            for sel in [s.strip() for s in cfg.get("text", "").split(",")]:
+                els = sel and item.select(sel)
+                if els:
+                    text = " ".join(e.get_text(strip=True) for e in els)
+                    break
+
+            if not title and not text:
+                continue
+
+            post_date = None
+            for sel in [s.strip() for s in cfg.get("date", "").split(",")]:
+                el = sel and item.select_one(sel)
+                if el:
+                    dt = el.get("datetime") or el.get_text(strip=True)
+                    post_date = parse_date(dt)
+                    if post_date:
+                        break
+
+            article_url = ""
+            for sel in [s.strip() for s in cfg.get("link", "").split(",")]:
+                el = sel and item.select_one(sel)
+                if el and el.get("href"):
+                    article_url = urljoin(base_url, el["href"])
+                    break
+
+            results.append({
+                "title":     title[:500],
+                "text":      text[:2000],
+                "post_date": post_date,
+                "url":       article_url or base_url,
+            })
+        except Exception:
+            continue
+
+    return results
+
+
+async def scan_website(source: dict, search_terms: list[str], browser_context) -> list[dict]:
+    """Сканирует веб-портал, фильтрует статьи по вхождению search_terms."""
+    url   = source.get("url", "")
+    title = source.get("title") or url
+    if not url:
+        return []
+
+    print(f"\n  🌐 Веб-портал: {title} ({url})")
+
+    css_config = source.get("css_config") or DEFAULT_CSS_CONFIG
+
+    html = await fetch_web_page(url, browser_context)
+    if not html:
+        print(f"    ❌ Не удалось загрузить страницу")
+        return []
+
+    articles = parse_articles_from_html(html, url, css_config)
+    if not articles:
+        print(f"    ⚠️ CSS-парсер ничего не нашёл")
+        return []
+
+    # Фильтрация по вхождению search_terms
+    matched = [
+        a for a in articles
+        if contains_any_term(f"{a['title']} {a['text']}", search_terms)
+    ]
+
+    results = []
+    for a in matched:
+        snippet = (a["text"] or a["title"])[:1000]
+        results.append({
+            "url":             a["url"],
+            "title":           a["title"],
+            "content_snippet": snippet,
+            "post_date":       a["post_date"],
+            "source_type":     "website",
+            "source_name":     title,
+            "search_term":     next(
+                (t for t in search_terms if t.lower() in f"{a['title']} {a['text']}".lower()),
+                search_terms[0] if search_terms else "",
+            ),
+        })
+
+    print(f"    ✅ Найдено статей: {len(articles)}, с упоминаниями: {len(results)}")
+    return results
+
+
+# ============================================================================
+# LLM-ОБРАБОТКА НЕОБРАБОТАННЫХ УПОМИНАНИЙ
+# ============================================================================
+
+async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> int:
+    """Обрабатывает все необработанные упоминания через LLM пачками."""
+    mentions = get_unprocessed_mentions()
+    if not mentions:
+        print("  ℹ️ Необработанных упоминаний нет")
+        return 0
+
+    print(f"  🤖 Обрабатываю {len(mentions)} упоминаний через LLM...")
+    processed = 0
+
+    for i, mention in enumerate(mentions):
+        try:
+            text = mention.get("content_snippet") or mention.get("title") or ""
+            sentiment, summary = await analyze_mention(text, mention.get("url", ""), session)
+            update_mention_analysis(mention["id"], sentiment, summary)
+            processed += 1
+            print(f"    [{i+1}/{len(mentions)}] ID={mention['id']} → {sentiment} | {summary[:60]}")
+        except Exception as e:
+            print(f"    ❌ Ошибка обработки {mention['id']}: {e}")
+
+        if i < len(mentions) - 1:
+            await asyncio.sleep(LLM_BATCH_PAUSE)
+
+    return processed
+
+
+# ============================================================================
+# ОРКЕСТРАТОР
+# ============================================================================
+
+async def run_mentions_monitoring():
+    start_time = time.time()
+    print("\n" + "=" * 60)
+    print("МОНИТОРИНГ УПОМИНАНИЙ — СТАРТ")
+    print("=" * 60)
+
+    # 1. Создаём запись о запуске
+    scan_id = create_scan()
+
+    # 2. Загружаем данные
+    search_terms = get_search_terms()
+    if not search_terms:
+        msg = "❌ Нет активных поисковых терминов — мониторинг упоминаний отменён"
+        print(msg)
+        send_telegram_message(msg)
+        if scan_id:
+            fail_scan(scan_id, "Нет активных поисковых терминов")
+        return
+
+    sources = get_mention_sources()
+    tg_sources  = [s for s in sources if s.get("source_type") == "telegram"]
+    web_sources = [s for s in sources if s.get("source_type") == "website"]
+
+    print(f"🔍 Поисковые термины ({len(search_terms)}): {', '.join(search_terms)}")
+    print(f"📱 TG-каналов: {len(tg_sources)}, 🌐 Веб-порталов: {len(web_sources)}")
+
+    all_results: list[dict] = []
+
+    connector = aiohttp.TCPConnector(limit=5, ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as http_session:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--window-size=1920,1080",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+            )
+            browser_context = await browser.new_context(
+                user_agent=get_random_user_agent(),
+                viewport={"width": 1920, "height": 1080},
+                ignore_https_errors=True,
+                locale="ru-RU",
+                timezone_id="Europe/Moscow",
+                extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8"},
+            )
+
+            # === ФАЗА 1A: Поиск Google CSE ===
+            if GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
+                print("\n" + "=" * 60)
+                print("ФАЗА 1A: GOOGLE CSE")
+                print("=" * 60)
+                for term in search_terms:
+                    results = await search_google(term, http_session)
+                    all_results.extend(results)
+                    await asyncio.sleep(1)
+
+            # === ФАЗА 1B: Поиск Yandex ===
+            if YANDEX_API_KEY and YANDEX_FOLDER_ID:
+                print("\n" + "=" * 60)
+                print("ФАЗА 1B: YANDEX SEARCH API")
+                print("=" * 60)
+                for term in search_terms:
+                    results = await search_yandex(term, http_session)
+                    all_results.extend(results)
+                    await asyncio.sleep(2)
+
+            # === ФАЗА 1C: TG-каналы ===
+            if tg_sources:
+                print("\n" + "=" * 60)
+                print("ФАЗА 1C: TG-КАНАЛЫ")
+                print("=" * 60)
+                for i, source in enumerate(tg_sources, 1):
+                    print(f"\n[{i}/{len(tg_sources)}] {source.get('title') or source.get('username')}")
+                    results = await scan_tg_channel(source, search_terms, browser_context)
+                    all_results.extend(results)
+                    if i < len(tg_sources):
+                        await asyncio.sleep(DELAY_BETWEEN_SOURCES)
+
+            # === ФАЗА 1D: Веб-порталы ===
+            if web_sources:
+                print("\n" + "=" * 60)
+                print("ФАЗА 1D: ВЕБ-ПОРТАЛЫ")
+                print("=" * 60)
+                for i, source in enumerate(web_sources, 1):
+                    print(f"\n[{i}/{len(web_sources)}] {source.get('title') or source.get('url')}")
+                    results = await scan_website(source, search_terms, browser_context)
+                    all_results.extend(results)
+                    if i < len(web_sources):
+                        await asyncio.sleep(DELAY_BETWEEN_SOURCES)
+
+            await browser_context.close()
+            await browser.close()
+
+        # === ФАЗА 2: Сохранение (дедупликация по URL) ===
+        print("\n" + "=" * 60)
+        print(f"ФАЗА 2: СОХРАНЕНИЕ ({len(all_results)} результатов)")
+        print("=" * 60)
+
+        new_count = 0
+        seen_urls: set[str] = set()
+
+        for item in all_results:
+            url = item.get("url", "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            post_date = item.get("post_date")
+            data = {
+                "scan_id":         scan_id,
+                "source_type":     item.get("source_type", "website"),
+                "url":             url,
+                "title":           item.get("title", "")[:500],
+                "content_snippet": item.get("content_snippet", "")[:1000],
+                "post_date":       post_date.isoformat() if post_date else None,
+                "search_term":     item.get("search_term", "")[:255],
+                "source_name":     item.get("source_name", "")[:255],
+                "is_processed":    False,
+            }
+            if save_mention(data):
+                new_count += 1
+                print(f"  ✅ Новое упоминание: {url[:80]}")
+            else:
+                print(f"  🔁 Дубликат: {url[:80]}")
+
+        print(f"\n📊 Сохранено новых упоминаний: {new_count} из {len(all_results)} найденных")
+
+        # === ФАЗА 3: LLM-обработка ===
+        print("\n" + "=" * 60)
+        print("ФАЗА 3: LLM-АНАЛИЗ ТОНАЛЬНОСТИ")
+        print("=" * 60)
+        processed_count = await process_unprocessed_mentions(http_session)
+        print(f"✅ Обработано LLM: {processed_count}")
+
+    # Завершение
+    elapsed = int(time.time() - start_time)
+    if scan_id:
+        complete_scan(scan_id, new_count)
+
+    summary_msg = f"""📣 <b>Мониторинг упоминаний завершён</b>
+
+🔍 Поисковых терминов: <b>{len(search_terms)}</b>
+📱 TG-каналов: <b>{len(tg_sources)}</b>
+🌐 Веб-порталов: <b>{len(web_sources)}</b>
+
+🆕 Новых упоминаний: <b>{new_count}</b>
+🤖 Обработано LLM: <b>{processed_count}</b>
+⏱️ Время: {elapsed} сек"""
+
+    print(f"\n{summary_msg}")
+    send_telegram_message(summary_msg)
+    print(f"\n✅ Мониторинг упоминаний завершён за {elapsed} сек")
+
+
+# ============================================================================
+# ТОЧКА ВХОДА
+# ============================================================================
+
+if __name__ == "__main__":
+    init_semaphores()
+    asyncio.run(run_mentions_monitoring())

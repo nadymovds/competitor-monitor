@@ -1,11 +1,12 @@
 import React from 'react'
 import { hapticFeedback } from '../../services/telegram'
 
-export default function BottomNav({ activeTab, onTabChange }) {
+export default function BottomNav({ activeTab, onTabChange, isAdmin = false }) {
   const tabs = [
     { id: 'feed', label: 'Лента', icon: '📊' },
-    { id: 'scans', label: 'Сканирования', icon: '🔍' },
     { id: 'competitors', label: 'Конкуренты', icon: '👥' },
+    { id: 'mentions', label: 'Упоминания', icon: '📣' },
+    ...(isAdmin ? [{ id: 'scans', label: 'Сканирования', icon: '🔍' }] : []),
     { id: 'settings', label: 'Настройки', icon: '⚙️' }
   ]
 

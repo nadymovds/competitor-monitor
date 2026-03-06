@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { hapticFeedback, showAlert, showConfirm } from '../../services/telegram'
-import { createGroup, updateGroup, deleteGroup } from '../../services/supabase'
+import { createGroup, updateGroup, deleteGroup, getMentionSearchTerms, createMentionSearchTerm, updateMentionSearchTerm, deleteMentionSearchTerm, getMentionSources, createMentionSource, updateMentionSource, deleteMentionSource } from '../../services/supabase'
 import {
   getNewsCategories, getAllNewsChannels,
   createCategory, updateCategory, toggleCategoryVisibility, deleteCategory as deleteCategoryApi,
@@ -45,6 +45,28 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   const [editChUrl, setEditChUrl] = useState('')
   const [editChCssConfig, setEditChCssConfig] = useState('')
 
+  // Mention search terms state
+  const [mentionTerms, setMentionTerms] = useState([])
+  const [editingTerm, setEditingTerm] = useState(null)
+  const [showNewTermForm, setShowNewTermForm] = useState(false)
+  const [newTermValue, setNewTermValue] = useState('')
+  const [editTermValue, setEditTermValue] = useState('')
+
+  // Mention sources state
+  const [mentionSources, setMentionSources] = useState([])
+  const [editingMentionSource, setEditingMentionSource] = useState(null)
+  const [showNewMentionSourceForm, setShowNewMentionSourceForm] = useState(false)
+  const [newMsSourceType, setNewMsSourceType] = useState('telegram')
+  const [newMsUsername, setNewMsUsername] = useState('')
+  const [newMsTitle, setNewMsTitle] = useState('')
+  const [newMsUrl, setNewMsUrl] = useState('')
+  const [newMsCssConfig, setNewMsCssConfig] = useState('')
+  const [editMsSourceType, setEditMsSourceType] = useState('telegram')
+  const [editMsUsername, setEditMsUsername] = useState('')
+  const [editMsTitle, setEditMsTitle] = useState('')
+  const [editMsUrl, setEditMsUrl] = useState('')
+  const [editMsCssConfig, setEditMsCssConfig] = useState('')
+
   const isAdmin = user?.role === 'admin'
   const soon = () => { hapticFeedback('warning'); showAlert('Эта функция скоро будет доступна') }
 
@@ -60,6 +82,20 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
       }
     }
     loadNewsSettings()
+  }, [isAdmin])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    async function loadMentionSettings() {
+      try {
+        const [terms, sources] = await Promise.all([getMentionSearchTerms(), getMentionSources()])
+        setMentionTerms(terms)
+        setMentionSources(sources)
+      } catch (err) {
+        console.error('Error loading mention settings:', err)
+      }
+    }
+    loadMentionSettings()
   }, [isAdmin])
 
   // --- Groups handlers ---
@@ -381,6 +417,199 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
       hapticFeedback('success')
     } catch (err) {
       console.error('Error creating channel:', err)
+      hapticFeedback('error')
+      showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // --- Mention search terms handlers ---
+
+  const handleToggleTermActive = async (term) => {
+    hapticFeedback('light')
+    try {
+      const updated = await updateMentionSearchTerm(term.id, { isActive: !term.is_active })
+      setMentionTerms(prev => prev.map(t => t.id === updated.id ? updated : t))
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка: ' + err.message)
+    }
+  }
+
+  const handleEditTerm = (term) => {
+    hapticFeedback('light')
+    setEditingTerm(term)
+    setEditTermValue(term.term)
+  }
+
+  const handleSaveTerm = async () => {
+    if (!editTermValue.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите поисковый термин')
+      return
+    }
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const updated = await updateMentionSearchTerm(editingTerm.id, { term: editTermValue.trim() })
+      setMentionTerms(prev => prev.map(t => t.id === updated.id ? updated : t))
+      setEditingTerm(null)
+      setEditTermValue('')
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка сохранения: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteTerm = async (term) => {
+    hapticFeedback('warning')
+    const confirmed = await showConfirm(`Удалить термин "${term.term}"?`)
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      await deleteMentionSearchTerm(term.id)
+      setMentionTerms(prev => prev.filter(t => t.id !== term.id))
+      setEditingTerm(null)
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка удаления: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateTerm = async () => {
+    if (!newTermValue.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите поисковый термин')
+      return
+    }
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const created = await createMentionSearchTerm({ term: newTermValue.trim() })
+      setMentionTerms(prev => [...prev, created])
+      setShowNewTermForm(false)
+      setNewTermValue('')
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // --- Mention sources handlers ---
+
+  const handleToggleMentionSourceActive = async (src) => {
+    hapticFeedback('light')
+    try {
+      const updated = await updateMentionSource(src.id, { isActive: !src.is_active })
+      setMentionSources(prev => prev.map(s => s.id === updated.id ? updated : s))
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка: ' + err.message)
+    }
+  }
+
+  const handleEditMentionSource = (src) => {
+    hapticFeedback('light')
+    setEditingMentionSource(src)
+    setEditMsSourceType(src.source_type || 'telegram')
+    setEditMsUsername(src.username || '')
+    setEditMsTitle(src.title || '')
+    setEditMsUrl(src.url || '')
+    setEditMsCssConfig(src.css_config || '')
+  }
+
+  const handleSaveMentionSource = async () => {
+    if (editMsSourceType === 'telegram' && !editMsUsername.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите username канала')
+      return
+    }
+    if (editMsSourceType === 'website' && !editMsUrl.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите URL сайта')
+      return
+    }
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const updated = await updateMentionSource(editingMentionSource.id, {
+        username: editMsSourceType === 'telegram' ? editMsUsername.trim() : null,
+        title: editMsTitle.trim() || null,
+        url: editMsSourceType === 'website' ? editMsUrl.trim() : null,
+        cssConfig: editMsSourceType === 'website' && editMsCssConfig.trim() ? editMsCssConfig.trim() : null
+      })
+      setMentionSources(prev => prev.map(s => s.id === updated.id ? updated : s))
+      setEditingMentionSource(null)
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка сохранения: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteMentionSource = async (src) => {
+    hapticFeedback('warning')
+    const name = src.source_type === 'website' ? src.title || src.url : `@${src.username}`
+    const confirmed = await showConfirm(`Удалить источник "${name}"?`)
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      await deleteMentionSource(src.id)
+      setMentionSources(prev => prev.filter(s => s.id !== src.id))
+      setEditingMentionSource(null)
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка удаления: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateMentionSource = async () => {
+    if (newMsSourceType === 'telegram' && !newMsUsername.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите username канала')
+      return
+    }
+    if (newMsSourceType === 'website' && !newMsUrl.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите URL сайта')
+      return
+    }
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const created = await createMentionSource({
+        sourceType: newMsSourceType,
+        username: newMsSourceType === 'telegram' ? newMsUsername.trim() : null,
+        title: newMsTitle.trim() || null,
+        url: newMsSourceType === 'website' ? newMsUrl.trim() : null,
+        cssConfig: newMsSourceType === 'website' && newMsCssConfig.trim() ? newMsCssConfig.trim() : null
+      })
+      setMentionSources(prev => [...prev, created])
+      setShowNewMentionSourceForm(false)
+      setNewMsUsername('')
+      setNewMsTitle('')
+      setNewMsSourceType('telegram')
+      setNewMsUrl('')
+      setNewMsCssConfig('')
+      hapticFeedback('success')
+    } catch (err) {
       hapticFeedback('error')
       showAlert('Ошибка создания: ' + err.message)
     } finally {
@@ -820,6 +1049,197 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
               onClick={() => { hapticFeedback('light'); setShowNewChannelForm(true); setEditingChannel(null) }}
               style={addBtnStyle}
             >
+              + Добавить источник
+            </button>
+          )}
+        </Section>
+      )}
+
+      {/* Поиск упоминаний — только для админов */}
+      {isAdmin && (
+        <Section title="Поиск упоминаний" count={mentionTerms.length}>
+          {mentionTerms.map((term, i) => (
+            <div key={term.id}>
+              {editingTerm?.id === term.id ? (
+                <div style={{ padding: 16, borderBottom: i < mentionTerms.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <input
+                      type="text"
+                      value={editTermValue}
+                      onChange={(e) => setEditTermValue(e.target.value)}
+                      placeholder="Поисковый термин"
+                      style={inputStyle}
+                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={handleSaveTerm} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                        {saving ? 'Сохранение...' : 'Сохранить'}
+                      </button>
+                      <button onClick={() => { hapticFeedback('light'); setEditingTerm(null); setEditTermValue('') }} disabled={saving} style={btnSecondary}>Отмена</button>
+                      <button onClick={() => handleDeleteTerm(term)} disabled={saving} style={btnDanger}>Удалить</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: i < mentionTerms.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                    <button
+                      onClick={() => handleToggleTermActive(term)}
+                      style={{
+                        width: 20, height: 20, borderRadius: 4, border: '2px solid ' + (term.is_active ? '#10b981' : '#4b5563'),
+                        backgroundColor: term.is_active ? '#10b981' : 'transparent',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, padding: 0
+                      }}
+                    >
+                      {term.is_active && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
+                    </button>
+                    <span style={{ fontSize: 15, color: term.is_active ? '#fff' : '#6b7280' }}>{term.term}</span>
+                  </div>
+                  <button onClick={() => handleEditTerm(term)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 16, cursor: 'pointer', flexShrink: 0 }}>✎</button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {showNewTermForm && (
+            <div style={{ padding: 16, borderTop: mentionTerms.length > 0 ? '1px solid #2a2a3a' : 'none' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input
+                  type="text"
+                  value={newTermValue}
+                  onChange={(e) => setNewTermValue(e.target.value)}
+                  placeholder="Например: SKAI, ООО Рога и Копыта"
+                  style={inputStyle}
+                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleCreateTerm} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Создание...' : 'Добавить'}
+                  </button>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewTermForm(false); setNewTermValue('') }} disabled={saving} style={btnSecondary}>Отмена</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!showNewTermForm && (
+            <button onClick={() => { hapticFeedback('light'); setShowNewTermForm(true); setEditingTerm(null) }} style={addBtnStyle}>
+              + Добавить термин
+            </button>
+          )}
+        </Section>
+      )}
+
+      {/* Источники для упоминаний — только для админов */}
+      {isAdmin && (
+        <Section title="Источники для упоминаний" count={mentionSources.length}>
+          {mentionSources.map((src, i) => (
+            <div key={src.id}>
+              {editingMentionSource?.id === src.id ? (
+                <div style={{ padding: 16, borderBottom: i < mentionSources.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Тип источника</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => { hapticFeedback('light'); setEditMsSourceType('telegram') }} style={editMsSourceType === 'telegram' ? sourceTypeBtnActive : sourceTypeBtn}>📱 Telegram</button>
+                        <button onClick={() => { hapticFeedback('light'); setEditMsSourceType('website') }} style={editMsSourceType === 'website' ? sourceTypeBtnActive : sourceTypeBtn}>🌐 Веб-сайт</button>
+                      </div>
+                    </div>
+
+                    {editMsSourceType === 'telegram' ? (
+                      <div style={{ position: 'relative' }}>
+                        <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
+                        <input type="text" value={editMsUsername} onChange={(e) => setEditMsUsername(e.target.value.replace(/^@/, ''))} placeholder="username" style={{ ...inputStyle, paddingLeft: 28 }} />
+                      </div>
+                    ) : (
+                      <>
+                        <input type="text" value={editMsUrl} onChange={(e) => setEditMsUrl(e.target.value)} placeholder="https://example.com/news" style={inputStyle} />
+                        <input type="text" value={editMsCssConfig} onChange={(e) => setEditMsCssConfig(e.target.value)} placeholder="CSS-селекторы (JSON, необязательно)" style={inputStyle} />
+                      </>
+                    )}
+
+                    <input type="text" value={editMsTitle} onChange={(e) => setEditMsTitle(e.target.value)} placeholder="Название (необязательно)" style={inputStyle} />
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={handleSaveMentionSource} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                        {saving ? 'Сохранение...' : 'Сохранить'}
+                      </button>
+                      <button onClick={() => { hapticFeedback('light'); setEditingMentionSource(null) }} disabled={saving} style={btnSecondary}>Отмена</button>
+                      <button onClick={() => handleDeleteMentionSource(src)} disabled={saving} style={btnDanger}>Удалить</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: i < mentionSources.length - 1 ? '1px solid #2a2a3a' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                    <button
+                      onClick={() => handleToggleMentionSourceActive(src)}
+                      style={{
+                        width: 20, height: 20, borderRadius: 4, border: '2px solid ' + (src.is_active ? '#10b981' : '#4b5563'),
+                        backgroundColor: src.is_active ? '#10b981' : 'transparent',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, padding: 0
+                      }}
+                    >
+                      {src.is_active && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
+                    </button>
+                    <span style={{ fontSize: 14, flexShrink: 0 }}>{src.source_type === 'website' ? '🌐' : '📱'}</span>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {src.source_type === 'website' ? (
+                        <>
+                          <span style={{ fontSize: 15, color: src.is_active ? '#fff' : '#6b7280' }}>{src.title || src.url}</span>
+                          {src.title && src.url && <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>{src.url}</span>}
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 15, color: src.is_active ? '#fff' : '#6b7280' }}>@{src.username}</span>
+                          {src.title && <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>{src.title}</span>}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={() => handleEditMentionSource(src)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 16, cursor: 'pointer', flexShrink: 0 }}>✎</button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {showNewMentionSourceForm && (
+            <div style={{ padding: 16, borderTop: mentionSources.length > 0 ? '1px solid #2a2a3a' : 'none' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>Тип источника</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => { hapticFeedback('light'); setNewMsSourceType('telegram') }} style={newMsSourceType === 'telegram' ? sourceTypeBtnActive : sourceTypeBtn}>📱 Telegram</button>
+                    <button onClick={() => { hapticFeedback('light'); setNewMsSourceType('website') }} style={newMsSourceType === 'website' ? sourceTypeBtnActive : sourceTypeBtn}>🌐 Веб-сайт</button>
+                  </div>
+                </div>
+
+                {newMsSourceType === 'telegram' ? (
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 15 }}>@</span>
+                    <input type="text" value={newMsUsername} onChange={(e) => setNewMsUsername(e.target.value.replace(/^@/, ''))} placeholder="username" style={{ ...inputStyle, paddingLeft: 28 }} />
+                  </div>
+                ) : (
+                  <>
+                    <input type="text" value={newMsUrl} onChange={(e) => setNewMsUrl(e.target.value)} placeholder="https://example.com/news" style={inputStyle} />
+                    <input type="text" value={newMsCssConfig} onChange={(e) => setNewMsCssConfig(e.target.value)} placeholder="CSS-селекторы (JSON, необязательно)" style={inputStyle} />
+                  </>
+                )}
+
+                <input type="text" value={newMsTitle} onChange={(e) => setNewMsTitle(e.target.value)} placeholder="Название (необязательно)" style={inputStyle} />
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleCreateMentionSource} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Создание...' : 'Добавить источник'}
+                  </button>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewMentionSourceForm(false); setNewMsUsername(''); setNewMsTitle(''); setNewMsSourceType('telegram'); setNewMsUrl(''); setNewMsCssConfig('') }} disabled={saving} style={btnSecondary}>Отмена</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!showNewMentionSourceForm && (
+            <button onClick={() => { hapticFeedback('light'); setShowNewMentionSourceForm(true); setEditingMentionSource(null) }} style={addBtnStyle}>
               + Добавить источник
             </button>
           )}
