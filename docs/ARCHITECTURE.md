@@ -35,11 +35,36 @@
 - Создание записей в `news_digests` для статистики
 - Отправка PDF с инлайн-кнопкой «Показать посты»
 
+**`mentions_monitor.py`** - Мониторинг упоминаний компании
+- Поиск по Yandex Search API (асинхронный)
+- Парсинг Telegram-каналов через Playwright
+- Парсинг веб-порталов через Playwright (CSS-селекторы)
+- Анализ тональности и генерация summary через Groq LLM
+- Дедупликация по URL (`UNIQUE` constraint)
+- Сохранение в `mention_scans` и `mentions`
+- Запускается раз в неделю (понедельник, 09:00 МСК)
+
 **`bot.py`** - Telegram Bot с async polling
 - Обработка инлайн-кнопок (`CallbackQueryHandler`)
 - По нажатию «Показать посты» — отправляет посты дайджеста порциями по 10
 - Пагинация через callback_data: `show_posts:{digest_id}:{offset}`
 - Работает в фоне параллельно с cron-скриптами (постоянный процесс)
+
+#### Процесс мониторинга упоминаний
+
+1. **Фаза 1: Поиск**
+   - Yandex Search API: запрос по каждому термину из `mention_search_terms`
+   - Telegram-каналы из `mention_sources` (type=telegram): Playwright
+   - Веб-порталы из `mention_sources` (type=website): Playwright + CSS-селекторы
+
+2. **Фаза 2: LLM-обработка**
+   - Анализ тональности (positive / negative / neutral)
+   - Генерация краткого summary
+   - Дедупликация по URL (ON CONFLICT DO NOTHING)
+
+3. **Фаза 3: Сохранение**
+   - Создание записи `mention_scans` (status=running → completed/failed)
+   - Запись результатов в `mentions`
 
 #### Процесс мониторинга новостей
 
@@ -159,14 +184,17 @@ webapp/
 │   │   │   ├── FeedScreen.jsx        # Единая лента
 │   │   │   ├── ScansScreen.jsx       # История сканирований
 │   │   │   ├── CompetitorsScreen.jsx # Список конкурентов
+│   │   │   ├── MentionsScreen.jsx    # Упоминания компании
 │   │   │   └── SettingsScreen.jsx    # Настройки
 │   │   └── ui/           # UI компоненты
 │   │       ├── BottomNav.jsx
 │   │       ├── NewsCard.jsx
+│   │       ├── MentionCard.jsx       # Карточка упоминания
 │   │       ├── ScanCard.jsx
 │   │       └── ...
 │   ├── services/
-│   │   ├── supabase.js   # Клиент Supabase
+│   │   ├── supabase.js   # Клиент Supabase + CRUD для mentions
+│   │   ├── mentions.js   # API упоминаний
 │   │   ├── news.js       # API новостей
 │   │   ├── feed.js       # API единой ленты
 │   │   └── telegram.js   # Telegram Web App
@@ -193,10 +221,17 @@ webapp/
 - Детальная страница конкурента
 - История изменений
 
+**MentionsScreen** - Упоминания компании
+- Список упоминаний из `mentions`
+- Фильтры: источник (Яндекс / TG / Портал), тональность, период
+- Infinite scroll (pagination по 10)
+
 **SettingsScreen** - Настройки и управление
 - Управление категориями новостей
 - Управление каналами новостей
 - Группы конкурентов
+- Поиск упоминаний: CRUD для `mention_search_terms` (только admin)
+- Источники упоминаний: CRUD для `mention_sources` (только admin)
 
 #### Работа с API
 
@@ -269,6 +304,10 @@ schedule:
 # Мониторинг новостей - каждую пятницу 9:00 МСК
 schedule:
   - cron: '0 6 * * 5'  # UTC
+
+# Мониторинг упоминаний - каждый понедельник 9:00 МСК
+schedule:
+  - cron: '0 6 * * 1'  # UTC
 ```
 
 **2. По требованию (через Telegram Bot):**
@@ -474,6 +513,10 @@ SUPABASE_KEY=xxx
 TELEGRAM_BOT_TOKEN=xxx
 TELEGRAM_CHAT_ID=xxx
 GROQ_API_KEY=xxx
+
+# mentions_monitor.py — дополнительно
+YANDEX_SEARCH_API_KEY=xxx
+YANDEX_SEARCH_FOLDER_ID=xxx
 
 # bot.py — Render.com Environment Variables
 SUPABASE_URL=https://xxx.supabase.co

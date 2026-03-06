@@ -20,9 +20,28 @@ function formatDate(isoDate) {
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`
 }
 
+function getDomain(url) {
+  if (!url) return ''
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+// Для Яндекс-результатов source_name = "Яндекс" — не информативно,
+// лучше показать домен сайта. Для TG и website source_name уже осмысленный.
+function getDisplaySource(mention) {
+  if (mention.source_type === 'yandex') {
+    return getDomain(mention.url) || mention.source_name || ''
+  }
+  return mention.source_name || ''
+}
+
 export default function MentionCard({ mention }) {
   const source = SOURCE_LABELS[mention.source_type] || { label: mention.source_type, color: '#6b7280' }
   const sentiment = SENTIMENT_LABELS[mention.sentiment]
+  const displaySource = getDisplaySource(mention)
 
   const handleClick = () => {
     if (!mention.url) return
@@ -45,8 +64,8 @@ export default function MentionCard({ mention }) {
           )}
         </div>
         <div style={styles.meta}>
-          {mention.source_name && <span>{mention.source_name}</span>}
-          {mention.source_name && mention.post_date && <span> · </span>}
+          {displaySource && <span>{displaySource}</span>}
+          {displaySource && mention.post_date && <span> · </span>}
           {mention.post_date && <span>{formatDate(mention.post_date)}</span>}
         </div>
       </div>
@@ -57,6 +76,11 @@ export default function MentionCard({ mention }) {
           {mention.title}
           {mention.url && <span style={styles.linkIcon}> ↗</span>}
         </div>
+      )}
+
+      {/* URL источника */}
+      {mention.url && (
+        <div style={styles.url}>{mention.url}</div>
       )}
 
       {/* Саммари или сниппет */}
@@ -111,6 +135,14 @@ const styles = {
   linkIcon: {
     color: '#3b82f6',
     fontWeight: 400,
+  },
+  url: {
+    fontSize: 11,
+    color: '#4b5563',
+    marginBottom: 6,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   summary: {
     fontSize: 13,

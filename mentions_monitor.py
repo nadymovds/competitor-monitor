@@ -47,6 +47,7 @@ PLAYWRIGHT_TIMEOUT     = 30000
 MAX_POSTS_PER_CHANNEL  = 100
 DELAY_BETWEEN_SOURCES  = 3
 MAX_PAGES_PER_WEBSITE  = 2
+MAX_YANDEX_PAGES       = 3      # макс страниц Яндекс на термин (10 результатов/страница)
 LLM_BATCH_PAUSE        = 4      # сек между LLM-вызовами
 
 DEFAULT_CSS_CONFIG = {
@@ -344,15 +345,24 @@ def fail_scan(scan_id: int, error: str) -> None:
 
 
 def save_mention(data: dict) -> bool:
-    """INSERT с ON CONFLICT (url) DO NOTHING. Возвращает True если новая запись."""
+    """INSERT упоминания. При дубликате URL обновляет scan_id (чтобы запись была видна
+    в текущем скане), но сохраняет оригинальный created_at (дата первого обнаружения).
+    Возвращает True если запись новая."""
     try:
         result = supabase.table("mentions").insert(data).execute()
         return bool(result.data)
     except Exception as e:
         err = str(e)
-        # Supabase возвращает 409/23505 при конфликте уникального ключа
+        # Supabase возвращает 23505 при конфликте уникального ключа (url)
         if "23505" in err or "duplicate" in err.lower() or "already exists" in err.lower():
-            return False
+            # Обновляем scan_id чтобы дубликат был виден в текущем скане
+            try:
+                supabase.table("mentions").update({
+                    "scan_id": data.get("scan_id"),
+                }).eq("url", data["url"]).execute()
+            except Exception:
+                pass
+            return False  # не новая запись
         print(f"  ⚠️ Ошибка сохранения упоминания: {e}")
         return False
 
@@ -449,11 +459,10 @@ async def search_google(term: str, session: aiohttp.ClientSession) -> list[dict]
 # ПОИСК: YANDEX SEARCH API
 # ============================================================================
 
-async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]:
-    """Поиск через Yandex Search API v2 (асинхронный режим)."""
-    if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
-        print("  ⚠️ Yandex Search API не настроен, пропуск")
-        return []
+async def _search_yandex_page(term: str, page: int, session: aiohttp.ClientSession) -> list[dict]:
+    """Получает одну страницу результатов Yandex Search API v2."""
+    import base64
+    import xml.etree.ElementTree as ET
 
     headers = {
         "Authorization": f"Api-Key {YANDEX_API_KEY}",
@@ -465,7 +474,7 @@ async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]
             "searchType": "SEARCH_TYPE_RU",
             "queryText":  f'"{term}"',
             "maxPassages": 1,
-            "page": 0,
+            "page": page,
         },
         "sortSpec": {"sortMode": "SORT_MODE_BY_TIME", "sortOrder": "SORT_ORDER_DESC"},
         "maxPassages": 1,
@@ -483,12 +492,12 @@ async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]
             resp.raise_for_status()
             operation = await resp.json()
     except Exception as e:
-        print(f"  ❌ Yandex Search (запуск): {e}")
+        print(f"  ❌ Yandex Search стр.{page} (запуск): {e}")
         return []
 
     operation_id = operation.get("id")
     if not operation_id:
-        print(f"  ❌ Yandex Search: не получен operation_id")
+        print(f"  ❌ Yandex Search стр.{page}: не получен operation_id")
         return []
 
     # 2. Опрашиваем операцию (макс 30 сек)
@@ -504,7 +513,7 @@ async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]
                 resp.raise_for_status()
                 op = await resp.json()
         except Exception as e:
-            print(f"  ⚠️ Yandex Operation poll: {e}")
+            print(f"  ⚠️ Yandex Operation poll стр.{page}: {e}")
             break
 
         if op.get("done"):
@@ -512,28 +521,23 @@ async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]
             break
 
     if not result_data:
-        print(f"  ⚠️ Yandex Search «{term}»: операция не завершилась или пустой ответ")
+        print(f"  ⚠️ Yandex «{term}» стр.{page}: операция не завершилась или пустой ответ")
         return []
 
-    # 3. Парсим результаты
-    # Yandex Search API v2 возвращает base64-encoded XML в поле rawData
-    import base64
-    import xml.etree.ElementTree as ET
-
+    # 3. Парсим base64-encoded XML
     raw_data = result_data.get("rawData") or result_data.get("raw_data")
     if not raw_data:
-        print(f"  ⚠️ Yandex Search «{term}»: нет поля rawData в ответе")
+        print(f"  ⚠️ Yandex «{term}» стр.{page}: нет поля rawData")
         return []
 
     try:
         xml_bytes = base64.b64decode(raw_data)
         root = ET.fromstring(xml_bytes)
     except Exception as e:
-        print(f"  ❌ Yandex Search «{term}»: ошибка декодирования XML: {e}")
+        print(f"  ❌ Yandex «{term}» стр.{page}: ошибка декодирования XML: {e}")
         return []
 
     results = []
-    # Структура: yandexsearch/response/results/grouping/group/doc
     for doc in root.findall(".//{http://www.yandex.ru/XMLsearch}doc") or root.findall(".//doc"):
         url_el = doc.find("{http://www.yandex.ru/XMLsearch}url") or doc.find("url")
         url = url_el.text.strip() if url_el is not None and url_el.text else ""
@@ -563,13 +567,30 @@ async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]
             "source_name":     "Яндекс",
         })
 
-    if not results:
-        # Отладка: показываем теги верхнего уровня XML
-        tags = [child.tag for child in root][:5]
-        print(f"  ⚠️ Yandex «{term}»: 0 результатов, XML теги: {tags}")
-    else:
-        print(f"  ✅ Yandex «{term}»: {len(results)} результатов")
     return results
+
+
+async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]:
+    """Поиск через Yandex Search API v2: до MAX_YANDEX_PAGES страниц по 10 результатов."""
+    if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
+        print("  ⚠️ Yandex Search API не настроен, пропуск")
+        return []
+
+    all_results = []
+    for page in range(MAX_YANDEX_PAGES):
+        page_results = await _search_yandex_page(term, page, session)
+        all_results.extend(page_results)
+        # Если страница вернула меньше 10 — это последняя
+        if len(page_results) < 10:
+            break
+        if page < MAX_YANDEX_PAGES - 1:
+            await asyncio.sleep(1)
+
+    if not all_results:
+        print(f"  ⚠️ Yandex «{term}»: 0 результатов")
+    else:
+        print(f"  ✅ Yandex «{term}»: {len(all_results)} результатов ({min(MAX_YANDEX_PAGES, (len(all_results) + 9) // 10)} стр.)")
+    return all_results
 
 
 # ============================================================================

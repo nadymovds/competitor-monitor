@@ -297,6 +297,91 @@ URL-адреса конкурентов для мониторинга.
 
 ---
 
+## Мониторинг упоминаний
+
+### `mention_search_terms`
+Варианты названий компании для поиска упоминаний.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | serial | PK |
+| term | varchar(255) | Поисковый термин (название бренда, продукта, юр. лица) |
+| description | text | Описание |
+| is_active | boolean | Используется ли при поиске |
+| created_at | timestamptz | Дата создания |
+| updated_at | timestamptz | Дата обновления |
+
+**Начальные данные:** SKAI, SKAI.Видеоаналитика, SKAI Платформа, ООО "СМА-РТ"
+
+### `mention_sources`
+Telegram-каналы и веб-порталы для мониторинга упоминаний.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | serial | PK |
+| source_type | text | 'telegram' или 'website' |
+| username | varchar(255) | Username канала (для telegram) |
+| title | varchar(255) | Название источника |
+| description | text | Описание |
+| url | text | URL страницы (для website) |
+| css_config | jsonb | CSS-селекторы для парсинга (аналог news_channels) |
+| is_active | boolean | Активен ли источник |
+| last_scan_at | timestamptz | Время последнего сканирования |
+| created_at | timestamptz | Дата создания |
+| updated_at | timestamptz | Дата обновления |
+
+### `mention_scans`
+История запусков скрипта мониторинга упоминаний.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | serial | PK |
+| scan_date | date | Дата сканирования |
+| status | text | 'running', 'completed', 'failed' |
+| mentions_found | integer | Количество новых упоминаний за скан |
+| duration_seconds | integer | Длительность в секундах |
+| error_message | text | Сообщение об ошибке |
+| created_at | timestamptz | Дата создания |
+| completed_at | timestamptz | Время завершения |
+
+### `mentions`
+Найденные упоминания компании в интернете.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | serial | PK |
+| scan_id | integer | FK → mention_scans.id |
+| source_type | text | 'yandex', 'telegram', 'website' |
+| url | text | URL упоминания (UNIQUE) |
+| title | text | Заголовок |
+| content_snippet | text | Фрагмент текста |
+| post_date | timestamptz | Дата публикации |
+| sentiment | text | 'positive', 'negative', 'neutral' |
+| summary | text | Краткое описание (от LLM) |
+| search_term | varchar(255) | Поисковый термин, нашедший упоминание |
+| source_name | text | Название источника |
+| is_processed | boolean | Обработано ли LLM |
+| created_at | timestamptz | Дата создания |
+
+**Ограничение:** `UNIQUE (url)` — дедупликация по URL.
+
+### Связи мониторинга упоминаний
+```
+mention_scans (1) ──< mentions (N)
+mention_search_terms  ─── используется скриптом mentions_monitor.py
+mention_sources       ─── используется скриптом mentions_monitor.py
+```
+
+### Индексы
+- `mentions.scan_id` — фильтрация по скану
+- `mentions.source_type` — фильтрация по источнику
+- `mentions.sentiment` — фильтрация по тональности
+- `mentions.post_date DESC` — сортировка по дате
+- `mentions.is_processed WHERE false` — очередь необработанных
+- `mention_sources.is_active WHERE true` — активные источники
+
+---
+
 ## Пользователи и управление доступом
 
 ### `users`
@@ -376,6 +461,11 @@ news_posts (1) ──< news_digest_posts (N)
 news_digests (1) ──< news_digest_posts (N)
 
 competitors (1) ──< news_channels (N)  [опционально]
+```
+
+### Мониторинг упоминаний
+```
+mention_scans (1) ──< mentions (N)
 ```
 
 ---
