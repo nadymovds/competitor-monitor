@@ -64,7 +64,7 @@ async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     posts = [row["news_posts"] for row in result.data if row.get("news_posts")]
     total = len(posts)
-    batch = posts[offset: offset + 10]
+    batch = posts[offset: offset + 1]
 
     for post in batch:
         text = format_post_card(post)
@@ -89,13 +89,13 @@ async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         nav_markup = InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                "📋 Показать ещё →",
+                f"➡️ Следующая ({shown_end + 1}/{total})",
                 callback_data=f"show_posts:{digest_id}:{shown_end}"
             )
         ]])
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text=f"📰 Показано {offset + 1}–{shown_end} из {total} постов",
+            text=f"📰 {shown_end} из {total}",
             reply_markup=nav_markup
         )
     else:

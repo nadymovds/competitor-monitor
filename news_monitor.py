@@ -2051,7 +2051,7 @@ async def run_news_monitoring_async():
         if digest_id:
             keyboard = {
                 "inline_keyboard": [[
-                    {"text": f"📰 Читать новости ({total_digest_posts}) — по 10 за раз",
+                    {"text": f"📰 Читать новости ({total_digest_posts}) — по одной",
                      "callback_data": f"show_posts:{digest_id}:0"}
                 ]]
             }
