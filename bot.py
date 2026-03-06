@@ -182,7 +182,7 @@ def main():
     webhook_endpoint = f"{WEBHOOK_URL}/webhook"
     resp = req.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
-        json={"url": webhook_endpoint}
+        json={"url": webhook_endpoint, "allowed_updates": ["message", "callback_query"]}
     )
     print(f"Webhook set: {resp.json()}")
 
