@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 
 from flask import Flask, request
 from supabase import create_client, Client
@@ -19,6 +20,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app_flask = Flask(__name__)
 application: Application = None
+
+# Персистентный event loop в background-треде
+_loop = asyncio.new_event_loop()
+threading.Thread(target=_loop.run_forever, daemon=True).start()
 
 # ============================================================================
 # HANDLER
@@ -150,7 +155,8 @@ def format_post_card(post: dict) -> str:
 @app_flask.post("/webhook")
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    future = asyncio.run_coroutine_threadsafe(application.process_update(update), _loop)
+    future.result(timeout=60)
     return "ok"
 
 @app_flask.get("/")
@@ -174,8 +180,8 @@ def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CallbackQueryHandler(handle_show_posts, pattern=r"^show_posts:"))
 
-    # Инициализировать application (обязательно для v20+)
-    asyncio.run(application.initialize())
+    # Инициализировать application в том же event loop
+    asyncio.run_coroutine_threadsafe(application.initialize(), _loop).result()
 
     # Установить webhook при старте
     import requests as req
