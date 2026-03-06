@@ -225,8 +225,8 @@ const { data, error } = await supabase
 
 #### Файлы
 
-- **`bot.py`** — постоянно работающий процесс с async polling, обрабатывает инлайн-кнопки
-- **`news_monitor.py`** / **`competitor_monitor.py`** — cron-скрипты, запускаются по расписанию
+- **`bot.py`** — Flask webhook-сервер, задеплоен на Render.com (обрабатывает инлайн-кнопки)
+- **`news_monitor.py`** / **`competitor_monitor.py`** — cron-скрипты, запускаются по расписанию в GitHub Actions
 
 #### Интеграция
 
@@ -440,53 +440,46 @@ npm install
 npm run dev
 ```
 
-### Запуск bot.py в фоне
+### Деплой bot.py на Render.com
 
-**Через nohup (простой вариант):**
-```bash
-nohup python3 bot.py >> logs/bot.log 2>&1 &
-```
+`bot.py` работает как **webhook-сервер** (Flask), задеплоенный на Render.com free tier.
+Polling не используется — Telegram сам шлёт POST-запросы на `/webhook` при каждом нажатии кнопки.
 
-**Через systemd (рекомендуется для сервера):**
-```ini
-# /etc/systemd/system/competitor-bot.service
-[Unit]
-Description=Competitor Monitor Telegram Bot
-After=network.target
+**Почему не polling:** cron-скрипты запускаются в GitHub Actions (эфемерные контейнеры). Polling требует постоянно работающего процесса, который там недоступен. Webhook решает проблему без выделенного сервера.
 
-[Service]
-WorkingDirectory=/path/to/competitor-monitor
-ExecStart=/usr/bin/python3 bot.py
-Restart=always
-EnvironmentFile=/path/to/competitor-monitor/.env
+**Шаги деплоя на Render.com:**
 
-[Install]
-WantedBy=multi-user.target
-```
-```bash
-systemctl enable competitor-bot
-systemctl start competitor-bot
-```
+1. Создать новый **Web Service** из GitHub репо
+2. Build Command: `pip install -r requirements.txt`
+3. Start Command: `python bot.py` (или автоматически из `Procfile`)
+4. Добавить Environment Variables:
+   ```
+   SUPABASE_URL=https://xxx.supabase.co
+   SUPABASE_KEY=xxx
+   TELEGRAM_BOT_TOKEN=xxx
+   WEBHOOK_URL=https://your-app.onrender.com
+   ```
+5. После деплоя бот автоматически устанавливает webhook через `setWebhook` API
 
-**Через supervisor:**
-```ini
-# /etc/supervisor/conf.d/competitor-bot.conf
-[program:competitor-bot]
-directory=/path/to/competitor-monitor
-command=python3 bot.py
-autostart=true
-autorestart=true
-```
+**Endpoint'ы:**
+- `POST /webhook` — получает updates от Telegram
+- `GET /` — health check
 
 ### Переменные окружения
 
 ```bash
-# Backend (.env)
+# Backend — GitHub Actions secrets
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=xxx
 TELEGRAM_BOT_TOKEN=xxx
 TELEGRAM_CHAT_ID=xxx
 GROQ_API_KEY=xxx
+
+# bot.py — Render.com Environment Variables
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=xxx
+TELEGRAM_BOT_TOKEN=xxx
+WEBHOOK_URL=https://your-app.onrender.com  # URL выданный Render
 
 # Frontend (webapp/.env)
 VITE_SUPABASE_URL=https://xxx.supabase.co
@@ -495,8 +488,9 @@ VITE_SUPABASE_ANON_KEY=xxx
 
 ### Деплой
 
-- **Backend**: GitHub Actions (автоматический запуск)
-- **Frontend**: Vercel / Netlify (для prod) или Telegram Web App (текущий)
+- **Cron-скрипты** (`news_monitor.py`, `competitor_monitor.py`): GitHub Actions (эфемерные контейнеры)
+- **Telegram Bot** (`bot.py`): Render.com free tier (webhook-сервер, постоянно доступен)
+- **Frontend** (`webapp/`): Netlify
 - **База данных**: Supabase (managed PostgreSQL)
 
 ---

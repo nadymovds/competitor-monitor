@@ -1,6 +1,7 @@
 import asyncio
 import os
 
+from flask import Flask, request
 from supabase import create_client, Client
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
@@ -12,8 +13,12 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # https://your-app.onrender.com
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+app_flask = Flask(__name__)
+application: Application = None
 
 # ============================================================================
 # HANDLER
@@ -139,14 +144,42 @@ def format_post_card(post: dict) -> str:
 
 
 # ============================================================================
+# WEBHOOK ENDPOINT
+# ============================================================================
+
+@app_flask.post("/webhook")
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    asyncio.run(application.process_update(update))
+    return "ok"
+
+@app_flask.get("/")
+def health():
+    return "ok"
+
+
+# ============================================================================
 # ТОЧКА ВХОДА
 # ============================================================================
 
 def main():
+    global application
+
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CallbackQueryHandler(handle_show_posts, pattern=r"^show_posts:"))
-    print("Bot started. Polling...")
-    application.run_polling()
+
+    # Установить webhook при старте
+    import requests as req
+    webhook_endpoint = f"{WEBHOOK_URL}/webhook"
+    resp = req.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
+        json={"url": webhook_endpoint}
+    )
+    print(f"Webhook set: {resp.json()}")
+
+    port = int(os.environ.get("PORT", 8080))
+    print(f"Starting Flask on port {port}...")
+    app_flask.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
