@@ -2165,12 +2165,13 @@ print("✅ TG сканирование настроено")
 # ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================================
 
-async def run_monitoring_async():
+async def run_monitoring_async(mode='all'):
     print("🚀 Запуск мониторинга...")
     start_time = time.time()
-    
+
     init_semaphores()
-    send_telegram_message("🚀 <b>Запуск мониторинга конкурентов</b>")
+    mode_labels = {'all': 'конкурентов', 'websites': 'сайтов', 'telegram': 'TG-каналов'}
+    send_telegram_message(f"🚀 <b>Запуск мониторинга {mode_labels.get(mode, '')}</b>")
 
     current_date = datetime.now().strftime("%Y-%m-%d")
     report_id = generate_unique_id("report_")
@@ -2265,31 +2266,34 @@ async def run_monitoring_async():
 
             # Фаза 1: Batch-обработка веб-сайтов
             results = []
-            total_batches = (len(website_tasks) + BATCH_SIZE - 1) // BATCH_SIZE
+            if mode in ('all', 'websites'):
+                total_batches = (len(website_tasks) + BATCH_SIZE - 1) // BATCH_SIZE
 
-            for batch_idx in range(total_batches):
-                start_idx = batch_idx * BATCH_SIZE
-                end_idx = min(start_idx + BATCH_SIZE, len(website_tasks))
-                batch = website_tasks[start_idx:end_idx]
+                for batch_idx in range(total_batches):
+                    start_idx = batch_idx * BATCH_SIZE
+                    end_idx = min(start_idx + BATCH_SIZE, len(website_tasks))
+                    batch = website_tasks[start_idx:end_idx]
 
-                tasks = [
-                    scan_url_async(comp, url_info, summary_report_id, current_date, http_session, browser_context)
-                    for comp, url_info in batch
-                ]
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                results.extend(batch_results)
+                    tasks = [
+                        scan_url_async(comp, url_info, summary_report_id, current_date, http_session, browser_context)
+                        for comp, url_info in batch
+                    ]
+                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                    results.extend(batch_results)
 
-                processed = end_idx
-                print(f"📦 Батч {batch_idx + 1}/{total_batches}: обработано {processed}/{total_urls}")
+                    processed = end_idx
+                    print(f"📦 Батч {batch_idx + 1}/{total_batches}: обработано {processed}/{total_urls}")
 
-                # Пауза между батчами (кроме последнего)
-                if batch_idx < total_batches - 1:
-                    await asyncio.sleep(BATCH_DELAY)
+                    # Пауза между батчами (кроме последнего)
+                    if batch_idx < total_batches - 1:
+                        await asyncio.sleep(BATCH_DELAY)
 
             # Фаза 2: Сканирование Telegram-каналов конкурентов
-            tg_results = await scan_tg_channels_async(
-                tg_tasks, summary_report_id, browser_context, http_session
-            )
+            tg_results = []
+            if mode in ('all', 'telegram'):
+                tg_results = await scan_tg_channels_async(
+                    tg_tasks, summary_report_id, browser_context, http_session
+                )
 
             await browser_context.close()
             await browser.close()
@@ -2397,10 +2401,14 @@ async def run_monitoring_async():
     print("✅ Готово!")
 
 
-def run_monitoring_system():
-    asyncio.run(run_monitoring_async())
+def run_monitoring_system(mode='all'):
+    asyncio.run(run_monitoring_async(mode))
 
 print("✅ Система готова")
 
 if __name__ == "__main__":
-    run_monitoring_system()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['all', 'websites', 'telegram'], default='all')
+    args = parser.parse_args()
+    run_monitoring_system(args.mode)

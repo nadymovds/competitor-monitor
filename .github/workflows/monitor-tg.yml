@@ -1,39 +1,39 @@
-name: Competitor Monitor
+name: Competitor TG Monitor
 
-"on":
+on:
   schedule:
-    - cron: '0 15 * * 4'    # каждый четверг в 18:00 МСК (15:00 UTC)
+    - cron: '0 6 * * *'  # ежедневно в 09:00 МСК (06:00 UTC)
   workflow_dispatch:
 
 jobs:
-  monitor:
+  monitor-tg:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-dejavu-core
-      
+
       - name: Install Python dependencies
         run: |
           pip install -r requirements.txt
           playwright install chromium
           playwright install-deps chromium
-      
-      - name: Run monitoring script
+
+      - name: Run TG monitoring
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python monitor.py --mode websites
+        run: python monitor.py --mode telegram
