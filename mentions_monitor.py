@@ -516,35 +516,59 @@ async def search_yandex(term: str, session: aiohttp.ClientSession) -> list[dict]
         return []
 
     # 3. Парсим результаты
-    # Ответ Yandex Search API v2 содержит XML в поле rawData или структурированный JSON
+    # Yandex Search API v2 возвращает base64-encoded XML в поле rawData
+    import base64
+    import xml.etree.ElementTree as ET
+
+    raw_data = result_data.get("rawData") or result_data.get("raw_data")
+    if not raw_data:
+        print(f"  ⚠️ Yandex Search «{term}»: нет поля rawData в ответе")
+        return []
+
+    try:
+        xml_bytes = base64.b64decode(raw_data)
+        root = ET.fromstring(xml_bytes)
+    except Exception as e:
+        print(f"  ❌ Yandex Search «{term}»: ошибка декодирования XML: {e}")
+        return []
+
     results = []
-    groups = result_data.get("grouping", [{}])
-    for group in groups:
-        for doc in group.get("docGroup", [{}]):
-            for d in doc.get("doc", []):
-                url = d.get("url", "")
-                if not url:
-                    continue
-                title    = d.get("title", {}).get("#text", "") if isinstance(d.get("title"), dict) else str(d.get("title", ""))
-                snippet  = ""
-                passages = d.get("passages", {}).get("passage", [])
-                if isinstance(passages, list) and passages:
-                    snippet = str(passages[0])[:1000]
-                elif isinstance(passages, str):
-                    snippet = passages[:1000]
+    # Структура: yandexsearch/response/results/grouping/group/doc
+    for doc in root.findall(".//{http://www.yandex.ru/XMLsearch}doc") or root.findall(".//doc"):
+        url_el = doc.find("{http://www.yandex.ru/XMLsearch}url") or doc.find("url")
+        url = url_el.text.strip() if url_el is not None and url_el.text else ""
+        if not url:
+            continue
 
-                date_str = d.get("modtime") or d.get("pubDate") or ""
-                results.append({
-                    "title":           title[:500],
-                    "url":             url,
-                    "content_snippet": snippet,
-                    "post_date":       parse_date(date_str),
-                    "source_type":     "yandex",
-                    "search_term":     term,
-                    "source_name":     "Яндекс",
-                })
+        title_el = doc.find("{http://www.yandex.ru/XMLsearch}title") or doc.find("title")
+        title = "".join(title_el.itertext()).strip() if title_el is not None else ""
 
-    print(f"  🔴 Yandex «{term}»: {len(results)} результатов")
+        snippet = ""
+        for tag in ["passages", "extended-text", "headline"]:
+            ns_el = doc.find(f"{{http://www.yandex.ru/XMLsearch}}{tag}") or doc.find(tag)
+            if ns_el is not None:
+                snippet = "".join(ns_el.itertext()).strip()[:1000]
+                break
+
+        modtime_el = doc.find("{http://www.yandex.ru/XMLsearch}modtime") or doc.find("modtime")
+        date_str = modtime_el.text.strip() if modtime_el is not None and modtime_el.text else ""
+
+        results.append({
+            "title":           title[:500],
+            "url":             url,
+            "content_snippet": snippet,
+            "post_date":       parse_date(date_str),
+            "source_type":     "yandex",
+            "search_term":     term,
+            "source_name":     "Яндекс",
+        })
+
+    if not results:
+        # Отладка: показываем теги верхнего уровня XML
+        tags = [child.tag for child in root][:5]
+        print(f"  ⚠️ Yandex «{term}»: 0 результатов, XML теги: {tags}")
+    else:
+        print(f"  ✅ Yandex «{term}»: {len(results)} результатов")
     return results
 
 
