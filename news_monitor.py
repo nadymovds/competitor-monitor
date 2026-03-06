@@ -2058,7 +2058,7 @@ async def run_news_monitoring_async():
     summary_msg += error_summary
 
     if pdf_path and os.path.exists(pdf_path):
-        summary_msg += "\n\n📎 Подробный дайджест во вложении"
+        summary_msg += "\n\n📎 Подробный дайджест во вложении\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
         keyboard = None
         if digest_id:
             keyboard = {
