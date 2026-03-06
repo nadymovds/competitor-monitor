@@ -157,6 +157,12 @@ def webhook():
 def health():
     return "ok"
 
+@app_flask.get("/webhook-info")
+def webhook_info():
+    import requests as req
+    resp = req.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getWebhookInfo")
+    return resp.json()
+
 
 # ============================================================================
 # ТОЧКА ВХОДА
@@ -167,6 +173,9 @@ def main():
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CallbackQueryHandler(handle_show_posts, pattern=r"^show_posts:"))
+
+    # Инициализировать application (обязательно для v20+)
+    asyncio.run(application.initialize())
 
     # Установить webhook при старте
     import requests as req
