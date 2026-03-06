@@ -33,6 +33,13 @@
 - Дедупликация по content_hash
 - Генерация новостных дайджестов
 - Создание записей в `news_digests` для статистики
+- Отправка PDF с инлайн-кнопкой «Показать посты»
+
+**`bot.py`** - Telegram Bot с async polling
+- Обработка инлайн-кнопок (`CallbackQueryHandler`)
+- По нажатию «Показать посты» — отправляет посты дайджеста порциями по 10
+- Пагинация через callback_data: `show_posts:{digest_id}:{offset}`
+- Работает в фоне параллельно с cron-скриптами (постоянный процесс)
 
 #### Процесс мониторинга новостей
 
@@ -88,6 +95,7 @@ reportlab - генерация PDF
 beautifulsoup4 - парсинг HTML
 aiohttp - асинхронные HTTP-запросы
 python-dotenv - управление переменными окружения
+python-telegram-bot>=20.0 - async bot с polling (bot.py)
 ```
 
 ### 2. База данных (Supabase/PostgreSQL)
@@ -210,17 +218,23 @@ const { data, error } = await supabase
 
 - **Запуск сканирования** по требованию (создание записи в `scan_requests`)
 - **Управление расписанием** (сохранение в `bot_settings`)
-- **Отправка отчетов** - PDF-файлы и сводки дайджестов
+- **Отправка отчетов** - PDF-файлы с инлайн-кнопкой «Показать посты»
+- **Просмотр постов дайджеста** прямо в чате — порциями по 10
 - **Просмотр статистики** через Web App inline-кнопок
 - **Управление ролями** - назначение прав доступа пользователям
+
+#### Файлы
+
+- **`bot.py`** — постоянно работающий процесс с async polling, обрабатывает инлайн-кнопки
+- **`news_monitor.py`** / **`competitor_monitor.py`** — cron-скрипты, запускаются по расписанию
 
 #### Интеграция
 
 - Bot API для команд и сообщений
 - Web App Telegram (UI через `webapp/`)
+- Supabase для загрузки постов дайджеста (`news_digest_posts` → `news_posts`)
 - Запись в `bot_settings` для управления интервалами
 - Запись в `scan_requests` для запросов на сканирование
-- Запись `telegram_message_id` при отправке дайджестов
 
 #### Команды
 
@@ -232,6 +246,13 @@ const { data, error } = await supabase
 /settings - Управление расписанием
 /users - Управление ролями (admin)
 ```
+
+#### Инлайн-кнопки (CallbackQuery)
+
+| callback_data | Действие |
+|---|---|
+| `show_posts:{digest_id}:0` | Показать первые 10 постов дайджеста |
+| `show_posts:{digest_id}:{offset}` | Показать следующую порцию постов |
 
 ### 5. Автоматизация (GitHub Actions)
 
@@ -405,14 +426,56 @@ Python скрипты выводят подробные логи:
 ### Локальный запуск
 
 ```bash
-# Backend
+# Backend — cron-скрипты (запускать вручную или по расписанию)
 cd /path/to/competitor-monitor
 python3 news_monitor.py
+python3 competitor_monitor.py
+
+# Telegram Bot — постоянный процесс (запускать отдельно)
+python3 bot.py
 
 # Frontend
 cd webapp
 npm install
 npm run dev
+```
+
+### Запуск bot.py в фоне
+
+**Через nohup (простой вариант):**
+```bash
+nohup python3 bot.py >> logs/bot.log 2>&1 &
+```
+
+**Через systemd (рекомендуется для сервера):**
+```ini
+# /etc/systemd/system/competitor-bot.service
+[Unit]
+Description=Competitor Monitor Telegram Bot
+After=network.target
+
+[Service]
+WorkingDirectory=/path/to/competitor-monitor
+ExecStart=/usr/bin/python3 bot.py
+Restart=always
+EnvironmentFile=/path/to/competitor-monitor/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+systemctl enable competitor-bot
+systemctl start competitor-bot
+```
+
+**Через supervisor:**
+```ini
+# /etc/supervisor/conf.d/competitor-bot.conf
+[program:competitor-bot]
+directory=/path/to/competitor-monitor
+command=python3 bot.py
+autostart=true
+autorestart=true
 ```
 
 ### Переменные окружения

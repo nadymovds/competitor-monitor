@@ -5,3 +5,4 @@ lxml
 playwright
 aiohttp
 reportlab
+python-telegram-bot>=20.0

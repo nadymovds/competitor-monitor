@@ -324,7 +324,7 @@ def send_telegram_message(message: str) -> bool:
                 pass
     return success
 
-def send_telegram_document(file_path: str, caption: str = "") -> bool:
+def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict = None) -> bool:
     success = False
     chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
     for chat_id in chat_ids:
@@ -332,8 +332,10 @@ def send_telegram_document(file_path: str, caption: str = "") -> bool:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
                 with open(file_path, 'rb') as f:
-                    requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'},
-                                 files={'document': f}, timeout=60)
+                    data = {'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}
+                    if reply_markup:
+                        data['reply_markup'] = json.dumps(reply_markup)
+                    requests.post(url, data=data, files={'document': f}, timeout=60)
                 success = True
             except:
                 pass
@@ -2045,7 +2047,15 @@ async def run_news_monitoring_async():
 
     if pdf_path and os.path.exists(pdf_path):
         summary_msg += "\n\n📎 Подробный дайджест во вложении"
-        send_telegram_document(pdf_path, summary_msg)
+        keyboard = None
+        if digest_id:
+            keyboard = {
+                "inline_keyboard": [[
+                    {"text": f"📋 Показать посты ({total_digest_posts})",
+                     "callback_data": f"show_posts:{digest_id}:0"}
+                ]]
+            }
+        send_telegram_document(pdf_path, summary_msg, reply_markup=keyboard)
 
         # 15. Удаление временных файлов
         try:
