@@ -311,9 +311,24 @@ print("✅ Конфигурация загружена")
 # TELEGRAM
 # ============================================================================
 
+def get_notification_recipients() -> list:
+    recipients = []
+    for chat_id in [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]:
+        if chat_id:
+            recipients.append(chat_id)
+    try:
+        result = supabase.table("users").select("telegram_id").execute()
+        for row in result.data or []:
+            tid = str(row["telegram_id"])
+            if tid not in recipients:
+                recipients.append(tid)
+    except:
+        pass
+    return recipients
+
 def send_telegram_message(message: str) -> bool:
     success = False
-    chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
+    chat_ids = get_notification_recipients()
     for chat_id in chat_ids:
         if chat_id:
             try:
@@ -326,7 +341,7 @@ def send_telegram_message(message: str) -> bool:
 
 def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict = None) -> bool:
     success = False
-    chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
+    chat_ids = get_notification_recipients()
     for chat_id in chat_ids:
         if chat_id:
             try:
@@ -1636,10 +1651,7 @@ async def run_news_monitoring_async():
     # 1. Инициализация семафоров
     init_semaphores()
 
-    # 2. Уведомление о старте
-    send_telegram_message("🚀 <b>Запуск мониторинга новостей</b>\n📰 Сканирование источников...")
-
-    # 3. Загрузка источников из БД
+    # 2. Загрузка источников из БД
     all_sources = get_active_channels()
     if not all_sources:
         send_telegram_message("❌ Нет активных источников для мониторинга")

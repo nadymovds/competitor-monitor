@@ -149,9 +149,24 @@ print("✅ Конфигурация загружена")
 # TELEGRAM
 # ============================================================================
 
+def get_notification_recipients() -> list:
+    recipients = []
+    for chat_id in [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]:
+        if chat_id:
+            recipients.append(chat_id)
+    try:
+        result = supabase.table("users").select("telegram_id").execute()
+        for row in result.data or []:
+            tid = str(row["telegram_id"])
+            if tid not in recipients:
+                recipients.append(tid)
+    except:
+        pass
+    return recipients
+
 def send_telegram_message(message: str) -> bool:
     success = False
-    chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
+    chat_ids = get_notification_recipients()
     for chat_id in chat_ids:
         if chat_id:
             try:
@@ -164,7 +179,7 @@ def send_telegram_message(message: str) -> bool:
 
 def send_telegram_document(file_path: str, caption: str = "") -> bool:
     success = False
-    chat_ids = [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]
+    chat_ids = get_notification_recipients()
     for chat_id in chat_ids:
         if chat_id:
             try:
@@ -2170,8 +2185,6 @@ async def run_monitoring_async(mode='all'):
     start_time = time.time()
 
     init_semaphores()
-    mode_labels = {'all': 'конкурентов', 'websites': 'сайтов', 'telegram': 'TG-каналов'}
-    send_telegram_message(f"🚀 <b>Запуск мониторинга {mode_labels.get(mode, '')}</b>")
 
     current_date = datetime.now().strftime("%Y-%m-%d")
     report_id = generate_unique_id("report_")
