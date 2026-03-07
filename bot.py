@@ -105,6 +105,118 @@ async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+async def handle_show_tg_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    parts = query.data.split(":")
+    report_id = parts[1]
+    offset = int(parts[2])
+
+    result = (
+        supabase.table("competitor_tg_posts")
+        .select(
+            "id, channel_username, content_text, summary, title, post_url, "
+            "post_date, views_count, category, tags, "
+            "competitors(name)"
+        )
+        .eq("report_id", report_id)
+        .eq("is_meaningful", True)
+        .order("post_date", desc=False)
+        .execute()
+    )
+
+    if not result.data:
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Данные по TG-постам недоступны"
+        )
+        return
+
+    posts = result.data
+    total = len(posts)
+    batch = posts[offset: offset + 1]
+
+    for post in batch:
+        text = format_tg_post_card(post)
+        reply_markup = None
+        if post.get("post_url"):
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            reply_markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔗 Открыть в Telegram", url=post["post_url"])
+            ]])
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+            disable_web_page_preview=True
+        )
+        await asyncio.sleep(0.05)
+
+    shown_end = offset + len(batch)
+    if shown_end < total:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        nav_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"➡️ Следующий ({shown_end + 1}/{total})",
+                callback_data=f"show_tg_posts:{report_id}:{shown_end}"
+            )
+        ]])
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"📱 {shown_end} из {total}",
+            reply_markup=nav_markup
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"✅ Все {total} TG-постов показаны"
+        )
+
+
+def format_tg_post_card(post: dict) -> str:
+    competitor = post.get("competitors") or {}
+    competitor_name = competitor.get("name") or "Конкурент"
+    channel = post.get("channel_username") or ""
+    channel_str = f"@{channel}" if channel else ""
+
+    body = post.get("content_text") or post.get("summary") or post.get("title") or ""
+    if len(body) > 3800:
+        body = body[:3800] + "…"
+
+    post_date = post.get("post_date")
+    date_str = ""
+    if post_date:
+        from datetime import datetime
+        try:
+            dt = datetime.fromisoformat(post_date[:10])
+            months = ["января", "февраля", "марта", "апреля", "мая", "июня",
+                      "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+            date_str = f"\n📅 {dt.day} {months[dt.month - 1]} {dt.year}"
+        except Exception:
+            date_str = f"\n📅 {post_date[:10]}"
+
+    views_str = ""
+    views_count = post.get("views_count")
+    if views_count:
+        views_str = f"\n👁 {views_count:,}".replace(",", " ") + " просмотров"
+
+    category_icons = {
+        "products": "🏷️ Продукты",
+        "prices": "💰 Цены/акции",
+        "news": "📰 Новости",
+        "promotion": "📣 Продвижение",
+    }
+    category = post.get("category") or ""
+    category_str = f"\n🔖 {category_icons[category]}" if category in category_icons else ""
+
+    return f"📱 <b>{competitor_name}</b> {channel_str}\n\n{body}{date_str}{views_str}{category_str}"
+
+
 def format_post_card(post: dict) -> str:
     source_type = post.get("source_type", "")
     icon = "📱" if source_type == "telegram" else "🌐"
@@ -182,6 +294,7 @@ def main():
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CallbackQueryHandler(handle_show_posts, pattern=r"^show_posts:"))
+    application.add_handler(CallbackQueryHandler(handle_show_tg_posts, pattern=r"^show_tg_posts:"))
 
     # Инициализировать application в том же event loop
     asyncio.run_coroutine_threadsafe(application.initialize(), _loop).result()

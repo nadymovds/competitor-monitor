@@ -177,7 +177,7 @@ def send_telegram_message(message: str) -> bool:
                 pass
     return success
 
-def send_telegram_document(file_path: str, caption: str = "") -> bool:
+def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict = None) -> bool:
     success = False
     chat_ids = get_notification_recipients()
     for chat_id in chat_ids:
@@ -185,8 +185,10 @@ def send_telegram_document(file_path: str, caption: str = "") -> bool:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
                 with open(file_path, 'rb') as f:
-                    requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}, 
-                                 files={'document': f}, timeout=60)
+                    data = {'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}
+                    if reply_markup:
+                        data['reply_markup'] = json.dumps(reply_markup)
+                    requests.post(url, data=data, files={'document': f}, timeout=60)
                 success = True
             except:
                 pass
@@ -2379,9 +2381,35 @@ async def run_monitoring_async(mode='all'):
 
     success_rate = round(total_ok / total_urls * 100, 1) if total_urls > 0 else 0
 
-    tg_line = f"\n📱 TG-каналов: <b>{total_tg_channels}</b> (важных постов: {tg_meaningful_count})" if total_tg_channels > 0 else ""
+    keyboard = None
+    if tg_meaningful_count > 0:
+        keyboard = {
+            "inline_keyboard": [[
+                {"text": f"📱 Читать TG-посты ({tg_meaningful_count}) — по одному",
+                 "callback_data": f"show_tg_posts:{summary_report_id}:0"}
+            ]]
+        }
 
-    msg = f"""📊 <b>Мониторинг завершён</b>
+    if mode == 'telegram':
+        msg = f"""📱 <b>Мониторинг TG-каналов конкурентов завершён</b>
+
+📅 Дата: {current_date}
+⏱️ Время: {elapsed} сек
+📱 Каналов проверено: <b>{total_tg_channels}</b>
+
+✅ <b>Важных постов: {tg_meaningful_count}</b>
+   🏷️ Продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}
+   💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
+   📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
+   📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}
+
+📎 Подробный отчёт во вложении"""
+        if tg_meaningful_count > 0:
+            msg += "\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
+    else:
+        tg_line = f"\n📱 TG-каналов: <b>{total_tg_channels}</b> (важных постов: {tg_meaningful_count})" if total_tg_channels > 0 else ""
+
+        msg = f"""📊 <b>Мониторинг завершён</b>
 
 📅 Дата: {current_date}
 ⏱️ Время: {elapsed} сек
@@ -2403,8 +2431,10 @@ async def run_monitoring_async(mode='all'):
 {error_stats_text}
 
 📎 Подробный отчёт во вложении"""
+        if tg_meaningful_count > 0:
+            msg += "\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
 
-    send_telegram_document(pdf_path, msg)
+    send_telegram_document(pdf_path, msg, reply_markup=keyboard)
     
     try:
         os.remove(pdf_path)
