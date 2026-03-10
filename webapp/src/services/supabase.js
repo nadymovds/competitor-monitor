@@ -381,21 +381,20 @@ export async function getMentionSearchTerms() {
   return data
 }
 
-export async function createMentionSearchTerm({ term, description, matchType = 'partial' }) {
+export async function createMentionSearchTerm({ term, description }) {
   const { data, error } = await supabase
     .from('mention_search_terms')
-    .insert({ term, description: description || null, match_type: matchType })
+    .insert({ term, description: description || null })
     .select()
     .single()
   if (error) throw error
   return data
 }
 
-export async function updateMentionSearchTerm(id, { term, isActive, matchType }) {
+export async function updateMentionSearchTerm(id, { term, isActive }) {
   const updates = { updated_at: new Date().toISOString() }
   if (term !== undefined) updates.term = term
   if (isActive !== undefined) updates.is_active = isActive
-  if (matchType !== undefined) updates.match_type = matchType
 
   const { data, error } = await supabase
     .from('mention_search_terms')

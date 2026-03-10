@@ -107,22 +107,20 @@ def contains_any_term(text: str, terms: list[str]) -> bool:
     return any(t.lower() in text_lower for t in terms)
 
 
-def has_required_keyword(text: str, term: str, match_type: str = "partial") -> bool:
+def has_required_keyword(text: str, term: str) -> bool:
     """Проверяет обязательное вхождение ключевого слова в текст (до LLM).
 
-    match_type='full'    — весь термин должен присутствовать в тексте дословно.
-    match_type='partial' — достаточно первого значимого слова термина
-                           (первый токен при разбивке по пробелам/знакам).
+    Правило:
+    - Если термин содержит «skai» → в тексте обязательно должно быть «skai»
+    - Иначе (например «СМА-РТ») → требуется полное совпадение термина в тексте
     """
     if not term:
         return True
     text_lower = text.lower()
     term_lower = term.lower()
-    if match_type == "full":
-        return term_lower in text_lower
-    # partial: берём первое слово термина как обязательный ключевой маркер
-    first_word = re.split(r'[\s\-_./·]+', term_lower)[0] if term_lower else ''
-    return first_word in text_lower if first_word else True
+    if 'skai' in term_lower:
+        return 'skai' in text_lower
+    return term_lower in text_lower
 
 
 def extract_match_context(text: str, term: str, window: int = 200) -> str:
@@ -319,7 +317,7 @@ def parse_llm_json(response: str) -> dict | None:
         return None
 
 
-async def analyze_mention(text: str, url: str, search_term: str, match_type: str,
+async def analyze_mention(text: str, url: str, search_term: str,
                           session: aiohttp.ClientSession) -> tuple[str, str, bool]:
     """Определяет тональность, summary и релевантность упоминания через Groq.
 
@@ -330,29 +328,22 @@ async def analyze_mention(text: str, url: str, search_term: str, match_type: str
 
     # Python-уровень проверка: обязательное ключевое слово должно быть в тексте.
     # Если нет — LLM-вызов не нужен, сразу нерелевантно.
-    if not has_required_keyword(text, search_term, match_type):
+    if not has_required_keyword(text, search_term):
         return "neutral", "", False
 
     term_in_text = search_term.lower() in text.lower()
-    match_type_label = (
-        "ПОЛНОЕ — весь запрос должен присутствовать в тексте дословно"
-        if match_type == "full"
-        else "ЧАСТИЧНОЕ — достаточно присутствия первого ключевого слова (бренда)"
-    )
 
     prompt = f"""Оцени релевантность поискового результата для мониторинга упоминаний компании.
 
 ПОИСКОВЫЙ ЗАПРОС: «{search_term}»
-ТИП СОВПАДЕНИЯ: {match_type_label}
-ЗАПРОС ПРИСУТСТВУЕТ В ТЕКСТЕ: {"ДА" if term_in_text else "НЕТ — полная фраза отсутствует в сниппете"}
+ТЕРМИН ПРИСУТСТВУЕТ В ТЕКСТЕ: {"ДА" if term_in_text else "НЕТ — ТЕРМИН ОТСУТСТВУЕТ В СНИППЕТЕ"}
 URL: {url}
 ТЕКСТ СНИППЕТА: {text[:2000]}
 
-ПРАВИЛО №1 (ЖЁСТКОЕ): Если «ЗАПРОС ПРИСУТСТВУЕТ В ТЕКСТЕ» = НЕТ → проверь ТИП СОВПАДЕНИЯ.
-  - Если тип ПОЛНОЕ и фразы нет → is_relevant: false ОБЯЗАТЕЛЬНО.
-  - Если тип ЧАСТИЧНОЕ — допустимо, если первое слово запроса есть в тексте.
+ПРАВИЛО №1 (ЖЁСТКОЕ): Если «ТЕРМИН ПРИСУТСТВУЕТ В ТЕКСТЕ» = НЕТ → is_relevant: false ОБЯЗАТЕЛЬНО.
+Поисковик мог найти совпадение в другой части страницы, но нам нужно видеть упоминание в тексте.
 
-ПРАВИЛО №2: Даже если запрос есть в тексте, ставь is_relevant: false если:
+ПРАВИЛО №2: Даже если термин есть в тексте, ставь is_relevant: false если:
 - «{search_term}» просто в списке клиентов/партнёров/портфолио без события
 - Аббревиатура ООО/ЗАО/АО совпала случайно с другой компанией
 - Сайт — справочник юрлиц (audit-it.ru, rusprofile.ru, focus.kontur.ru, zachestnyibiznes.ru и т.п.)
@@ -389,19 +380,11 @@ is_relevant: true ТОЛЬКО если: есть конкретное собы�
 # SUPABASE — ОПЕРАЦИИ
 # ============================================================================
 
-def get_search_terms() -> list[dict]:
-    """Возвращает активные поисковые термины с типом совпадения.
-    Каждый элемент: {"term": str, "match_type": "partial"|"full"}
-    """
+def get_search_terms() -> list[str]:
+    """Возвращает активные поисковые термины."""
     try:
-        result = (supabase.table("mention_search_terms")
-                  .select("term, match_type")
-                  .eq("is_active", True)
-                  .execute())
-        return [
-            {"term": row["term"], "match_type": row.get("match_type") or "partial"}
-            for row in (result.data or []) if row.get("term")
-        ]
+        result = supabase.table("mention_search_terms").select("term").eq("is_active", True).execute()
+        return [row["term"] for row in (result.data or []) if row.get("term")]
     except Exception as e:
         print(f"❌ Ошибка получения поисковых терминов: {e}")
         return []
@@ -990,18 +973,6 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
         print("  ℹ️ Необработанных упоминаний нет")
         return 0, 0
 
-    # Загружаем типы совпадения для быстрого поиска по тексту термина
-    try:
-        terms_result = (supabase.table("mention_search_terms")
-                        .select("term, match_type")
-                        .execute())
-        match_type_map = {
-            row["term"].lower(): row.get("match_type") or "partial"
-            for row in (terms_result.data or [])
-        }
-    except Exception:
-        match_type_map = {}
-
     print(f"  🤖 Обрабатываю {len(mentions)} упоминаний через LLM...")
     processed = 0
     deleted   = 0
@@ -1010,9 +981,8 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
         try:
             text        = mention.get("content_snippet") or mention.get("title") or ""
             search_term = mention.get("search_term") or ""
-            match_type  = match_type_map.get(search_term.lower(), "partial")
             sentiment, summary, is_relevant = await analyze_mention(
-                text, mention.get("url", ""), search_term, match_type, session
+                text, mention.get("url", ""), search_term, session
             )
             if not is_relevant:
                 delete_mention(mention["id"])
@@ -1168,17 +1138,14 @@ async def run_mentions_monitoring():
     IGNORED_PATTERNS = get_ignored_patterns()
     print(f"🚫 Игнорируемых источников: {len(IGNORED_PATTERNS)}")
 
-    search_term_configs = get_search_terms()  # list[{"term": str, "match_type": str}]
-    if not search_term_configs:
+    search_terms = get_search_terms()
+    if not search_terms:
         msg = "❌ Нет активных поисковых терминов — мониторинг упоминаний отменён"
         print(msg)
         send_telegram_message(msg)
         if scan_id:
             fail_scan(scan_id, "Нет активных поисковых терминов")
         return
-
-    # Список строк — для совместимости с функциями, принимающими list[str]
-    search_terms = [t["term"] for t in search_term_configs]
 
     sources = get_mention_sources()
     tg_sources  = [s for s in sources if s.get("source_type") == "telegram"]
