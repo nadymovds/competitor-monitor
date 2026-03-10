@@ -1,27 +1,47 @@
 import React from 'react'
 import { openLink, hapticFeedback } from '../../services/telegram'
 
-// Извлекает фрагмент текста вокруг первого вхождения term (±120 символов)
+// Находит первое вхождение term (или его значимой части) в тексте.
+// Возвращает { idx, matchLen } или null.
+function findMatch(lower, termLower) {
+  if (!termLower) return null
+
+  // 1. Полное совпадение
+  const idx = lower.indexOf(termLower)
+  if (idx !== -1) return { idx, matchLen: termLower.length }
+
+  // 2. Fallback: разбиваем по пробелу/точке/дефису, ищем самую длинную часть
+  const parts = termLower.split(/[\s.·\-_]+/).filter(p => p.length > 2)
+  parts.sort((a, b) => b.length - a.length) // от длинных к коротким
+  for (const part of parts) {
+    const i = lower.indexOf(part)
+    if (i !== -1) return { idx: i, matchLen: part.length }
+  }
+
+  return null
+}
+
+// Извлекает фрагмент текста вокруг первого вхождения term (±250 символов)
 // и подсвечивает совпадение
 function HighlightedSnippet({ text, term }) {
   if (!text) return null
 
-  const lower = text.toLowerCase()
+  const lower    = text.toLowerCase()
   const termLower = (term || '').toLowerCase().trim()
-  const idx = termLower ? lower.indexOf(termLower) : -1
+  const found    = findMatch(lower, termLower)
 
-  if (idx === -1) {
-    // keyword не найден — показываем начало текста
+  if (!found) {
     return <span>{text.slice(0, 400)}{text.length > 400 ? '…' : ''}</span>
   }
 
+  const { idx, matchLen } = found
   const WINDOW = 250
-  const start = Math.max(0, idx - WINDOW)
-  const end   = Math.min(text.length, idx + termLower.length + WINDOW)
+  const start  = Math.max(0, idx - WINDOW)
+  const end    = Math.min(text.length, idx + matchLen + WINDOW)
 
-  const before  = (start > 0 ? '…' : '') + text.slice(start, idx)
-  const match   = text.slice(idx, idx + termLower.length)
-  const after   = text.slice(idx + termLower.length, end) + (end < text.length ? '…' : '')
+  const before = (start > 0 ? '…' : '') + text.slice(start, idx)
+  const match  = text.slice(idx, idx + matchLen)
+  const after  = text.slice(idx + matchLen, end) + (end < text.length ? '…' : '')
 
   return (
     <span>
