@@ -90,9 +90,11 @@ export default function MentionsScreen() {
         dateFrom = new Date(customFrom + 'T00:00:00')
         dateTo   = new Date(customTo   + 'T23:59:59')
       } else {
-        dateTo   = new Date()
+        dateTo = new Date()
+        dateTo.setHours(23, 59, 59, 999)
         dateFrom = new Date()
         dateFrom.setDate(dateFrom.getDate() - dateRange)
+        dateFrom.setHours(0, 0, 0, 0)
       }
 
       const sourceTypes = selectedSource !== 'all' ? [selectedSource] : []
