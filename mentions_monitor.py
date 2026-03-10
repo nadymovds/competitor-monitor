@@ -11,7 +11,7 @@ import asyncio
 import random
 import time
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 import aiohttp
@@ -119,6 +119,50 @@ def extract_match_context(text: str, term: str, window: int = 200) -> str:
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
     return prefix + text[start:end] + suffix
+
+
+# Список игнорируемых источников (загружается из БД в run_mentions_monitoring)
+IGNORED_PATTERNS: list[str] = []
+
+
+def is_url_ignored(url: str, patterns: list[str]) -> bool:
+    """Возвращает True если URL соответствует одному из игнорируемых паттернов.
+
+    Паттерны без "/" — доменные (skai.online → skai.online + *.skai.online).
+    Паттерны с "/"  — путевые  (t.me/skai_online — точное совпадение пути).
+    """
+    if not url or not patterns:
+        return False
+    try:
+        parsed   = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        path     = parsed.path or ""
+    except Exception:
+        return False
+
+    for pattern in patterns:
+        pattern = pattern.strip().lower()
+        if "/" in pattern:
+            # Путевой паттерн: t.me/skai_online
+            pat_host, pat_path = pattern.split("/", 1)
+            pat_path = "/" + pat_path
+            if hostname == pat_host and (path == pat_path or path.startswith(pat_path + "/")):
+                return True
+        else:
+            # Доменный паттерн с поддоменами
+            if hostname == pattern or hostname.endswith("." + pattern):
+                return True
+    return False
+
+
+def get_ignored_patterns() -> list[str]:
+    """Загружает паттерны игнорируемых источников из БД."""
+    try:
+        result = supabase.table("mention_ignored_sources").select("pattern").execute()
+        return [row["pattern"] for row in (result.data or []) if row.get("pattern")]
+    except Exception as e:
+        print(f"⚠️ Не удалось загрузить игнорируемые источники: {e}")
+        return []
 
 
 MONTHS_RU = {
@@ -380,6 +424,10 @@ def save_mention(data: dict) -> bool:
     """INSERT упоминания. При дубликате URL обновляет scan_id (чтобы запись была видна
     в текущем скане), но сохраняет оригинальный created_at (дата первого обнаружения).
     Возвращает True если запись новая."""
+    url = data.get("url", "")
+    if url and is_url_ignored(url, IGNORED_PATTERNS):
+        print(f"  🚫 Игнорируем (в списке исключений): {url[:80]}")
+        return False
     try:
         result = supabase.table("mentions").insert(data).execute()
         return bool(result.data)
@@ -1065,6 +1113,10 @@ async def run_mentions_monitoring():
     scan_id = create_scan()
 
     # 2. Загружаем данные
+    global IGNORED_PATTERNS
+    IGNORED_PATTERNS = get_ignored_patterns()
+    print(f"🚫 Игнорируемых источников: {len(IGNORED_PATTERNS)}")
+
     search_terms = get_search_terms()
     if not search_terms:
         msg = "❌ Нет активных поисковых терминов — мониторинг упоминаний отменён"

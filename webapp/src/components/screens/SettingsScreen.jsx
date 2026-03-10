@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { hapticFeedback, showAlert, showConfirm } from '../../services/telegram'
-import { createGroup, updateGroup, deleteGroup, getMentionSearchTerms, createMentionSearchTerm, updateMentionSearchTerm, deleteMentionSearchTerm, getMentionSources, createMentionSource, updateMentionSource, deleteMentionSource } from '../../services/supabase'
+import { createGroup, updateGroup, deleteGroup, getMentionSearchTerms, createMentionSearchTerm, updateMentionSearchTerm, deleteMentionSearchTerm, getMentionSources, createMentionSource, updateMentionSource, deleteMentionSource, getMentionIgnoredSources, createMentionIgnoredSource, deleteMentionIgnoredSource } from '../../services/supabase'
 import {
   getNewsCategories, getAllNewsChannels,
   createCategory, updateCategory, toggleCategoryVisibility, deleteCategory as deleteCategoryApi,
@@ -67,6 +67,11 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   const [editMsUrl, setEditMsUrl] = useState('')
   const [editMsCssConfig, setEditMsCssConfig] = useState('')
 
+  // Ignored sources state
+  const [ignoredSources, setIgnoredSources] = useState([])
+  const [showNewIgnoredForm, setShowNewIgnoredForm] = useState(false)
+  const [newIgnoredPattern, setNewIgnoredPattern] = useState('')
+
   const isAdmin = user?.role === 'admin'
   const soon = () => { hapticFeedback('warning'); showAlert('Эта функция скоро будет доступна') }
 
@@ -88,9 +93,10 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     if (!isAdmin) return
     async function loadMentionSettings() {
       try {
-        const [terms, sources] = await Promise.all([getMentionSearchTerms(), getMentionSources()])
+        const [terms, sources, ignored] = await Promise.all([getMentionSearchTerms(), getMentionSources(), getMentionIgnoredSources()])
         setMentionTerms(terms)
         setMentionSources(sources)
+        setIgnoredSources(ignored)
       } catch (err) {
         console.error('Error loading mention settings:', err)
       }
@@ -612,6 +618,47 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     } catch (err) {
       hapticFeedback('error')
       showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // --- Ignored sources handlers ---
+
+  const handleCreateIgnoredSource = async () => {
+    if (!newIgnoredPattern.trim()) {
+      hapticFeedback('error')
+      showAlert('Введите домен или путь (например: example.com или t.me/channel_name)')
+      return
+    }
+    hapticFeedback('light')
+    setSaving(true)
+    try {
+      const created = await createMentionIgnoredSource({ pattern: newIgnoredPattern.trim() })
+      setIgnoredSources(prev => [...prev, created])
+      setShowNewIgnoredForm(false)
+      setNewIgnoredPattern('')
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка создания: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteIgnoredSource = async (src) => {
+    hapticFeedback('warning')
+    const confirmed = await showConfirm(`Удалить "${src.pattern}" из списка игнорируемых?`)
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      await deleteMentionIgnoredSource(src.id)
+      setIgnoredSources(prev => prev.filter(s => s.id !== src.id))
+      hapticFeedback('success')
+    } catch (err) {
+      hapticFeedback('error')
+      showAlert('Ошибка удаления: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -1241,6 +1288,57 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
           {!showNewMentionSourceForm && (
             <button onClick={() => { hapticFeedback('light'); setShowNewMentionSourceForm(true); setEditingMentionSource(null) }} style={addBtnStyle}>
               + Добавить источник
+            </button>
+          )}
+        </Section>
+      )}
+
+      {/* Игнорируемые источники — только для админов */}
+      {isAdmin && (
+        <Section title="Игнорируемые источники" count={ignoredSources.length}>
+          <div style={{ padding: '8px 16px 4px', fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>
+            Упоминания с этих сайтов и каналов не сохраняются. Домены игнорируются с поддоменами. Для TG-каналов укажите путь: t.me/channel_name
+          </div>
+          {ignoredSources.map((src, i) => (
+            <div key={src.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: '1px solid #2a2a3a' }}>
+              <div style={{ overflow: 'hidden', flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, color: '#fff', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{src.pattern}</div>
+                {src.description && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{src.description}</div>}
+              </div>
+              <button
+                onClick={() => handleDeleteIgnoredSource(src)}
+                disabled={saving}
+                style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 18, cursor: 'pointer', flexShrink: 0, padding: '0 0 0 12px', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {showNewIgnoredForm && (
+            <div style={{ padding: 16, borderTop: '1px solid #2a2a3a' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input
+                  type="text"
+                  value={newIgnoredPattern}
+                  onChange={(e) => setNewIgnoredPattern(e.target.value)}
+                  placeholder="example.com или t.me/channel_name"
+                  style={inputStyle}
+                  autoFocus
+                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleCreateIgnoredSource} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Добавление...' : 'Добавить'}
+                  </button>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewIgnoredForm(false); setNewIgnoredPattern('') }} disabled={saving} style={btnSecondary}>Отмена</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!showNewIgnoredForm && (
+            <button onClick={() => { hapticFeedback('light'); setShowNewIgnoredForm(true) }} style={addBtnStyle}>
+              + Добавить исключение
             </button>
           )}
         </Section>

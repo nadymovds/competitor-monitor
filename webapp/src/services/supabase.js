@@ -470,6 +470,35 @@ export async function deleteMentionSource(id) {
   if (error) throw error
 }
 
+// === Функции для игнорируемых источников упоминаний ===
+
+export async function getMentionIgnoredSources() {
+  const { data, error } = await supabase
+    .from('mention_ignored_sources')
+    .select('*')
+    .order('created_at')
+  if (error) throw error
+  return data
+}
+
+export async function createMentionIgnoredSource({ pattern, description }) {
+  const { data, error } = await supabase
+    .from('mention_ignored_sources')
+    .insert({ pattern: pattern.trim(), description: description?.trim() || null })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteMentionIgnoredSource(id) {
+  const { error } = await supabase
+    .from('mention_ignored_sources')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
 export async function getCompetitorScanDetails(reportId) {
   // Получаем изменения на сайтах
   const { data: changes, error: changesError } = await supabase
