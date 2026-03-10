@@ -1361,8 +1361,8 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
       )}
 
       <div style={{ textAlign: 'center', padding: '20px 0', marginTop: 20 }}>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия 1.0.0</div>
-        <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 Competitor Monitor</div>
+        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия {import.meta.env.VITE_APP_VERSION}</div>
+        <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 SKAI Eye</div>
       </div>
     </div>
   )
