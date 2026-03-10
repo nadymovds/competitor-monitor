@@ -164,14 +164,17 @@ def get_notification_recipients() -> list:
         pass
     return recipients
 
-def send_telegram_message(message: str) -> bool:
+def send_telegram_message(message: str, reply_markup: dict = None) -> bool:
     success = False
     chat_ids = get_notification_recipients()
     for chat_id in chat_ids:
         if chat_id:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=30)
+                payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+                if reply_markup:
+                    payload["reply_markup"] = json.dumps(reply_markup)
+                requests.post(url, json=payload, timeout=30)
                 success = True
             except:
                 pass
@@ -1269,6 +1272,7 @@ def generate_pdf_report(
     sections = [
         (CATEGORY_PRODUCTS, "🏷️ НОВЫЕ ПРОДУКТЫ И УСЛУГИ"),
         (CATEGORY_PRICES, "💰 ЦЕНЫ И АКЦИИ"),
+        (CATEGORY_SERVICES, "🛠️ СЕРВИС И ОБСЛУЖИВАНИЕ"),
         (CATEGORY_NEWS, "📰 НОВОСТИ"),
         (CATEGORY_PROMOTION, "📣 ПРОДВИЖЕНИЕ"),
     ]
@@ -1762,7 +1766,7 @@ def get_existing_tg_content_hashes(competitor_id: str, days: int = 14) -> set:
 
 
 def mark_tg_post_processed(post_id: int, title: str, summary: str,
-                           category: str, tags: list) -> bool:
+                           category: str, tags: list, is_meaningful: bool = False) -> bool:
     """Обновляет пост после LLM-анализа."""
     try:
         data = {
@@ -1771,6 +1775,7 @@ def mark_tg_post_processed(post_id: int, title: str, summary: str,
             'category': category,
             'tags': tags or [],
             'is_processed': True,
+            'is_meaningful': is_meaningful,
         }
 
         result = supabase.table('competitor_tg_posts') \
@@ -2120,7 +2125,8 @@ async def scan_tg_channels_async(
                     category = analysis.get('category', CATEGORY_OTHER)
                     tags = analysis.get('tags', [])
 
-                    mark_tg_post_processed(post_id, title, summary, category, tags)
+                    mark_tg_post_processed(post_id, title, summary, category, tags,
+                                           is_meaningful=analysis.get('is_meaningful', False))
 
                     return {
                         'post_id': post_id,
@@ -2400,12 +2406,22 @@ async def run_monitoring_async(mode='all'):
 ✅ <b>Важных постов: {tg_meaningful_count}</b>
    🏷️ Продукты: {len(categorized_changes[CATEGORY_PRODUCTS])}
    💰 Цены/акции: {len(categorized_changes[CATEGORY_PRICES])}
+   🛠️ Сервис: {len(categorized_changes[CATEGORY_SERVICES])}
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
-   📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}
-
-📎 Подробный отчёт во вложении"""
+   📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}"""
         if tg_meaningful_count > 0:
+            msg += "\n\n📎 Сводка во вложении · подробно с фильтрами — в мини-приложении (кнопка ниже)"
             msg += "\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
+        if tg_meaningful_count == 0:
+            send_telegram_message(msg, reply_markup=keyboard)
+        else:
+            send_telegram_document(pdf_path, msg, reply_markup=keyboard)
+        try:
+            os.remove(pdf_path)
+        except:
+            pass
+        print("✅ Готово!")
+        return
     else:
         tg_line = f"\n📱 TG-каналов: <b>{total_tg_channels}</b> (важных постов: {tg_meaningful_count})" if total_tg_channels > 0 else ""
 
@@ -2430,7 +2446,7 @@ async def run_monitoring_async(mode='all'):
 ⚠️ <b>Неуспешно: {len(failed_sites)}</b>
 {error_stats_text}
 
-📎 Подробный отчёт во вложении"""
+📎 Сводка во вложении · подробно с фильтрами — в мини-приложении (кнопка ниже)"""
         if tg_meaningful_count > 0:
             msg += "\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
 
