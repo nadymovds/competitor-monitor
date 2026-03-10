@@ -1,6 +1,6 @@
 {
   "name": "competitor-monitor-webapp",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "Telegram Mini App для мониторинга конкурентов",
   "type": "module",
   "scripts": {
