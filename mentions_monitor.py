@@ -106,6 +106,20 @@ def contains_any_term(text: str, terms: list[str]) -> bool:
     return any(t.lower() in text_lower for t in terms)
 
 
+def extract_match_context(text: str, term: str, window: int = 200) -> str:
+    """Возвращает фрагмент текста ±window символов вокруг первого вхождения term."""
+    if not text or not term:
+        return text[:400] if text else ""
+    idx = text.lower().find(term.lower())
+    if idx == -1:
+        return text[:400]
+    start = max(0, idx - window)
+    end   = min(len(text), idx + len(term) + window)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return prefix + text[start:end] + suffix
+
+
 MONTHS_RU = {
     "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
     "мая": 5, "июня": 6, "июля": 7, "августа": 8,
@@ -242,41 +256,51 @@ def parse_llm_json(response: str) -> dict | None:
         return None
 
 
-async def analyze_mention(text: str, url: str, session: aiohttp.ClientSession) -> tuple[str, str]:
-    """Определяет тональность и summary упоминания через Groq.
+async def analyze_mention(text: str, url: str, search_term: str,
+                          session: aiohttp.ClientSession) -> tuple[str, str, bool]:
+    """Определяет тональность, summary и релевантность упоминания через Groq.
 
-    Returns: (sentiment, summary) — ('positive'|'negative'|'neutral', str)
+    Returns: (sentiment, summary, is_relevant)
     """
     if not text or len(text.strip()) < 20:
-        return "neutral", ""
+        return "neutral", "", True
 
-    prompt = f"""Проанализируй текст упоминания компании.
+    prompt = f"""Проанализируй, является ли этот текст реальным упоминанием компании/продукта.
 
+ПОИСКОВЫЙ ЗАПРОС: «{search_term}»
 URL: {url}
 ТЕКСТ: {text[:2000]}
 
-Выполни две задачи:
-1. ТОНАЛЬНОСТЬ: определи тональность упоминания компании.
+Выполни три задачи:
+
+1. РЕЛЕВАНТНОСТЬ: действительно ли в тексте упоминается именно «{search_term}» как компания,
+   продукт или бренд? Если поисковый запрос нашёл случайное совпадение слов без связи с
+   компанией — это нерелевантный результат (is_relevant: false).
+   Примеры нерелевантного: аббревиатура «ООО» совпала со словом «ооо», общее слово попало
+   в несвязанный текст, TikTok/соцсеть без явного упоминания бренда.
+
+2. ТОНАЛЬНОСТЬ (только если релевантно):
    - positive — позитивная (похвала, успех, достижения)
    - negative — негативная (критика, проблемы, жалобы)
    - neutral — нейтральная (факты, новости без оценки)
 
-2. РЕЗЮМЕ: краткое описание сути упоминания, максимум 200 символов, на русском языке.
+3. РЕЗЮМЕ (только если релевантно): суть упоминания, максимум 150 символов, на русском.
    Не используй фразы "В тексте говорится", "Автор пишет".
 
 Отвечай ТОЛЬКО JSON без пояснений:
-{{"sentiment": "neutral", "summary": "Краткое описание"}}"""
+{{"is_relevant": true, "sentiment": "neutral", "summary": "Краткое описание"}}"""
 
-    response = await call_llm_async(prompt, session, max_tokens=200)
+    response = await call_llm_async(prompt, session, max_tokens=250)
     data = parse_llm_json(response)
     if not data:
-        return "neutral", ""
+        return "neutral", "", True  # при ошибке оставляем, не удаляем
 
+    is_relevant = bool(data.get("is_relevant", True))
     sentiment = data.get("sentiment", "neutral")
     if sentiment not in ("positive", "negative", "neutral"):
         sentiment = "neutral"
     summary = str(data.get("summary", "")).strip()[:200]
-    return sentiment, summary
+    return sentiment, summary, is_relevant
 
 
 # ============================================================================
@@ -391,6 +415,14 @@ def update_mention_analysis(mention_id: int, sentiment: str, summary: str) -> No
         }).eq("id", mention_id).execute()
     except Exception as e:
         print(f"  ⚠️ Ошибка обновления упоминания {mention_id}: {e}")
+
+
+def delete_mention(mention_id: int) -> None:
+    """Удаляет нерелевантное упоминание из БД."""
+    try:
+        supabase.table("mentions").delete().eq("id", mention_id).execute()
+    except Exception as e:
+        print(f"  ⚠️ Ошибка удаления упоминания {mention_id}: {e}")
 
 
 # ============================================================================
@@ -854,30 +886,42 @@ async def scan_website(source: dict, search_terms: list[str], browser_context) -
 # LLM-ОБРАБОТКА НЕОБРАБОТАННЫХ УПОМИНАНИЙ
 # ============================================================================
 
-async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> int:
-    """Обрабатывает все необработанные упоминания через LLM пачками."""
+async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[int, int]:
+    """Обрабатывает все необработанные упоминания через LLM пачками.
+
+    Returns: (processed_count, deleted_count)
+    """
     mentions = get_unprocessed_mentions()
     if not mentions:
         print("  ℹ️ Необработанных упоминаний нет")
-        return 0
+        return 0, 0
 
     print(f"  🤖 Обрабатываю {len(mentions)} упоминаний через LLM...")
     processed = 0
+    deleted   = 0
 
     for i, mention in enumerate(mentions):
         try:
-            text = mention.get("content_snippet") or mention.get("title") or ""
-            sentiment, summary = await analyze_mention(text, mention.get("url", ""), session)
-            update_mention_analysis(mention["id"], sentiment, summary)
-            processed += 1
-            print(f"    [{i+1}/{len(mentions)}] ID={mention['id']} → {sentiment} | {summary[:60]}")
+            text        = mention.get("content_snippet") or mention.get("title") or ""
+            search_term = mention.get("search_term") or ""
+            sentiment, summary, is_relevant = await analyze_mention(
+                text, mention.get("url", ""), search_term, session
+            )
+            if not is_relevant:
+                delete_mention(mention["id"])
+                deleted += 1
+                print(f"    [{i+1}/{len(mentions)}] ID={mention['id']} → ❌ НЕРЕЛЕВАНТНО, удалено")
+            else:
+                update_mention_analysis(mention["id"], sentiment, summary)
+                processed += 1
+                print(f"    [{i+1}/{len(mentions)}] ID={mention['id']} → {sentiment} | {summary[:60]}")
         except Exception as e:
             print(f"    ❌ Ошибка обработки {mention['id']}: {e}")
 
         if i < len(mentions) - 1:
             await asyncio.sleep(LLM_BATCH_PAUSE)
 
-    return processed
+    return processed, deleted
 
 
 # ============================================================================
@@ -987,7 +1031,8 @@ async def run_mentions_monitoring():
         print(f"ФАЗА 2: СОХРАНЕНИЕ ({len(all_results)} результатов)")
         print("=" * 60)
 
-        new_count = 0
+        new_count    = 0
+        skipped_count = 0
         seen_urls: set[str] = set()
 
         for item in all_results:
@@ -996,15 +1041,33 @@ async def run_mentions_monitoring():
                 continue
             seen_urls.add(url)
 
+            term    = item.get("search_term", "")
+            title   = item.get("title", "")
+            snippet = item.get("content_snippet", "")
+
+            # Pre-save heuristic фильтр: для поисковых результатов (Yandex/Google)
+            # проверяем, что keyword реально присутствует в title+snippet.
+            # TG и website уже фильтруются через contains_any_term при парсинге.
+            if item.get("source_type") in ("yandex", "website") and term:
+                combined = f"{title} {snippet}"
+                if not contains_any_term(combined, [term]):
+                    skipped_count += 1
+                    print(f"  ⚠️ Пропущено (нет ключевого слова в сниппете): {url[:80]}")
+                    continue
+
+            # Для всех источников: обрезаем snippet до контекстного окна вокруг keyword
+            if term and snippet:
+                snippet = extract_match_context(snippet, term, window=200)
+
             post_date = item.get("post_date")
             data = {
                 "scan_id":         scan_id,
                 "source_type":     item.get("source_type", "website"),
                 "url":             url,
-                "title":           item.get("title", "")[:500],
-                "content_snippet": item.get("content_snippet", "")[:1000],
+                "title":           title[:500],
+                "content_snippet": snippet[:1000],
                 "post_date":       post_date.isoformat() if post_date else None,
-                "search_term":     item.get("search_term", "")[:255],
+                "search_term":     term[:255],
                 "source_name":     item.get("source_name", "")[:255],
                 "is_processed":    False,
             }
@@ -1014,14 +1077,16 @@ async def run_mentions_monitoring():
             else:
                 print(f"  🔁 Дубликат: {url[:80]}")
 
+        print(f"\n  🚫 Отфильтровано (нет keyword в сниппете): {skipped_count}")
+
         print(f"\n📊 Сохранено новых упоминаний: {new_count} из {len(all_results)} найденных")
 
         # === ФАЗА 3: LLM-обработка ===
         print("\n" + "=" * 60)
         print("ФАЗА 3: LLM-АНАЛИЗ ТОНАЛЬНОСТИ")
         print("=" * 60)
-        processed_count = await process_unprocessed_mentions(http_session)
-        print(f"✅ Обработано LLM: {processed_count}")
+        processed_count, deleted_count = await process_unprocessed_mentions(http_session)
+        print(f"✅ Обработано LLM: {processed_count}, удалено нерелевантных: {deleted_count}")
 
     # Завершение
     elapsed = int(time.time() - start_time)
@@ -1036,6 +1101,7 @@ async def run_mentions_monitoring():
 
 🆕 Новых упоминаний: <b>{new_count}</b>
 🤖 Обработано LLM: <b>{processed_count}</b>
+🗑 Удалено нерелевантных: <b>{deleted_count}</b>
 ⏱️ Время: {elapsed} сек"""
 
     print(f"\n{summary_msg}")
