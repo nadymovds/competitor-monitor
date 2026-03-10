@@ -107,32 +107,20 @@ def contains_any_term(text: str, terms: list[str]) -> bool:
     return any(t.lower() in text_lower for t in terms)
 
 
-# Предлоги и союзы, которые не несут смысла для поиска бренда
-_STOP_WORDS = {
-    'для', 'в', 'на', 'с', 'и', 'или', 'не', 'от', 'по', 'из', 'при',
-    'без', 'под', 'над', 'о', 'об', 'за', 'до', 'со', 'но', 'что', 'как',
-    'так', 'уже', 'все', 'при', 'это', 'то', 'я', 'он', 'мы',
-}
+def has_required_keyword(text: str, term: str) -> bool:
+    """Проверяет обязательное вхождение ключевого слова в текст (до LLM).
 
-
-def has_core_words(text: str, term: str) -> bool:
-    """Возвращает True если хотя бы одно ключевое слово из поискового термина
-    встречается в тексте. Игнорирует стоп-слова и слова короче 3 символов.
-
-    Это Python-уровень фильтр, который работает ДО LLM и отбрасывает записи
-    где Яндекс нашёл совпадение по части фразы (например «для автопарков»),
-    но сам бренд (например «skai») в сниппете отсутствует.
+    Правило:
+    - Если термин содержит «skai» → в тексте обязательно должно быть «skai»
+    - Иначе (например «СМА-РТ») → требуется полное совпадение термина в тексте
     """
     if not term:
         return True
     text_lower = text.lower()
-    words = [
-        w for w in re.split(r'[\s\-_./·]+', term.lower())
-        if len(w) >= 3 and w not in _STOP_WORDS
-    ]
-    if not words:
-        return True  # термин состоит только из стоп-слов — пропускаем проверку
-    return any(w in text_lower for w in words)
+    term_lower = term.lower()
+    if 'skai' in term_lower:
+        return 'skai' in text_lower
+    return term_lower in text_lower
 
 
 def extract_match_context(text: str, term: str, window: int = 200) -> str:
@@ -338,9 +326,9 @@ async def analyze_mention(text: str, url: str, search_term: str,
     if not text or len(text.strip()) < 20:
         return "neutral", "", True
 
-    # Python-уровень проверка: хотя бы одно смысловое слово из термина должно
-    # встречаться в тексте. Если нет — LLM-вызов не нужен, сразу нерелевантно.
-    if not has_core_words(text, search_term):
+    # Python-уровень проверка: обязательное ключевое слово должно быть в тексте.
+    # Если нет — LLM-вызов не нужен, сразу нерелевантно.
+    if not has_required_keyword(text, search_term):
         return "neutral", "", False
 
     term_in_text = search_term.lower() in text.lower()
