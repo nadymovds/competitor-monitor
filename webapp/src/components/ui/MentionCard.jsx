@@ -1,6 +1,37 @@
 import React from 'react'
 import { openLink, hapticFeedback } from '../../services/telegram'
 
+// Извлекает фрагмент текста вокруг первого вхождения term (±120 символов)
+// и подсвечивает совпадение
+function HighlightedSnippet({ text, term }) {
+  if (!text) return null
+
+  const lower = text.toLowerCase()
+  const termLower = (term || '').toLowerCase().trim()
+  const idx = termLower ? lower.indexOf(termLower) : -1
+
+  if (idx === -1) {
+    // keyword не найден — показываем начало текста
+    return <span>{text.slice(0, 240)}{text.length > 240 ? '…' : ''}</span>
+  }
+
+  const WINDOW = 120
+  const start = Math.max(0, idx - WINDOW)
+  const end   = Math.min(text.length, idx + termLower.length + WINDOW)
+
+  const before  = (start > 0 ? '…' : '') + text.slice(start, idx)
+  const match   = text.slice(idx, idx + termLower.length)
+  const after   = text.slice(idx + termLower.length, end) + (end < text.length ? '…' : '')
+
+  return (
+    <span>
+      {before}
+      <mark style={styles.highlight}>{match}</mark>
+      {after}
+    </span>
+  )
+}
+
 const SOURCE_LABELS = {
   yandex:   { label: 'Яндекс',  color: '#ef4444' },
   telegram: { label: 'TG',      color: '#0ea5e9' },
@@ -62,6 +93,11 @@ export default function MentionCard({ mention }) {
               {sentiment.icon} {mention.sentiment === 'positive' ? 'Позитивно' : mention.sentiment === 'negative' ? 'Негативно' : 'Нейтрально'}
             </span>
           )}
+          {mention.search_term && (
+            <span style={styles.keywordBadge}>
+              🔑 {mention.search_term}
+            </span>
+          )}
         </div>
         <div style={styles.meta}>
           {displaySource && <span>{displaySource}</span>}
@@ -83,10 +119,13 @@ export default function MentionCard({ mention }) {
         <div style={styles.url}>{mention.url}</div>
       )}
 
-      {/* Саммари или сниппет */}
-      {(mention.summary || mention.content_snippet) && (
+      {/* Саммари (LLM) или сниппет с подсветкой ключевого слова */}
+      {mention.summary && (
+        <div style={styles.summary}>{mention.summary}</div>
+      )}
+      {!mention.summary && mention.content_snippet && (
         <div style={styles.summary}>
-          {mention.summary || mention.content_snippet}
+          <HighlightedSnippet text={mention.content_snippet} term={mention.search_term} />
         </div>
       )}
     </div>
@@ -148,10 +187,21 @@ const styles = {
     fontSize: 13,
     color: '#9ca3af',
     lineHeight: 1.5,
-    display: '-webkit-box',
-    WebkitLineClamp: 3,
-    WebkitBoxOrient: 'vertical',
-    overflow: 'hidden',
     wordBreak: 'break-word',
+  },
+  keywordBadge: {
+    fontSize: 11,
+    fontWeight: 600,
+    padding: '3px 8px',
+    borderRadius: 6,
+    letterSpacing: 0.3,
+    backgroundColor: '#78716c22',
+    color: '#a8a29e',
+  },
+  highlight: {
+    backgroundColor: '#854d0e44',
+    color: '#fbbf24',
+    borderRadius: 3,
+    padding: '0 2px',
   },
 }
