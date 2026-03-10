@@ -21,10 +21,16 @@ const SENTIMENT_FILTERS = [
 ]
 
 const DATE_RANGES = [
-  { value: 7,  label: '7 дн' },
-  { value: 30, label: '30 дн' },
-  { value: 90, label: '90 дн' },
+  { value: 7,        label: '7 дн' },
+  { value: 30,       label: '30 дн' },
+  { value: 90,       label: '90 дн' },
+  { value: 365,      label: 'Год' },
+  { value: 'custom', label: 'Период...' },
 ]
+
+function toDateInputValue(date) {
+  return date.toISOString().slice(0, 10)
+}
 
 export default function MentionsScreen() {
   const [items, setItems] = useState([])
@@ -36,6 +42,12 @@ export default function MentionsScreen() {
   const [selectedSource, setSelectedSource] = useState('all')
   const [selectedSentiment, setSelectedSentiment] = useState('all')
   const [dateRange, setDateRange] = useState(30)
+
+  const today = new Date()
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30); return toDateInputValue(d)
+  })
+  const [customTo, setCustomTo] = useState(() => toDateInputValue(today))
 
   const observerTarget = useRef(null)
   const initialized = useRef(false)
@@ -52,7 +64,7 @@ export default function MentionsScreen() {
   useEffect(() => {
     if (!initialized.current) return
     load(0)
-  }, [selectedSource, selectedSentiment, dateRange])
+  }, [selectedSource, selectedSentiment, dateRange, customFrom, customTo])
 
   // Infinite scroll
   useEffect(() => {
@@ -73,9 +85,15 @@ export default function MentionsScreen() {
       if (newOffset === 0) setLoading(true)
       else setLoadingMore(true)
 
-      const dateTo = new Date()
-      const dateFrom = new Date()
-      dateFrom.setDate(dateFrom.getDate() - dateRange)
+      let dateTo, dateFrom
+      if (dateRange === 'custom') {
+        dateFrom = new Date(customFrom + 'T00:00:00')
+        dateTo   = new Date(customTo   + 'T23:59:59')
+      } else {
+        dateTo   = new Date()
+        dateFrom = new Date()
+        dateFrom.setDate(dateFrom.getDate() - dateRange)
+      }
 
       const sourceTypes = selectedSource !== 'all' ? [selectedSource] : []
       const sentiments  = selectedSentiment !== 'all' ? [selectedSentiment] : []
@@ -144,6 +162,26 @@ export default function MentionsScreen() {
           active={dateRange}
           onChange={handleDateRangeChange}
         />
+        {dateRange === 'custom' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 2 }}>
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo}
+              onChange={e => { hapticFeedback('light'); setCustomFrom(e.target.value) }}
+              style={styles.dateInput}
+            />
+            <span style={{ color: '#6b7280', fontSize: 13 }}>—</span>
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom}
+              max={toDateInputValue(new Date())}
+              onChange={e => { hapticFeedback('light'); setCustomTo(e.target.value) }}
+              style={styles.dateInput}
+            />
+          </div>
+        )}
       </div>
 
       {/* Контент */}
@@ -243,5 +281,16 @@ const styles = {
     border: 'none',
     cursor: 'pointer',
     flexShrink: 0,
+  },
+  dateInput: {
+    flex: 1,
+    padding: '6px 10px',
+    fontSize: 13,
+    backgroundColor: '#252532',
+    border: '1px solid #2a2a3a',
+    borderRadius: 8,
+    color: '#fff',
+    outline: 'none',
+    minWidth: 0,
   },
 }
