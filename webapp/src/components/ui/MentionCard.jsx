@@ -12,10 +12,10 @@ function HighlightedSnippet({ text, term }) {
 
   if (idx === -1) {
     // keyword не найден — показываем начало текста
-    return <span>{text.slice(0, 240)}{text.length > 240 ? '…' : ''}</span>
+    return <span>{text.slice(0, 400)}{text.length > 400 ? '…' : ''}</span>
   }
 
-  const WINDOW = 120
+  const WINDOW = 250
   const start = Math.max(0, idx - WINDOW)
   const end   = Math.min(text.length, idx + termLower.length + WINDOW)
 
@@ -119,14 +119,14 @@ export default function MentionCard({ mention }) {
         <div style={styles.url}>{mention.url}</div>
       )}
 
-      {/* Саммари (LLM) или сниппет с подсветкой ключевого слова */}
-      {mention.summary && (
-        <div style={styles.summary}>{mention.summary}</div>
-      )}
-      {!mention.summary && mention.content_snippet && (
-        <div style={styles.summary}>
+      {/* Контекст упоминания: сниппет с подсветкой + саммари LLM */}
+      {mention.content_snippet && (
+        <div style={styles.snippet}>
           <HighlightedSnippet text={mention.content_snippet} term={mention.search_term} />
         </div>
+      )}
+      {mention.summary && (
+        <div style={styles.summary}>{mention.summary}</div>
       )}
     </div>
   )
@@ -183,10 +183,18 @@ const styles = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  summary: {
+  snippet: {
     fontSize: 13,
     color: '#9ca3af',
     lineHeight: 1.5,
+    wordBreak: 'break-word',
+    marginBottom: 4,
+  },
+  summary: {
+    fontSize: 12,
+    color: '#6b7280',
+    lineHeight: 1.4,
+    fontStyle: 'italic',
     wordBreak: 'break-word',
   },
   keywordBadge: {
