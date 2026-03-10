@@ -50,7 +50,9 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
   const [editingTerm, setEditingTerm] = useState(null)
   const [showNewTermForm, setShowNewTermForm] = useState(false)
   const [newTermValue, setNewTermValue] = useState('')
+  const [newTermMatchType, setNewTermMatchType] = useState('partial')
   const [editTermValue, setEditTermValue] = useState('')
+  const [editTermMatchType, setEditTermMatchType] = useState('partial')
 
   // Mention sources state
   const [mentionSources, setMentionSources] = useState([])
@@ -448,6 +450,7 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     hapticFeedback('light')
     setEditingTerm(term)
     setEditTermValue(term.term)
+    setEditTermMatchType(term.match_type || 'partial')
   }
 
   const handleSaveTerm = async () => {
@@ -459,10 +462,11 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     hapticFeedback('light')
     setSaving(true)
     try {
-      const updated = await updateMentionSearchTerm(editingTerm.id, { term: editTermValue.trim() })
+      const updated = await updateMentionSearchTerm(editingTerm.id, { term: editTermValue.trim(), matchType: editTermMatchType })
       setMentionTerms(prev => prev.map(t => t.id === updated.id ? updated : t))
       setEditingTerm(null)
       setEditTermValue('')
+      setEditTermMatchType('partial')
       hapticFeedback('success')
     } catch (err) {
       hapticFeedback('error')
@@ -499,10 +503,11 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
     hapticFeedback('light')
     setSaving(true)
     try {
-      const created = await createMentionSearchTerm({ term: newTermValue.trim() })
+      const created = await createMentionSearchTerm({ term: newTermValue.trim(), matchType: newTermMatchType })
       setMentionTerms(prev => [...prev, created])
       setShowNewTermForm(false)
       setNewTermValue('')
+      setNewTermMatchType('partial')
       hapticFeedback('success')
     } catch (err) {
       hapticFeedback('error')
@@ -1117,11 +1122,12 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
                       placeholder="Поисковый термин"
                       style={inputStyle}
                     />
+                    <MatchTypeToggle value={editTermMatchType} onChange={setEditTermMatchType} />
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={handleSaveTerm} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
                         {saving ? 'Сохранение...' : 'Сохранить'}
                       </button>
-                      <button onClick={() => { hapticFeedback('light'); setEditingTerm(null); setEditTermValue('') }} disabled={saving} style={btnSecondary}>Отмена</button>
+                      <button onClick={() => { hapticFeedback('light'); setEditingTerm(null); setEditTermValue(''); setEditTermMatchType('partial') }} disabled={saving} style={btnSecondary}>Отмена</button>
                       <button onClick={() => handleDeleteTerm(term)} disabled={saving} style={btnDanger}>Удалить</button>
                     </div>
                   </div>
@@ -1141,6 +1147,9 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
                       {term.is_active && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
                     </button>
                     <span style={{ fontSize: 15, color: term.is_active ? '#fff' : '#6b7280' }}>{term.term}</span>
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, backgroundColor: term.match_type === 'full' ? '#f59e0b22' : '#3b82f622', color: term.match_type === 'full' ? '#f59e0b' : '#60a5fa', flexShrink: 0 }}>
+                      {term.match_type === 'full' ? 'полное' : 'частичное'}
+                    </span>
                   </div>
                   <button onClick={() => handleEditTerm(term)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 16, cursor: 'pointer', flexShrink: 0 }}>✎</button>
                 </div>
@@ -1158,11 +1167,12 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
                   placeholder="Например: SKAI, ООО Рога и Копыта"
                   style={inputStyle}
                 />
+                <MatchTypeToggle value={newTermMatchType} onChange={setNewTermMatchType} />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={handleCreateTerm} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
                     {saving ? 'Создание...' : 'Добавить'}
                   </button>
-                  <button onClick={() => { hapticFeedback('light'); setShowNewTermForm(false); setNewTermValue('') }} disabled={saving} style={btnSecondary}>Отмена</button>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewTermForm(false); setNewTermValue(''); setNewTermMatchType('partial') }} disabled={saving} style={btnSecondary}>Отмена</button>
                 </div>
               </div>
             </div>
@@ -1361,8 +1371,8 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
       )}
 
       <div style={{ textAlign: 'center', padding: '20px 0', marginTop: 20 }}>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия {import.meta.env.VITE_APP_VERSION}</div>
-        <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 SKAI Eye</div>
+        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия 1.0.0</div>
+        <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 Competitor Monitor</div>
       </div>
     </div>
   )
@@ -1459,6 +1469,41 @@ const sourceTypeBtnActive = {
 }
 
 // --- Shared components ---
+
+function MatchTypeToggle({ value, onChange }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Тип совпадения</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          onClick={() => { hapticFeedback('light'); onChange('partial') }}
+          style={{
+            padding: '6px 14px', fontSize: 13, fontWeight: 500, border: 'none', borderRadius: 8, cursor: 'pointer',
+            backgroundColor: value === 'partial' ? '#3b82f620' : '#252532',
+            color: value === 'partial' ? '#60a5fa' : '#9ca3af',
+          }}
+        >
+          Частичное
+        </button>
+        <button
+          onClick={() => { hapticFeedback('light'); onChange('full') }}
+          style={{
+            padding: '6px 14px', fontSize: 13, fontWeight: 500, border: 'none', borderRadius: 8, cursor: 'pointer',
+            backgroundColor: value === 'full' ? '#f59e0b22' : '#252532',
+            color: value === 'full' ? '#f59e0b' : '#9ca3af',
+          }}
+        >
+          Полное
+        </button>
+      </div>
+      <div style={{ fontSize: 11, color: '#4b5563', marginTop: 5 }}>
+        {value === 'full'
+          ? 'Весь текст запроса должен быть в сниппете'
+          : 'Достаточно первого слова (бренда) в сниппете'}
+      </div>
+    </div>
+  )
+}
 
 function ColorButton({ color, selected, onClick }) {
   return (
