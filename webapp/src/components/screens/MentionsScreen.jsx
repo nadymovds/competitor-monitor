@@ -25,7 +25,7 @@ const DATE_RANGES = [
   { value: 30,       label: '30 дн' },
   { value: 90,       label: '90 дн' },
   { value: 365,      label: 'Год' },
-  { value: 'custom', label: 'Период...' },
+  { value: 'custom', label: 'Свой' },
 ]
 
 function toDateInputValue(date) {
