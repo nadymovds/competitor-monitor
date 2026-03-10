@@ -10,7 +10,7 @@ import re
 import asyncio
 import random
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urljoin
 
 import requests
@@ -49,6 +49,7 @@ DELAY_BETWEEN_SOURCES  = 3
 MAX_PAGES_PER_WEBSITE  = 2
 MAX_YANDEX_PAGES       = 3      # макс страниц Яндекс на термин (10 результатов/страница)
 LLM_BATCH_PAUSE        = 4      # сек между LLM-вызовами
+MENTIONS_TG_LOOKBACK_DAYS = 8  # глубина поиска в уже собранных TG-постах (дней)
 
 DEFAULT_CSS_CONFIG = {
     "item":  "article, .news-item, .post, .news, .entry",
@@ -932,6 +933,125 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
 
 
 # ============================================================================
+# ПОИСК УПОМИНАНИЙ В УЖЕ СОБРАННЫХ TG-ПОСТАХ (конкуренты + новости)
+# ============================================================================
+
+def find_mentions_in_competitor_posts(scan_id: int | None, search_terms: list[str]) -> int:
+    """Ищет упоминания search_terms в уже собранных постах TG-каналов конкурентов.
+
+    Не запускает браузер — читает данные из таблицы competitor_tg_posts.
+    Возвращает количество новых упоминаний.
+    """
+    since_date = (datetime.now() - timedelta(days=MENTIONS_TG_LOOKBACK_DAYS)).isoformat()
+
+    try:
+        result = (supabase.table("competitor_tg_posts")
+                  .select("channel_username, post_url, content_text, post_date")
+                  .gte("post_date", since_date)
+                  .execute())
+        posts = result.data or []
+    except Exception as e:
+        print(f"  ❌ Ошибка запроса competitor_tg_posts: {e}")
+        return 0
+
+    print(f"  📥 competitor_tg_posts за {MENTIONS_TG_LOOKBACK_DAYS} дн.: {len(posts)} постов")
+
+    new_count = 0
+    for post in posts:
+        text = post.get("content_text") or ""
+        if not text or not contains_any_term(text, search_terms):
+            continue
+
+        matched_term = next((t for t in search_terms if t.lower() in text.lower()), search_terms[0])
+        snippet = extract_match_context(text, matched_term, window=200)
+        url = post.get("post_url", "")
+        if not url:
+            continue
+
+        channel = post.get("channel_username", "")
+        source_name = f"@{channel.lstrip('@')}" if channel else "конкурент TG"
+
+        data = {
+            "scan_id":         scan_id,
+            "source_type":     "telegram",
+            "url":             url,
+            "title":           text[:150].split("\n")[0],
+            "content_snippet": snippet[:1000],
+            "post_date":       post.get("post_date"),
+            "search_term":     matched_term[:255],
+            "source_name":     source_name[:255],
+            "is_processed":    False,
+        }
+        if save_mention(data):
+            new_count += 1
+            print(f"    ✅ Конкурент TG: {url[:80]}")
+
+    return new_count
+
+
+def find_mentions_in_news_posts(scan_id: int | None, search_terms: list[str]) -> int:
+    """Ищет упоминания search_terms в уже собранных постах отраслевых новостных TG-каналов.
+
+    Не запускает браузер — читает данные из таблицы news_posts.
+    Возвращает количество новых упоминаний.
+    """
+    since_date = (datetime.now() - timedelta(days=MENTIONS_TG_LOOKBACK_DAYS)).isoformat()
+
+    # Загружаем каналы для маппинга channel_id → username/title
+    try:
+        channels_result = supabase.table("news_channels").select("id, username, title").execute()
+        channel_map = {row["id"]: row for row in (channels_result.data or [])}
+    except Exception as e:
+        print(f"  ⚠️ Ошибка запроса news_channels: {e}")
+        channel_map = {}
+
+    try:
+        result = (supabase.table("news_posts")
+                  .select("channel_id, post_url, content_text, post_date")
+                  .gte("post_date", since_date)
+                  .execute())
+        posts = result.data or []
+    except Exception as e:
+        print(f"  ❌ Ошибка запроса news_posts: {e}")
+        return 0
+
+    print(f"  📥 news_posts за {MENTIONS_TG_LOOKBACK_DAYS} дн.: {len(posts)} постов")
+
+    new_count = 0
+    for post in posts:
+        text = post.get("content_text") or ""
+        if not text or not contains_any_term(text, search_terms):
+            continue
+
+        matched_term = next((t for t in search_terms if t.lower() in text.lower()), search_terms[0])
+        snippet = extract_match_context(text, matched_term, window=200)
+        url = post.get("post_url", "")
+        if not url:
+            continue
+
+        channel = channel_map.get(post.get("channel_id"), {})
+        username = channel.get("username", "")
+        source_name = f"@{username.lstrip('@')}" if username else (channel.get("title") or "новости TG")
+
+        data = {
+            "scan_id":         scan_id,
+            "source_type":     "telegram",
+            "url":             url,
+            "title":           text[:150].split("\n")[0],
+            "content_snippet": snippet[:1000],
+            "post_date":       post.get("post_date"),
+            "search_term":     matched_term[:255],
+            "source_name":     source_name[:255],
+            "is_processed":    False,
+        }
+        if save_mention(data):
+            new_count += 1
+            print(f"    ✅ Новости TG: {url[:80]}")
+
+    return new_count
+
+
+# ============================================================================
 # ОРКЕСТРАТОР
 # ============================================================================
 
@@ -962,6 +1082,8 @@ async def run_mentions_monitoring():
     print(f"📱 TG-каналов: {len(tg_sources)}, 🌐 Веб-порталов: {len(web_sources)}")
 
     all_results: list[dict] = []
+    comp_tg_count = 0
+    news_tg_count = 0
 
     connector = aiohttp.TCPConnector(limit=5, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as http_session:
@@ -1088,6 +1210,15 @@ async def run_mentions_monitoring():
 
         print(f"\n📊 Сохранено новых упоминаний: {new_count} из {len(all_results)} найденных")
 
+        # === ФАЗА 2E: Упоминания из TG конкурентов и новостных каналов ===
+        print("\n" + "=" * 60)
+        print("ФАЗА 2E: ПОИСК УПОМИНАНИЙ В TG КОНКУРЕНТОВ И НОВОСТЯХ")
+        print("=" * 60)
+        comp_tg_count = find_mentions_in_competitor_posts(scan_id, search_terms)
+        news_tg_count = find_mentions_in_news_posts(scan_id, search_terms)
+        new_count += comp_tg_count + news_tg_count
+        print(f"  ✅ Из TG конкурентов: {comp_tg_count}, из TG новостей: {news_tg_count}")
+
         # === ФАЗА 3: LLM-обработка ===
         print("\n" + "=" * 60)
         print("ФАЗА 3: LLM-АНАЛИЗ ТОНАЛЬНОСТИ")
@@ -1107,6 +1238,7 @@ async def run_mentions_monitoring():
 🌐 Веб-порталов: <b>{len(web_sources)}</b>
 
 🆕 Новых упоминаний: <b>{new_count}</b>
+  └ из TG конкурентов: {comp_tg_count}, из TG новостей: {news_tg_count}
 🤖 Обработано LLM: <b>{processed_count}</b>
 🗑 Удалено нерелевантных: <b>{deleted_count}</b>
 ⏱️ Время: {elapsed} сек"""
