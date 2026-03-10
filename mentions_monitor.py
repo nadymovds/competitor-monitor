@@ -1213,7 +1213,6 @@ async def run_mentions_monitoring():
         print("=" * 60)
 
         new_count    = 0
-        skipped_count = 0
         seen_urls: set[str] = set()
 
         for item in all_results:
@@ -1226,15 +1225,9 @@ async def run_mentions_monitoring():
             title   = item.get("title", "")
             snippet = item.get("content_snippet", "")
 
-            # Pre-save heuristic фильтр: для поисковых результатов (Yandex/Google)
-            # проверяем, что keyword реально присутствует в title+snippet.
-            # TG и website уже фильтруются через contains_any_term при парсинге.
-            if item.get("source_type") in ("yandex", "website") and term:
-                combined = f"{title} {snippet}"
-                if not contains_any_term(combined, [term]):
-                    skipped_count += 1
-                    print(f"  ⚠️ Пропущено (нет ключевого слова в сниппете): {url[:80]}")
-                    continue
+            # Яндекс/Google уже отфильтровали по ключевому слову на уровне поиска —
+            # дополнительная проверка по сниппету не нужна и снижает recall.
+            # Фильтрацию по релевантности выполняет LLM в Фазе 3.
 
             # Для всех источников: обрезаем snippet до контекстного окна вокруг keyword
             if term and snippet:
@@ -1257,8 +1250,6 @@ async def run_mentions_monitoring():
                 print(f"  ✅ Новое упоминание: {url[:80]}")
             else:
                 print(f"  🔁 Дубликат: {url[:80]}")
-
-        print(f"\n  🚫 Отфильтровано (нет keyword в сниппете): {skipped_count}")
 
         print(f"\n📊 Сохранено новых упоминаний: {new_count} из {len(all_results)} найденных")
 
