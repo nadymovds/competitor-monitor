@@ -6,6 +6,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import os
 import hashlib
 import json
+from functools import lru_cache
 import re
 import asyncio
 import random
@@ -47,7 +48,7 @@ PLAYWRIGHT_TIMEOUT     = 30000
 MAX_POSTS_PER_CHANNEL  = 100
 DELAY_BETWEEN_SOURCES  = 3
 MAX_PAGES_PER_WEBSITE  = 2
-MAX_YANDEX_PAGES       = 4      # макс страниц Яндекс на термин (10 результатов/страница)
+MAX_YANDEX_PAGES       = 3      # макс страниц Яндекс на термин (10 результатов/страница)
 LLM_BATCH_PAUSE        = 4      # сек между LLM-вызовами
 MENTIONS_TG_LOOKBACK_DAYS = 8  # глубина поиска в уже собранных TG-постах (дней)
 
@@ -102,31 +103,99 @@ def clean_text(html_or_text: str) -> str:
     return text.strip()
 
 
-def contains_any_term(text: str, terms: list[str]) -> bool:
-    text_lower = text.lower()
-    return any(t.lower() in text_lower for t in terms)
+_QUOTE_RE = re.compile(r'[\"\'«»“”‘’]')
+_DASH_RE = re.compile(r'[–—‑−]')
+_NONWORD_RE = re.compile(r'[^0-9a-zа-яё\s\-]+', re.IGNORECASE)
 
 
-def has_required_keyword(text: str, term: str, match_type: str = "partial") -> bool:
-    """Проверяет обязательное вхождение ключевого слова в текст (до LLM).
+def _normalize_for_match(text: str) -> str:
+    """Нормализует текст для устойчивого сопоставления терминов."""
+    if not text:
+        return ""
+    s = text.lower()
+    s = s.replace("ё", "е")
+    s = _QUOTE_RE.sub("", s)
+    s = _DASH_RE.sub("-", s)
+    s = _NONWORD_RE.sub(" ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
-    match_type='full'    — весь термин должен присутствовать в тексте дословно.
-    match_type='partial' — достаточно первого значимого слова термина
-                           (первый токен при разбивке по пробелам/знакам).
-    """
-    if not term:
-        return True
-    text_lower = text.lower()
-    term_lower = term.lower()
+
+def _term_tokens(term_norm: str) -> list[str]:
+    return re.findall(r"[0-9a-zа-яё]+", term_norm, flags=re.IGNORECASE)
+
+
+@lru_cache(maxsize=2048)
+def _build_term_regex(term_norm: str, mode: str) -> re.Pattern | None:
+    tokens = _term_tokens(term_norm)
+    if not tokens:
+        return None
+    if mode == "partial":
+        core = re.escape(tokens[0])
+    else:
+        core = r"[\s\-]+".join(re.escape(t) for t in tokens)
+    boundary = r"(?<![0-9A-Za-zА-Яа-яЁё])"
+    boundary_end = r"(?![0-9A-Za-zА-Яа-яЁё])"
+    return re.compile(boundary + core + boundary_end, re.IGNORECASE)
+
+
+def _should_force_full(term: str, match_type: str) -> bool:
     if match_type == "full":
-        return term_lower in text_lower
-    # partial: первое слово термина как целое слово (не подстрока другого слова).
-    # \b в Python 3 работает с кириллицей (Unicode-aware).
-    first_word = re.split(r'[\s\-_./·]+', term_lower)[0] if term_lower else ''
-    if not first_word:
         return True
-    pattern = r'\b' + re.escape(first_word) + r'\b'
-    return bool(re.search(pattern, text_lower))
+    term_norm = _normalize_for_match(term)
+    tokens = _term_tokens(term_norm)
+    if not tokens:
+        return True
+    # Короткие/аббревиатурные токены дают много ложных совпадений.
+    if len(tokens) >= 2 and len(tokens[0]) <= 4:
+        return True
+    if len(tokens) == 1 and len(tokens[0]) <= 3:
+        return True
+    if re.fullmatch(r"[A-ZА-Я0-9]{2,5}", term.strip()):
+        return True
+    if "skai" in term_norm:
+        return False
+    return False
+
+
+def term_matches(text: str, term: str, match_type: str = "partial", strict_full: bool = False) -> bool:
+    if not text or not term:
+        return False
+    if match_type not in ("partial", "full"):
+        match_type = "partial"
+    text_norm = _normalize_for_match(text)
+    term_norm = _normalize_for_match(term)
+    effective = "full" if strict_full or _should_force_full(term, match_type) else match_type
+    rx = _build_term_regex(term_norm, effective)
+    if not rx:
+        return False
+    return bool(rx.search(text_norm))
+
+
+def find_matching_term(text: str, term_configs: list[dict], match_type_map: dict | None = None,
+                       strict_full: bool = False) -> str:
+    if not text:
+        return ""
+    for cfg in term_configs or []:
+        term = cfg.get("term") or ""
+        if not term:
+            continue
+        match_type = cfg.get("match_type") or "partial"
+        if match_type_map:
+            match_type = match_type_map.get(term.lower(), match_type)
+        if term_matches(text, term, match_type, strict_full=strict_full):
+            return term
+    return ""
+
+
+def contains_any_term(text: str, term_configs: list[dict], match_type_map: dict | None = None,
+                      strict_full: bool = False) -> bool:
+    return bool(find_matching_term(text, term_configs, match_type_map, strict_full=strict_full))
+
+
+def has_required_keyword(text: str, term: str, match_type: str = "partial",
+                         strict_full: bool = False) -> bool:
+    return term_matches(text, term, match_type, strict_full=strict_full)
 
 
 def extract_match_context(text: str, term: str, window: int = 200) -> str:
@@ -181,6 +250,41 @@ def is_url_ignored(url: str, patterns: list[str]) -> bool:
             if hostname == pattern or hostname.endswith("." + pattern):
                 return True
     return False
+
+
+BLOCKED_DOMAINS = {
+    "audit-it.ru", "rusprofile.ru", "zachestnyibiznes.ru", "list-org.com",
+    "focus.kontur.ru", "synapsenet.ru", "spark-interfax.ru", "checko.ru",
+    "sbis.ru", "kartoteka.ru", "2gis.ru", "flagma.ru",
+    "hh.ru", "superjob.ru", "zarplata.ru", "rabota.ru", "trudvsem.ru",
+    "tgsearch.su", "tgramsearch.com", "tgramsearch.ru", "tgstat.ru", "telemetr.me",
+}
+
+IRRELEVANT_TEXT_PATTERNS = [
+    re.compile(r"\b(инн|огрн|кпп|оквэд|устав|учредител|регистрац|юр\.?\s*адрес)\b", re.IGNORECASE),
+    re.compile(r"\b(ваканс|резюме|карьер|соискател|отклик|работа в)\b", re.IGNORECASE),
+    re.compile(r"\b(каталог компаний|справочник|реестр|карточка компании)\b", re.IGNORECASE),
+    re.compile(r"\b(sma)\b.{0,40}\b(connector|antenna|coax|rf|cable|female|male|u\.?fl|ipex)\b", re.IGNORECASE),
+    re.compile(r"\b(разъем|коаксиал|антенн)\b.{0,40}\b(sma|u\.?fl|ipex)\b", re.IGNORECASE),
+]
+
+
+def is_blocked_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        hostname = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(hostname == d or hostname.endswith("." + d) for d in BLOCKED_DOMAINS)
+
+
+def is_obviously_irrelevant(text: str, url: str) -> bool:
+    if is_blocked_url(url):
+        return True
+    if not text:
+        return True
+    return any(rx.search(text) for rx in IRRELEVANT_TEXT_PATTERNS)
 
 
 _VIDEO_URL_RE = re.compile(
@@ -351,17 +455,24 @@ async def analyze_mention(text: str, url: str, search_term: str, match_type: str
     Returns: (sentiment, summary, is_relevant)
     """
     if not text or len(text.strip()) < 20:
-        return "neutral", "", True
+        return "neutral", "", False
+
+    if not search_term:
+        return "neutral", "", False
+
+    if is_obviously_irrelevant(text, url):
+        return "neutral", "", False
 
     # Python-уровень проверка: обязательное ключевое слово должно быть в тексте.
     # Если нет — LLM-вызов не нужен, сразу нерелевантно.
-    if not has_required_keyword(text, search_term, match_type):
+    force_full = _should_force_full(search_term, match_type)
+    if not has_required_keyword(text, search_term, match_type, strict_full=force_full):
         return "neutral", "", False
 
-    term_in_text = search_term.lower() in text.lower()
+    term_in_text = term_matches(text, search_term, "full", strict_full=True)
     match_type_label = (
         "ПОЛНОЕ — весь запрос должен присутствовать в тексте дословно"
-        if match_type == "full"
+        if (match_type == "full" or force_full)
         else "ЧАСТИЧНОЕ — достаточно присутствия первого ключевого слова (бренда)"
     )
 
@@ -400,9 +511,9 @@ is_relevant: true ТОЛЬКО если: есть конкретное собы�
     response = await call_llm_async(prompt, session, max_tokens=250)
     data = parse_llm_json(response)
     if not data:
-        return "neutral", "", True  # при ошибке оставляем, не удаляем
+        return "neutral", "", False  # при ошибке отсекаем
 
-    is_relevant = bool(data.get("is_relevant", True))
+    is_relevant = bool(data.get("is_relevant", False))
     sentiment = data.get("sentiment", "neutral")
     if sentiment not in ("positive", "negative", "neutral"):
         sentiment = "neutral"
@@ -491,6 +602,9 @@ def save_mention(data: dict) -> bool:
     if url and is_url_ignored(url, IGNORED_PATTERNS):
         print(f"  🚫 Игнорируем (в списке исключений): {url[:80]}")
         return False
+    if url and is_blocked_url(url):
+        print(f"  🚫 Блоклист домена (save_mention): {url[:80]}")
+        return False
     try:
         result = supabase.table("mentions").insert(data).execute()
         return bool(result.data)
@@ -514,7 +628,7 @@ def get_unprocessed_mentions() -> list:
     """Выборка необработанных упоминаний для LLM-анализа."""
     try:
         result = (supabase.table("mentions")
-                  .select("id, url, title, content_snippet")
+                  .select("id, url, title, content_snippet, search_term")
                   .eq("is_processed", False)
                   .order("created_at", desc=False)
                   .execute())
@@ -812,8 +926,9 @@ def parse_tg_posts(html: str, username: str) -> list[dict]:
     return sorted(posts, key=lambda p: p["message_id"])
 
 
-async def scan_tg_channel(source: dict, search_terms: list[str], browser_context) -> list[dict]:
-    """Сканирует TG-канал, фильтрует посты по вхождению search_terms."""
+async def scan_tg_channel(source: dict, term_configs: list[dict],
+                          match_type_map: dict, browser_context) -> list[dict]:
+    """Сканирует TG-канал, фильтрует посты по вхождению терминов."""
     username = source.get("username", "").lstrip("@")
     if not username:
         return []
@@ -837,15 +952,23 @@ async def scan_tg_channel(source: dict, search_terms: list[str], browser_context
         pages_done += 1
         await asyncio.sleep(1)
 
-    # Фильтрация по вхождению search_terms
-    matched = [
-        p for p in all_posts
-        if p.get("text") and contains_any_term(p["text"], search_terms)
-    ]
+    # Фильтрация по вхождению терминов
+    matched = []
+    for p in all_posts:
+        text = p.get("text") or ""
+        if not text:
+            continue
+        term = find_matching_term(text, term_configs, match_type_map)
+        if not term:
+            continue
+        p["__matched_term"] = term
+        matched.append(p)
 
     results = []
     for p in matched[:MAX_POSTS_PER_CHANNEL]:
         snippet = p["text"][:1000]
+        if is_obviously_irrelevant(p.get("text") or "", p.get("post_url") or ""):
+            continue
         results.append({
             "url":             p["post_url"],
             "title":           p["text"][:150].split("\n")[0],
@@ -853,7 +976,7 @@ async def scan_tg_channel(source: dict, search_terms: list[str], browser_context
             "post_date":       p["post_date"],
             "source_type":     "telegram",
             "source_name":     source.get("title") or f"@{username}",
-            "search_term":     next((t for t in search_terms if t.lower() in p["text"].lower()), search_terms[0] if search_terms else ""),
+            "search_term":     p.get("__matched_term", ""),
         })
 
     print(f"    ✅ Найдено постов: {len(all_posts)}, с упоминаниями: {len(results)}")
@@ -954,8 +1077,9 @@ def parse_articles_from_html(html: str, base_url: str, css_config: dict) -> list
     return results
 
 
-async def scan_website(source: dict, search_terms: list[str], browser_context) -> list[dict]:
-    """Сканирует веб-портал, фильтрует статьи по вхождению search_terms."""
+async def scan_website(source: dict, term_configs: list[dict],
+                       match_type_map: dict, browser_context) -> list[dict]:
+    """Сканирует веб-портал, фильтрует статьи по вхождению терминов."""
     url   = source.get("url", "")
     title = source.get("title") or url
     if not url:
@@ -975,15 +1099,22 @@ async def scan_website(source: dict, search_terms: list[str], browser_context) -
         print(f"    ⚠️ CSS-парсер ничего не нашёл")
         return []
 
-    # Фильтрация по вхождению search_terms
-    matched = [
-        a for a in articles
-        if contains_any_term(f"{a['title']} {a['text']}", search_terms)
-    ]
+    # Фильтрация по вхождению терминов
+    matched = []
+    for a in articles:
+        combined = f"{a['title']} {a['text']}"
+        term = find_matching_term(combined, term_configs, match_type_map)
+        if not term:
+            continue
+        a["__matched_term"] = term
+        matched.append(a)
 
     results = []
     for a in matched:
         snippet = (a["text"] or a["title"])[:1000]
+        combined = f"{a['title']} {a['text']}"
+        if is_obviously_irrelevant(combined, a.get("url") or ""):
+            continue
         results.append({
             "url":             a["url"],
             "title":           a["title"],
@@ -991,10 +1122,7 @@ async def scan_website(source: dict, search_terms: list[str], browser_context) -
             "post_date":       a["post_date"],
             "source_type":     "website",
             "source_name":     title,
-            "search_term":     next(
-                (t for t in search_terms if t.lower() in f"{a['title']} {a['text']}".lower()),
-                search_terms[0] if search_terms else "",
-            ),
+            "search_term":     a.get("__matched_term", ""),
         })
 
     print(f"    ✅ Найдено статей: {len(articles)}, с упоминаниями: {len(results)}")
@@ -1060,8 +1188,9 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
 # ПОИСК УПОМИНАНИЙ В УЖЕ СОБРАННЫХ TG-ПОСТАХ (конкуренты + новости)
 # ============================================================================
 
-def find_mentions_in_competitor_posts(scan_id: int | None, search_terms: list[str]) -> int:
-    """Ищет упоминания search_terms в уже собранных постах TG-каналов конкурентов.
+def find_mentions_in_competitor_posts(scan_id: int | None, term_configs: list[dict],
+                                      match_type_map: dict) -> int:
+    """Ищет упоминания терминов в уже собранных постах TG-каналов конкурентов.
 
     Не запускает браузер — читает данные из таблицы competitor_tg_posts.
     Возвращает количество новых упоминаний.
@@ -1083,14 +1212,19 @@ def find_mentions_in_competitor_posts(scan_id: int | None, search_terms: list[st
     new_count = 0
     for post in posts:
         text = post.get("content_text") or ""
-        if not text or not contains_any_term(text, search_terms):
+        if not text:
             continue
-
-        matched_term = next((t for t in search_terms if t.lower() in text.lower()), search_terms[0])
-        snippet = extract_match_context(text, matched_term, window=200)
         url = post.get("post_url", "")
         if not url:
             continue
+        if is_blocked_url(url):
+            continue
+        matched_term = find_matching_term(text, term_configs, match_type_map)
+        if not matched_term:
+            continue
+        if is_obviously_irrelevant(text, url=url):
+            continue
+        snippet = extract_match_context(text, matched_term, window=200)
 
         channel = post.get("channel_username", "")
         source_name = f"@{channel.lstrip('@')}" if channel else "конкурент TG"
@@ -1113,8 +1247,9 @@ def find_mentions_in_competitor_posts(scan_id: int | None, search_terms: list[st
     return new_count
 
 
-def find_mentions_in_news_posts(scan_id: int | None, search_terms: list[str]) -> int:
-    """Ищет упоминания search_terms в уже собранных постах отраслевых новостных TG-каналов.
+def find_mentions_in_news_posts(scan_id: int | None, term_configs: list[dict],
+                                match_type_map: dict) -> int:
+    """Ищет упоминания терминов в уже собранных постах отраслевых новостных TG-каналов.
 
     Не запускает браузер — читает данные из таблицы news_posts.
     Возвращает количество новых упоминаний.
@@ -1144,14 +1279,19 @@ def find_mentions_in_news_posts(scan_id: int | None, search_terms: list[str]) ->
     new_count = 0
     for post in posts:
         text = post.get("content_text") or ""
-        if not text or not contains_any_term(text, search_terms):
+        if not text:
             continue
-
-        matched_term = next((t for t in search_terms if t.lower() in text.lower()), search_terms[0])
-        snippet = extract_match_context(text, matched_term, window=200)
         url = post.get("post_url", "")
         if not url:
             continue
+        if is_blocked_url(url):
+            continue
+        matched_term = find_matching_term(text, term_configs, match_type_map)
+        if not matched_term:
+            continue
+        if is_obviously_irrelevant(text, url=url):
+            continue
+        snippet = extract_match_context(text, matched_term, window=200)
 
         channel = channel_map.get(post.get("channel_id"), {})
         username = channel.get("username", "")
@@ -1267,7 +1407,7 @@ async def run_mentions_monitoring():
                 print("=" * 60)
                 for i, source in enumerate(tg_sources, 1):
                     print(f"\n[{i}/{len(tg_sources)}] {source.get('title') or source.get('username')}")
-                    results = await scan_tg_channel(source, search_terms, browser_context)
+                    results = await scan_tg_channel(source, search_term_configs, match_type_map, browser_context)
                     all_results.extend(results)
                     if i < len(tg_sources):
                         await asyncio.sleep(DELAY_BETWEEN_SOURCES)
@@ -1279,7 +1419,7 @@ async def run_mentions_monitoring():
                 print("=" * 60)
                 for i, source in enumerate(web_sources, 1):
                     print(f"\n[{i}/{len(web_sources)}] {source.get('title') or source.get('url')}")
-                    results = await scan_website(source, search_terms, browser_context)
+                    results = await scan_website(source, search_term_configs, match_type_map, browser_context)
                     all_results.extend(results)
                     if i < len(web_sources):
                         await asyncio.sleep(DELAY_BETWEEN_SOURCES)
@@ -1309,19 +1449,33 @@ async def run_mentions_monitoring():
             if is_video_url(url):
                 print(f"  🎬 Пропуск видео-URL: {url[:80]}")
                 continue
+            if is_blocked_url(url):
+                print(f"  🚫 Блоклист домена: {url[:80]}")
+                continue
+            if not term:
+                print(f"  🚫 Пустой термин: {url[:80]}")
+                continue
 
             # Для TG-каналов и веб-порталов (не поисковиков) проверяем наличие термина
-            # в заголовке/сниппете. Для Яндекса/Google не проверяем: термин может быть на
-            # странице, но не попасть в выдержку (passage).
+            # в заголовке/сниппете. Для Яндекса/Google требуем строгого полного совпадения
+            # во избежание ложных срабатываний.
             is_search_engine = (
                 item.get("source_type") == "yandex"
-                or item.get("source_name") == "Google"
+                or item.get("source_name") in ("Google", "Яндекс")
             )
             match_type_for_term = match_type_map.get(term.lower(), "partial")
-            if term and not is_search_engine and not has_required_keyword(
-                f"{title} {snippet}", term, match_type_for_term
-            ):
-                print(f"  ⏭️  Пропуск (термин не найден в заголовке/сниппете): {url[:80]}")
+            combined = f"{title} {snippet}"
+            if is_search_engine:
+                if not has_required_keyword(combined, term, "full", strict_full=True):
+                    print(f"  ⏭️  Пропуск (поиск: нет полного термина в сниппете): {url[:80]}")
+                    continue
+            else:
+                if not has_required_keyword(combined, term, match_type_for_term):
+                    print(f"  ⏭️  Пропуск (термин не найден в заголовке/сниппете): {url[:80]}")
+                    continue
+
+            if is_obviously_irrelevant(combined, url):
+                print(f"  🚫 Нерелевантный контент: {url[:80]}")
                 continue
 
             # Для всех источников: обрезаем snippet до контекстного окна вокруг keyword
@@ -1352,8 +1506,8 @@ async def run_mentions_monitoring():
         print("\n" + "=" * 60)
         print("ФАЗА 2E: ПОИСК УПОМИНАНИЙ В TG КОНКУРЕНТОВ И НОВОСТЯХ")
         print("=" * 60)
-        comp_tg_count = find_mentions_in_competitor_posts(scan_id, search_terms)
-        news_tg_count = find_mentions_in_news_posts(scan_id, search_terms)
+        comp_tg_count = find_mentions_in_competitor_posts(scan_id, search_term_configs, match_type_map)
+        news_tg_count = find_mentions_in_news_posts(scan_id, search_term_configs, match_type_map)
         new_count += comp_tg_count + news_tg_count
         print(f"  ✅ Из TG конкурентов: {comp_tg_count}, из TG новостей: {news_tg_count}")
 
