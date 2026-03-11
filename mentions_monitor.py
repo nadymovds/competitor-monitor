@@ -47,7 +47,7 @@ PLAYWRIGHT_TIMEOUT     = 30000
 MAX_POSTS_PER_CHANNEL  = 100
 DELAY_BETWEEN_SOURCES  = 3
 MAX_PAGES_PER_WEBSITE  = 2
-MAX_YANDEX_PAGES       = 3      # макс страниц Яндекс на термин (10 результатов/страница)
+MAX_YANDEX_PAGES       = 4      # макс страниц Яндекс на термин (10 результатов/страница)
 LLM_BATCH_PAUSE        = 4      # сек между LLM-вызовами
 MENTIONS_TG_LOOKBACK_DAYS = 8  # глубина поиска в уже собранных TG-постах (дней)
 
