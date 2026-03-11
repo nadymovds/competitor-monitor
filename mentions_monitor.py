@@ -120,9 +120,13 @@ def has_required_keyword(text: str, term: str, match_type: str = "partial") -> b
     term_lower = term.lower()
     if match_type == "full":
         return term_lower in text_lower
-    # partial: берём первое слово термина как обязательный ключевой маркер
+    # partial: первое слово термина как целое слово (не подстрока другого слова).
+    # \b в Python 3 работает с кириллицей (Unicode-aware).
     first_word = re.split(r'[\s\-_./·]+', term_lower)[0] if term_lower else ''
-    return first_word in text_lower if first_word else True
+    if not first_word:
+        return True
+    pattern = r'\b' + re.escape(first_word) + r'\b'
+    return bool(re.search(pattern, text_lower))
 
 
 def extract_match_context(text: str, term: str, window: int = 200) -> str:
@@ -1179,6 +1183,7 @@ async def run_mentions_monitoring():
 
     # Список строк — для совместимости с функциями, принимающими list[str]
     search_terms = [t["term"] for t in search_term_configs]
+    match_type_map = {t["term"].lower(): t.get("match_type", "partial") for t in search_term_configs}
 
     sources = get_mention_sources()
     tg_sources  = [s for s in sources if s.get("source_type") == "telegram"]
@@ -1279,9 +1284,13 @@ async def run_mentions_monitoring():
             title   = item.get("title", "")
             snippet = item.get("content_snippet", "")
 
-            # Яндекс/Google уже отфильтровали по ключевому слову на уровне поиска —
-            # дополнительная проверка по сниппету не нужна и снижает recall.
-            # Фильтрацию по релевантности выполняет LLM в Фазе 3.
+            # Проверяем наличие термина в заголовке + сниппете.
+            # Поисковики (Яндекс/Google) не гарантируют точного совпадения даже с кавычками —
+            # могут вернуть страницы, где слова термина встречаются раздельно.
+            match_type_for_term = match_type_map.get(term.lower(), "partial")
+            if term and not has_required_keyword(f"{title} {snippet}", term, match_type_for_term):
+                print(f"  ⏭️  Пропуск (термин не найден в заголовке/сниппете): {url[:80]}")
+                continue
 
             # Для всех источников: обрезаем snippet до контекстного окна вокруг keyword
             if term and snippet:
