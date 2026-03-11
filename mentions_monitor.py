@@ -168,13 +168,34 @@ def is_url_ignored(url: str, patterns: list[str]) -> bool:
             # Путевой паттерн: t.me/skai_online
             pat_host, pat_path = pattern.split("/", 1)
             pat_path = "/" + pat_path
-            if hostname == pat_host and (path == pat_path or path.startswith(pat_path + "/")):
+            if hostname == pat_host and (
+                path == pat_path
+                or path.startswith(pat_path + "/")
+                # Telegram web-preview добавляет /s/ перед username: t.me/s/skai_online/363
+                or path == "/s" + pat_path
+                or path.startswith("/s" + pat_path + "/")
+            ):
                 return True
         else:
             # Доменный паттерн с поддоменами
             if hostname == pattern or hostname.endswith("." + pattern):
                 return True
     return False
+
+
+_VIDEO_URL_RE = re.compile(
+    r'(vk\.com/video|vkvideo\.ru|vk\.com/clip'
+    r'|yandex\.ru/video|yandex\.ru/efir'
+    r'|youtube\.com/watch|music\.youtube\.com|youtu\.be/'
+    r'|rutube\.ru/video|ok\.ru/video'
+    r'|wall-video\.ru|tiktok\.com/@)',
+    re.IGNORECASE,
+)
+
+
+def is_video_url(url: str) -> bool:
+    """Возвращает True если URL ведёт на видео-контент."""
+    return bool(_VIDEO_URL_RE.search(url))
 
 
 def get_ignored_patterns() -> list[str]:
@@ -1284,11 +1305,22 @@ async def run_mentions_monitoring():
             title   = item.get("title", "")
             snippet = item.get("content_snippet", "")
 
-            # Проверяем наличие термина в заголовке + сниппете.
-            # Поисковики (Яндекс/Google) не гарантируют точного совпадения даже с кавычками —
-            # могут вернуть страницы, где слова термина встречаются раздельно.
+            # Фильтр видео-URL — не сохраняем ссылки на видео-платформы
+            if is_video_url(url):
+                print(f"  🎬 Пропуск видео-URL: {url[:80]}")
+                continue
+
+            # Для TG-каналов и веб-порталов (не поисковиков) проверяем наличие термина
+            # в заголовке/сниппете. Для Яндекса/Google не проверяем: термин может быть на
+            # странице, но не попасть в выдержку (passage).
+            is_search_engine = (
+                item.get("source_type") == "yandex"
+                or item.get("source_name") == "Google"
+            )
             match_type_for_term = match_type_map.get(term.lower(), "partial")
-            if term and not has_required_keyword(f"{title} {snippet}", term, match_type_for_term):
+            if term and not is_search_engine and not has_required_keyword(
+                f"{title} {snippet}", term, match_type_for_term
+            ):
                 print(f"  ⏭️  Пропуск (термин не найден в заголовке/сниппете): {url[:80]}")
                 continue
 
