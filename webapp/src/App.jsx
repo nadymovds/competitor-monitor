@@ -117,10 +117,14 @@ export default function App() {
   const renderScreen = () => {
     if (selectedCompetitorId) {
       return (
-        <CompetitorsScreen 
-          competitorId={selectedCompetitorId} 
-          onBack={handleBackFromCompetitor}
+        <CompetitorsScreen
+          user={user}
+          groups={groups}
+          selectedCompetitorId={selectedCompetitorId}
+          cameFromMonitoring={!cameFromFeed}
+          onBackToMonitoring={handleBackFromCompetitor}
           onBackToFeed={cameFromFeed ? handleBackToFeed : null}
+          onClearSelection={handleBackFromCompetitor}
         />
       )
     }
@@ -129,7 +133,7 @@ export default function App() {
       case 'feed':
         return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
       case 'competitors':
-        return <CompetitorsScreen />
+        return <CompetitorsScreen user={user} groups={groups} onClearSelection={() => {}} />
       case 'mentions':
         return <MentionsScreen />
       case 'settings':

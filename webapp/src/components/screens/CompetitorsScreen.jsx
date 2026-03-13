@@ -389,7 +389,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
 
           {/* URLs */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <label style={{ fontSize: 14, color: '#9ca3af' }}>URL сайтов</label>
+            <label style={{ fontSize: 14, color: '#9ca3af' }}>Сайты и TG-каналы</label>
 
             {editUrls.filter(u => !u.isDeleted).map((u, index) => {
               const actualIndex = editUrls.findIndex(eu => eu === u)
