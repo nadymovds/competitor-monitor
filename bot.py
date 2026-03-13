@@ -116,6 +116,8 @@ async def handle_show_tg_posts(update: Update, context: ContextTypes.DEFAULT_TYP
     report_id = parts[1]
     offset = int(parts[2])
 
+    print(f"[tg_posts] report_id={report_id} offset={offset}", flush=True)
+
     result = (
         supabase.table("competitor_tg_posts")
         .select(
@@ -128,6 +130,8 @@ async def handle_show_tg_posts(update: Update, context: ContextTypes.DEFAULT_TYP
         .order("post_date", desc=False)
         .execute()
     )
+
+    print(f"[tg_posts] found {len(result.data) if result.data else 0} posts", flush=True)
 
     if not result.data:
         await context.bot.send_message(
@@ -269,9 +273,13 @@ def format_post_card(post: dict) -> str:
 
 @app_flask.post("/webhook")
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    future = asyncio.run_coroutine_threadsafe(application.process_update(update), _loop)
-    future.result(timeout=60)
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, application.bot)
+        future = asyncio.run_coroutine_threadsafe(application.process_update(update), _loop)
+        future.result(timeout=60)
+    except Exception as e:
+        print(f"[webhook] error: {e}", flush=True)
     return "ok"
 
 @app_flask.get("/")
