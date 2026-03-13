@@ -5,7 +5,7 @@ import { getNewsDigests, getNewsDigestDetails } from '../../services/news'
 import ScanCard from '../ui/ScanCard'
 import NextScanInfo from '../ui/NextScanInfo'
 
-export default function ScansScreen({ onNavigateToCompetitor }) {
+export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
   const [scanType, setScanType] = useState('competitors') // 'competitors' | 'news'
   const [scans, setScans] = useState([])
   const [loading, setLoading] = useState(true)
@@ -81,6 +81,11 @@ export default function ScansScreen({ onNavigateToCompetitor }) {
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
+        {onBack && (
+          <button onClick={() => { hapticFeedback('light'); onBack() }} style={styles.backButton}>
+            ← Настройки
+          </button>
+        )}
         <h1 style={styles.title}>Сканирования</h1>
       </div>
 
@@ -156,6 +161,16 @@ const styles = {
   },
   header: {
     paddingBottom: 12
+  },
+  backButton: {
+    background: 'none',
+    border: 'none',
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: 500,
+    cursor: 'pointer',
+    padding: '0 0 8px 0',
+    display: 'block'
   },
   title: {
     fontSize: 24,

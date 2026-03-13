@@ -9,7 +9,7 @@ import {
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
-export default function SettingsScreen({ user, groups: initialGroups }) {
+export default function SettingsScreen({ user, groups: initialGroups, onNavigateToScans }) {
   const [groups, setGroups] = useState(initialGroups || [])
   const [editingGroup, setEditingGroup] = useState(null)
   const [showNewGroupForm, setShowNewGroupForm] = useState(false)
@@ -1370,8 +1370,20 @@ export default function SettingsScreen({ user, groups: initialGroups }) {
         </Section>
       )}
 
+      {isAdmin && onNavigateToScans && (
+        <Section title="Данные">
+          <button
+            onClick={() => { hapticFeedback('light'); onNavigateToScans() }}
+            style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', color: '#fff' }}
+          >
+            <span style={{ fontSize: 15 }}>Сканирования</span>
+            <span style={{ color: '#6b7280', fontSize: 18 }}>›</span>
+          </button>
+        </Section>
+      )}
+
       <div style={{ textAlign: 'center', padding: '20px 0', marginTop: 20 }}>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия 1.0.0</div>
+        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'}</div>
         <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 Competitor Monitor</div>
       </div>
     </div>

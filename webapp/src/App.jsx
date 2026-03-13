@@ -11,6 +11,7 @@ import { checkUserAccess, getGroups } from './services/supabase'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('feed')
+  const [settingsSubPage, setSettingsSubPage] = useState(null) // null | 'scans'
   const [user, setUser] = useState(null)
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
@@ -69,15 +70,11 @@ export default function App() {
   const isAdmin = user?.role === 'admin'
 
   const handleTabChange = (tab) => {
-    if (tab === 'scans' && !isAdmin) {
-      setActiveTab('feed')
-      return
-    }
-
     if (tab !== 'competitors') {
       setSelectedCompetitorId(null)
       setCameFromFeed(false)
     }
+    setSettingsSubPage(null)
     setActiveTab(tab)
   }
 
@@ -131,16 +128,15 @@ export default function App() {
     switch (activeTab) {
       case 'feed':
         return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
-      case 'scans':
-        return isAdmin
-          ? <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} />
-          : <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
       case 'competitors':
         return <CompetitorsScreen />
       case 'mentions':
         return <MentionsScreen />
       case 'settings':
-        return <SettingsScreen user={user} groups={groups} />
+        if (settingsSubPage === 'scans') {
+          return <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} onBack={() => setSettingsSubPage(null)} />
+        }
+        return <SettingsScreen user={user} groups={groups} onNavigateToScans={() => setSettingsSubPage('scans')} />
       default:
         return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
     }
