@@ -44,6 +44,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
+BOT_URL = os.environ.get("BOT_URL")  # https://your-bot.onrender.com
 
 LLM_MODEL = "llama-3.1-8b-instant"
 LLM_API_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -148,6 +149,17 @@ print("✅ Конфигурация загружена")
 # ============================================================================
 # TELEGRAM
 # ============================================================================
+
+def wake_up_bot(timeout: int = 90) -> None:
+    """Пингует Render-сервис, чтобы разбудить его до отправки кнопки."""
+    if not BOT_URL:
+        return
+    try:
+        print(f"⏳ Прогрев бота: {BOT_URL} ...")
+        requests.get(BOT_URL, timeout=timeout)
+        print("✅ Бот проснулся")
+    except Exception as e:
+        print(f"⚠️ Прогрев бота не удался: {e}")
 
 def get_notification_recipients() -> list:
     recipients = []
@@ -2411,7 +2423,7 @@ async def run_monitoring_async(mode='all'):
    📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}"""
         if tg_meaningful_count > 0:
             msg += "\n\n📎 Сводка во вложении · подробно с фильтрами — в мини-приложении (кнопка ниже)"
-            msg += "\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
+            wake_up_bot()
         if tg_meaningful_count == 0:
             send_telegram_message(msg, reply_markup=keyboard)
         else:
@@ -2448,7 +2460,7 @@ async def run_monitoring_async(mode='all'):
 
 📎 Сводка во вложении · подробно с фильтрами — в мини-приложении (кнопка ниже)"""
         if tg_meaningful_count > 0:
-            msg += "\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
+            wake_up_bot()
 
     send_telegram_document(pdf_path, msg, reply_markup=keyboard)
     
