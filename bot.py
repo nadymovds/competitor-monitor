@@ -26,6 +26,25 @@ _loop = asyncio.new_event_loop()
 threading.Thread(target=_loop.run_forever, daemon=True).start()
 
 # ============================================================================
+# АВТОРИЗАЦИЯ
+# ============================================================================
+
+def is_user_allowed(telegram_id: int) -> bool:
+    """Проверяет, есть ли пользователь в таблице users (как в мини-апп)."""
+    try:
+        result = (
+            supabase.table("users")
+            .select("id")
+            .eq("telegram_id", telegram_id)
+            .single()
+            .execute()
+        )
+        return result.data is not None
+    except Exception:
+        return False
+
+
+# ============================================================================
 # HANDLER
 # ============================================================================
 
@@ -35,6 +54,13 @@ async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer()
     except Exception:
         pass  # callback query истёк — не критично
+
+    if not is_user_allowed(query.from_user.id):
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="🔒 У вас нет доступа к этому боту."
+        )
+        return
 
     parts = query.data.split(":")
     digest_id = int(parts[1])
@@ -111,6 +137,13 @@ async def handle_show_tg_posts(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer()
     except Exception:
         pass
+
+    if not is_user_allowed(query.from_user.id):
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="🔒 У вас нет доступа к этому боту."
+        )
+        return
 
     parts = query.data.split(":")
     report_id = parts[1]
