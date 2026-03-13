@@ -297,27 +297,34 @@ def webhook_info():
 # ТОЧКА ВХОДА
 # ============================================================================
 
-def main():
+def _init_bot():
+    """Инициализация бота в фоне — не блокирует старт Flask."""
     global application
+    try:
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        application.add_handler(CallbackQueryHandler(handle_show_posts, pattern=r"^show_posts:"))
+        application.add_handler(CallbackQueryHandler(handle_show_tg_posts, pattern=r"^show_tg_posts:"))
 
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    application.add_handler(CallbackQueryHandler(handle_show_posts, pattern=r"^show_posts:"))
-    application.add_handler(CallbackQueryHandler(handle_show_tg_posts, pattern=r"^show_tg_posts:"))
+        asyncio.run_coroutine_threadsafe(application.initialize(), _loop).result(timeout=30)
 
-    # Инициализировать application в том же event loop
-    asyncio.run_coroutine_threadsafe(application.initialize(), _loop).result()
+        import requests as req
+        webhook_endpoint = f"{WEBHOOK_URL}/webhook"
+        resp = req.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
+            json={"url": webhook_endpoint, "allowed_updates": ["message", "callback_query"]},
+            timeout=15
+        )
+        print(f"Webhook set: {resp.json()}", flush=True)
+    except Exception as e:
+        print(f"[init_bot] error: {e}", flush=True)
 
-    # Установить webhook при старте
-    import requests as req
-    webhook_endpoint = f"{WEBHOOK_URL}/webhook"
-    resp = req.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
-        json={"url": webhook_endpoint, "allowed_updates": ["message", "callback_query"]}
-    )
-    print(f"Webhook set: {resp.json()}")
+
+def main():
+    # Запускаем Flask сразу — Render требует биндинг порта в течение 5 минут
+    threading.Thread(target=_init_bot, daemon=True).start()
 
     port = int(os.environ.get("PORT", 8080))
-    print(f"Starting Flask on port {port}...")
+    print(f"Starting Flask on port {port}...", flush=True)
     app_flask.run(host="0.0.0.0", port=port)
 
 
