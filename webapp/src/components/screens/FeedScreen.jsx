@@ -375,7 +375,7 @@ const resetCompetitorFilters = () => {
             <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Источник</div>
             <div style={{ display: 'flex', gap: 8, overflowX: 'auto', whiteSpace: 'nowrap', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
               {[
-                { id: 'all', label: 'Все источники' },
+                { id: 'all', label: 'Все' },
                 { id: 'website', label: '🌐 Web' },
                 { id: 'telegram', label: '📢 TG' }
               ].map(src => (
@@ -427,7 +427,7 @@ const resetCompetitorFilters = () => {
           {/* Фильтр по группам */}
           <div style={{ position: 'relative', zIndex: 10 }}>
             <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Группы</span>
+              <span>Группы конкурентов</span>
               {(selectedGroups.length > 0 || activeSourceFilter !== 'all' || activeCategory !== 'all') && (
                 <button
                   onClick={resetCompetitorFilters}
