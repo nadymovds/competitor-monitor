@@ -266,7 +266,7 @@ const resetCompetitorFilters = () => {
   // Используем базовые счётчики (независимые от source/category фильтров)
   const sourceCounts = baseCounts.sources
   const categoryCounts = baseCounts.categories
-  const visibleNewsCategories = newsCategories
+  const visibleNewsCategories = newsCategories.filter(c => c.is_visible !== false)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
