@@ -4,6 +4,12 @@ name: Mentions Monitor
   schedule:
     - cron: '0 6 * * 1'    # каждый понедельник в 9:00 МСК (06:00 UTC)
   workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Тестовый режим (уведомления только администратору)'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   monitor-mentions:
@@ -38,4 +44,4 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
           YANDEX_SEARCH_FOLDER_ID: ${{ secrets.YANDEX_SEARCH_FOLDER_ID }}
-        run: python mentions_monitor.py
+        run: python mentions_monitor.py ${{ github.event.inputs.test_mode == 'true' && '--test' || '' }}

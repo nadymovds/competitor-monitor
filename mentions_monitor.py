@@ -32,6 +32,7 @@ GROQ_API_KEY        = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
+TEST_MODE = False  # переопределяется через --test
 
 YANDEX_API_KEY      = os.environ.get("YANDEX_SEARCH_API_KEY")
 YANDEX_FOLDER_ID    = os.environ.get("YANDEX_SEARCH_FOLDER_ID")
@@ -359,6 +360,9 @@ def parse_date(date_str: str) -> datetime | None:
 # ============================================================================
 
 def get_notification_recipients() -> list:
+    if TEST_MODE:
+        print("⚠️ TEST MODE: уведомления только администратору")
+        return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
     recipients = []
     for chat_id in [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]:
         if chat_id:
@@ -1545,5 +1549,12 @@ async def run_mentions_monitoring():
 # ============================================================================
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test', action='store_true', help='Тестовый режим: уведомления только администратору')
+    args = parser.parse_args()
+    if args.test:
+        global TEST_MODE
+        TEST_MODE = True
     init_semaphores()
     asyncio.run(run_mentions_monitoring())

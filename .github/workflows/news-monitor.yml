@@ -9,6 +9,11 @@ name: News Monitor
         description: 'Период в днях'
         required: false
         default: '7'
+      test_mode:
+        description: 'Тестовый режим (уведомления только администратору)'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   monitor-news:
@@ -42,4 +47,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NEWS_PERIOD_DAYS: ${{ github.event.inputs.period_days || '7' }}
-        run: python news_monitor.py
+        run: python news_monitor.py ${{ github.event.inputs.test_mode == 'true' && '--test' || '' }}
