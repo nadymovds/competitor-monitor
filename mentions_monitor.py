@@ -361,22 +361,8 @@ def parse_date(date_str: str) -> datetime | None:
 # ============================================================================
 
 def get_notification_recipients() -> list:
-    if TEST_MODE:
-        print("⚠️ TEST MODE: уведомления только администратору")
-        return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
-    recipients = []
-    for chat_id in ([TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []) + TELEGRAM_GROUP_CHAT_IDS:
-        if chat_id:
-            recipients.append(chat_id)
-    try:
-        result = supabase.table("users").select("telegram_id").execute()
-        for row in result.data or []:
-            tid = str(row["telegram_id"])
-            if tid not in recipients:
-                recipients.append(tid)
-    except:
-        pass
-    return recipients
+    # Уведомления отключены для этого скрипта
+    return []
 
 
 def send_telegram_message(message: str) -> bool:
