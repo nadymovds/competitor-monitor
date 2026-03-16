@@ -17,6 +17,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [accessDenied, setAccessDenied] = useState(false)
+  const [accessDeniedInfo, setAccessDeniedInfo] = useState(null)
   const [selectedCompetitorId, setSelectedCompetitorId] = useState(null)
   const [cameFromFeed, setCameFromFeed] = useState(false)
 
@@ -26,11 +27,13 @@ export default function App() {
         setLoading(true)
         const telegramUser = getTelegramUser()
         if (!telegramUser) {
+          setAccessDeniedInfo({ reason: 'no_tg_user' })
           setAccessDenied(true)
           return
         }
         const { allowed, user: dbUser } = await checkUserAccess(telegramUser)
         if (!allowed) {
+          setAccessDeniedInfo({ reason: 'not_in_db', telegramId: telegramUser.id })
           setAccessDenied(true)
           return
         }
@@ -97,6 +100,16 @@ export default function App() {
           <br />
           Обратитесь к администратору.
         </div>
+        {accessDeniedInfo?.reason === 'not_in_db' && (
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 12 }}>
+            ID: {String(accessDeniedInfo.telegramId)}
+          </div>
+        )}
+        {accessDeniedInfo?.reason === 'no_tg_user' && (
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 12 }}>
+            Telegram не передал данные пользователя
+          </div>
+        )}
       </div>
     )
   }
