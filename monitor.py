@@ -164,8 +164,21 @@ def wake_up_bot(timeout: int = 90) -> None:
         print(f"⚠️ Прогрев бота не удался: {e}")
 
 def get_notification_recipients() -> list:
-    # Уведомления отключены для этого скрипта
-    return []
+    if TEST_MODE:
+        print("⚠️ TEST MODE: уведомления только администратору")
+        return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
+    recipients = []
+    if TELEGRAM_CHAT_ID:
+        recipients.append(TELEGRAM_CHAT_ID)
+    try:
+        result = supabase.table("users").select("telegram_id").execute()
+        for row in result.data or []:
+            tid = str(row["telegram_id"])
+            if tid not in recipients:
+                recipients.append(tid)
+    except:
+        pass
+    return recipients
 
 def send_telegram_message(message: str, reply_markup: dict = None) -> bool:
     success = False
