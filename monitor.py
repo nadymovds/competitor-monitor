@@ -43,9 +43,10 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-TELEGRAM_GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
+_group_ids_raw = os.environ.get("TELEGRAM_GROUP_CHAT_ID", "")
+TELEGRAM_GROUP_CHAT_IDS = [i.strip() for i in _group_ids_raw.split(",") if i.strip()]
 BOT_URL = os.environ.get("BOT_URL")
-TEST_MODE = False  # переопределяется через --test  # https://your-bot.onrender.com
+TEST_MODE = False  # переопределяется через --test
 
 LLM_MODEL = "llama-3.1-8b-instant"
 LLM_API_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -167,7 +168,7 @@ def get_notification_recipients() -> list:
         print("⚠️ TEST MODE: уведомления только администратору")
         return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
     recipients = []
-    for chat_id in [TELEGRAM_CHAT_ID, TELEGRAM_GROUP_CHAT_ID]:
+    for chat_id in ([TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []) + TELEGRAM_GROUP_CHAT_IDS:
         if chat_id:
             recipients.append(chat_id)
     try:
@@ -217,7 +218,7 @@ def send_app_button(chat_id: str = None) -> bool:
     """Отправляет кнопку для открытия Mini App"""
     if not TELEGRAM_BOT_TOKEN:
         return False
-    target_chat_id = chat_id or TELEGRAM_GROUP_CHAT_ID
+    target_chat_id = chat_id or (TELEGRAM_GROUP_CHAT_IDS[0] if TELEGRAM_GROUP_CHAT_IDS else None)
     if not target_chat_id:
         return False
     try:
