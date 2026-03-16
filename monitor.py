@@ -2507,6 +2507,5 @@ if __name__ == "__main__":
     parser.add_argument('--test', action='store_true', help='Тестовый режим: уведомления только администратору')
     args = parser.parse_args()
     if args.test:
-        global TEST_MODE
         TEST_MODE = True
     run_monitoring_system(args.mode)

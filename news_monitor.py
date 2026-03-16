@@ -2098,6 +2098,5 @@ if __name__ == "__main__":
     parser.add_argument('--test', action='store_true', help='Тестовый режим: уведомления только администратору')
     args = parser.parse_args()
     if args.test:
-        global TEST_MODE
         TEST_MODE = True
     asyncio.run(run_news_monitoring_async())
