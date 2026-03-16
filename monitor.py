@@ -2107,15 +2107,25 @@ async def scan_tg_channels_async(
             # 2. Дедупликация по content_hash
             existing_hashes = get_existing_tg_content_hashes(competitor_id)
             new_posts = []
-            skipped_dupes = 0
+            dupe_posts = []
             for post in posts:
                 if post.get('content_hash') and post['content_hash'] in existing_hashes:
-                    skipped_dupes += 1
-                    continue
-                new_posts.append(post)
+                    dupe_posts.append(post)
+                else:
+                    new_posts.append(post)
 
-            if skipped_dupes:
-                print(f"    ⏭️ Пропущено дубликатов: {skipped_dupes}")
+            # Обновляем report_id у дублей — чтобы кнопка в боте нашла их по текущему отчёту
+            if dupe_posts:
+                print(f"    ⏭️ Пропущено дубликатов: {len(dupe_posts)}")
+                for post in dupe_posts:
+                    try:
+                        supabase.table('competitor_tg_posts') \
+                            .update({'report_id': report_id}) \
+                            .eq('channel_username', channel_username) \
+                            .eq('message_id', post['message_id']) \
+                            .execute()
+                    except Exception as e:
+                        print(f"    ⚠️ Ошибка обновления report_id у дубля: {e}")
 
             if not new_posts:
                 # Обновляем last_message_id даже если все дубликаты
