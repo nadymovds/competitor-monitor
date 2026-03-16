@@ -159,7 +159,7 @@ async def handle_show_tg_posts(update: Update, context: ContextTypes.DEFAULT_TYP
             "competitors(name)"
         )
         .eq("report_id", report_id)
-        .eq("is_meaningful", True)
+        .eq("is_processed", True)
         .order("post_date", desc=False)
         .execute()
     )

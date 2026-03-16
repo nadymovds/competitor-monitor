@@ -1748,10 +1748,20 @@ def save_competitor_tg_post(competitor_id: str, url_id: str, channel_username: s
 
         result = supabase.table('competitor_tg_posts').upsert(
             data, on_conflict='channel_username,message_id'
-        ).execute()
+        ).select('id').execute()
 
         if result.data:
             return result.data[0].get('id')
+
+        # Fallback: получаем id отдельным запросом
+        fallback = supabase.table('competitor_tg_posts') \
+            .select('id') \
+            .eq('channel_username', channel_username) \
+            .eq('message_id', post_data['message_id']) \
+            .single() \
+            .execute()
+        if fallback.data:
+            return fallback.data.get('id')
         return None
 
     except Exception as e:
@@ -1787,7 +1797,6 @@ def mark_tg_post_processed(post_id: int, title: str, summary: str,
             'category': category,
             'tags': tags or [],
             'is_processed': True,
-            'is_meaningful': is_meaningful,
         }
 
         result = supabase.table('competitor_tg_posts') \
