@@ -330,6 +330,18 @@ Telegram-каналы и веб-порталы для мониторинга у�
 | created_at | timestamptz | Дата создания |
 | updated_at | timestamptz | Дата обновления |
 
+### `mention_ignored_sources`
+Чёрный список источников — паттерны URL / username, которые следует игнорировать.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | serial | PK |
+| pattern | text | URL или паттерн для игнорирования |
+| description | text | Описание (почему добавлен) |
+| created_at | timestamptz | Дата создания |
+
+---
+
 ### `mention_scans`
 История запусков скрипта мониторинга упоминаний.
 

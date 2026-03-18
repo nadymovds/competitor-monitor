@@ -18,13 +18,13 @@
 
 #### Основные модули
 
-**`monitor.py`** - Мониторинг конкурентов
-- Сканирование веб-сайтов конкурентов
-- Мониторинг Telegram-каналов конкурентов
-- Определение изменений через LLM
-- Категоризация изменений (products/prices/services/news)
-- Генерация PDF-отчетов
-- Отправка уведомлений в Telegram
+**`monitor.py`** - Мониторинг конкурентов (режимы: `--mode websites` / `--mode telegram`)
+- Сканирование веб-сайтов конкурентов (Playwright, async)
+- Мониторинг Telegram-каналов конкурентов (Telethon)
+- Определение изменений через LLM (Groq / llama-3.3-70b-versatile)
+- Категоризация изменений (products/prices/services/news/technical)
+- Генерация PDF-отчётов
+- Отправка уведомлений в личные чаты и групповые чаты (`TELEGRAM_GROUP_CHAT_IDS`)
 
 **`news_monitor.py`** - Мониторинг отраслевых новостей
 - Сканирование новостных Telegram-каналов
@@ -37,6 +37,7 @@
 
 **`mentions_monitor.py`** - Мониторинг упоминаний компании
 - Поиск по Yandex Search API (асинхронный)
+- Поиск по Google Custom Search API (опционально)
 - Парсинг Telegram-каналов через Playwright
 - Парсинг веб-порталов через Playwright (CSS-селекторы)
 - Анализ тональности и генерация summary через Groq LLM
@@ -181,19 +182,23 @@ webapp/
 ├── src/
 │   ├── components/
 │   │   ├── screens/      # Экраны приложения
-│   │   │   ├── FeedScreen.jsx        # Единая лента
+│   │   │   ├── FeedScreen.jsx        # Единая лента (конкуренты + новости)
 │   │   │   ├── ScansScreen.jsx       # История сканирований
 │   │   │   ├── CompetitorsScreen.jsx # Список конкурентов
 │   │   │   ├── MentionsScreen.jsx    # Упоминания компании
 │   │   │   └── SettingsScreen.jsx    # Настройки
 │   │   └── ui/           # UI компоненты
-│   │       ├── BottomNav.jsx
+│   │       ├── BottomNav.jsx         # 5 вкладок: feed/scans/competitors/mentions/settings
+│   │       ├── FeedTypeToggle.jsx    # Переключатель Все/Конкуренты/Новости
+│   │       ├── MultiSelect.jsx       # Dropdown с множественным выбором
 │   │       ├── NewsCard.jsx
 │   │       ├── MentionCard.jsx       # Карточка упоминания
-│   │       ├── ScanCard.jsx
+│   │       ├── ScanCard.jsx          # Карточка сканирования (collapse/expand)
+│   │       ├── NextScanInfo.jsx      # Дата следующего сканирования
+│   │       ├── NewsFilters.jsx       # Фильтры новостей
 │   │       └── ...
 │   ├── services/
-│   │   ├── supabase.js   # Клиент Supabase + CRUD для mentions
+│   │   ├── supabase.js   # Клиент Supabase + CRUD
 │   │   ├── mentions.js   # API упоминаний
 │   │   ├── news.js       # API новостей
 │   │   ├── feed.js       # API единой ленты
@@ -207,8 +212,8 @@ webapp/
 **FeedScreen** - Единая лента
 - Объединяет изменения конкурентов и отраслевые новости
 - Фильтры по типу, группам, категориям, источникам
-- Infinite scroll
-- Период: последние 7 дней
+- Infinite scroll (10 элементов за раз)
+- Период: последние 30 дней (до 8 недель назад)
 
 **ScansScreen** - История сканирований
 - Переключатель: Конкуренты / Новости
@@ -297,15 +302,19 @@ const { data, error } = await supabase
 
 **1. По расписанию (автоматический):**
 ```yaml
-# Мониторинг конкурентов - каждый четверг 18:00 МСК
+# monitor.py --mode websites — каждый четверг 18:00 МСК
 schedule:
   - cron: '0 15 * * 4'  # UTC
 
-# Мониторинг новостей - каждую пятницу 9:00 МСК
+# monitor.py --mode telegram — ежедневно 09:00 МСК
+schedule:
+  - cron: '0 6 * * *'  # UTC
+
+# news_monitor.py — каждую пятницу 9:00 МСК
 schedule:
   - cron: '0 6 * * 5'  # UTC
 
-# Мониторинг упоминаний - каждый понедельник 9:00 МСК
+# mentions_monitor.py — каждый понедельник 9:00 МСК
 schedule:
   - cron: '0 6 * * 1'  # UTC
 ```
@@ -511,18 +520,24 @@ Polling не используется — Telegram сам шлёт POST-запр
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=xxx
 TELEGRAM_BOT_TOKEN=xxx
-TELEGRAM_CHAT_ID=xxx
+TELEGRAM_CHAT_ID=xxx                         # личный чат для уведомлений
+TELEGRAM_GROUP_CHAT_IDS=id1,id2              # групповые чаты (через запятую)
 GROQ_API_KEY=xxx
 
 # mentions_monitor.py — дополнительно
 YANDEX_SEARCH_API_KEY=xxx
 YANDEX_SEARCH_FOLDER_ID=xxx
+GOOGLE_CSE_API_KEY=xxx                       # опционально
+GOOGLE_CSE_ID=xxx                            # опционально
+
+# news_monitor.py — опционально
+NEWS_PERIOD_DAYS=7                           # период сбора новостей
 
 # bot.py — Render.com Environment Variables
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=xxx
 TELEGRAM_BOT_TOKEN=xxx
-WEBHOOK_URL=https://your-app.onrender.com  # URL выданный Render
+WEBHOOK_URL=https://your-app.onrender.com    # URL выданный Render
 
 # Frontend (webapp/.env)
 VITE_SUPABASE_URL=https://xxx.supabase.co
@@ -531,9 +546,9 @@ VITE_SUPABASE_ANON_KEY=xxx
 
 ### Деплой
 
-- **Cron-скрипты** (`news_monitor.py`, `competitor_monitor.py`): GitHub Actions (эфемерные контейнеры)
+- **Cron-скрипты** (`monitor.py`, `news_monitor.py`, `mentions_monitor.py`): GitHub Actions (эфемерные контейнеры)
 - **Telegram Bot** (`bot.py`): Render.com free tier (webhook-сервер, постоянно доступен)
-- **Frontend** (`webapp/`): Netlify
+- **Frontend** (`webapp/`): GitHub Pages (автодеплой при push в `webapp/**`)
 - **База данных**: Supabase (managed PostgreSQL)
 
 ---
