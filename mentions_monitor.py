@@ -1174,7 +1174,7 @@ def find_mentions_in_news_posts(scan_id: int | None, terms: list[str]) -> int:
 
     try:
         result = (supabase.table("news_posts")
-                  .select("channel_id, post_url, content_text, post_date")
+                  .select("channel_id, post_url, content_text, post_date, source_type")
                   .gte("post_date", since_date)
                   .execute())
         posts = result.data or []
@@ -1200,12 +1200,16 @@ def find_mentions_in_news_posts(scan_id: int | None, terms: list[str]) -> int:
         snippet = extract_match_context(text, matched_term, window=200)
 
         channel = channel_map.get(post.get("channel_id"), {})
+        post_source_type = post.get("source_type") or "telegram"
         username = channel.get("username", "")
-        source_name = f"@{username.lstrip('@')}" if username else (channel.get("title") or "новости TG")
+        if post_source_type == "website":
+            source_name = channel.get("title") or "новости портал"
+        else:
+            source_name = f"@{username.lstrip('@')}" if username else (channel.get("title") or "новости TG")
 
         data = {
             "scan_id":         scan_id,
-            "source_type":     "telegram",
+            "source_type":     post_source_type,
             "url":             url,
             "title":           text[:150].split("\n")[0],
             "content_snippet": snippet[:1000],
