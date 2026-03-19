@@ -593,10 +593,11 @@ async def search_google(term: str, session: aiohttp.ClientSession) -> list[dict]
         print("  ⚠️ Google CSE не настроен, пропуск")
         return []
 
+    api_query = re.sub(r"\s+", " ", re.sub(r"[.\-]+", " ", term)).strip()
     params = {
         "key":          GOOGLE_CSE_API_KEY,
         "cx":           GOOGLE_CSE_ID,
-        "q":            f'"{term}"',
+        "q":            f'"{api_query}"',
         "num":          10,
         "dateRestrict": "w1",
     }
@@ -658,11 +659,12 @@ async def _search_yandex_page(term: str, page: int, session: aiohttp.ClientSessi
         "Authorization": f"Api-Key {YANDEX_API_KEY}",
         "Content-Type":  "application/json",
     }
+    api_query = re.sub(r"\s+", " ", re.sub(r"[.\-]+", " ", term)).strip()
     body = {
         "folderId": YANDEX_FOLDER_ID,
         "query": {
             "searchType": "SEARCH_TYPE_RU",
-            "queryText":  f'"{term}"',
+            "queryText":  f'"{api_query}"',
             "maxPassages": 1,
             "page": page,
         },
