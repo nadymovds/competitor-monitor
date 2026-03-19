@@ -375,27 +375,26 @@ export async function getCompetitorScans(limit = 10, offset = 0) {
 export async function getMentionSearchTerms() {
   const { data, error } = await supabase
     .from('mention_search_terms')
-    .select('*')
+    .select('id, term, is_active, created_at')
     .order('id')
   if (error) throw error
   return data
 }
 
-export async function createMentionSearchTerm({ term, description, matchType = 'partial' }) {
+export async function createMentionSearchTerm({ term }) {
   const { data, error } = await supabase
     .from('mention_search_terms')
-    .insert({ term, description: description || null, match_type: matchType })
+    .insert({ term, is_active: true })
     .select()
     .single()
   if (error) throw error
   return data
 }
 
-export async function updateMentionSearchTerm(id, { term, isActive, matchType }) {
+export async function updateMentionSearchTerm(id, { term, isActive }) {
   const updates = { updated_at: new Date().toISOString() }
   if (term !== undefined) updates.term = term
   if (isActive !== undefined) updates.is_active = isActive
-  if (matchType !== undefined) updates.match_type = matchType
 
   const { data, error } = await supabase
     .from('mention_search_terms')
@@ -482,10 +481,10 @@ export async function getMentionIgnoredSources() {
   return data
 }
 
-export async function createMentionIgnoredSource({ pattern, description }) {
+export async function createMentionIgnoredSource({ pattern }) {
   const { data, error } = await supabase
     .from('mention_ignored_sources')
-    .insert({ pattern: pattern.trim(), description: description?.trim() || null })
+    .insert({ pattern: pattern.trim() })
     .select()
     .single()
   if (error) throw error

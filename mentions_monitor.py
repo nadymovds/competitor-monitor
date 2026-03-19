@@ -128,76 +128,41 @@ def _term_tokens(term_norm: str) -> list[str]:
 
 
 @lru_cache(maxsize=2048)
-def _build_term_regex(term_norm: str, mode: str) -> re.Pattern | None:
+def _build_term_regex(term_norm: str) -> re.Pattern | None:
     tokens = _term_tokens(term_norm)
     if not tokens:
         return None
-    if mode == "partial":
-        core = re.escape(tokens[0])
-    else:
-        core = r"[\s\-]+".join(re.escape(t) for t in tokens)
+    core = r"[\s\-]+".join(re.escape(t) for t in tokens)
     boundary = r"(?<![0-9A-Za-zА-Яа-яЁё])"
     boundary_end = r"(?![0-9A-Za-zА-Яа-яЁё])"
     return re.compile(boundary + core + boundary_end, re.IGNORECASE)
 
 
-def _should_force_full(term: str, match_type: str) -> bool:
-    if match_type == "full":
-        return True
-    term_norm = _normalize_for_match(term)
-    tokens = _term_tokens(term_norm)
-    if not tokens:
-        return True
-    # Короткие/аббревиатурные токены дают много ложных совпадений.
-    if len(tokens) >= 2 and len(tokens[0]) <= 4:
-        return True
-    if len(tokens) == 1 and len(tokens[0]) <= 3:
-        return True
-    if re.fullmatch(r"[A-ZА-Я0-9]{2,5}", term.strip()):
-        return True
-    if "skai" in term_norm:
-        return False
-    return False
-
-
-def term_matches(text: str, term: str, match_type: str = "partial", strict_full: bool = False) -> bool:
+def term_matches(text: str, term: str) -> bool:
+    """Полное совпадение: все токены термина присутствуют в тексте (граница слова)."""
     if not text or not term:
         return False
-    if match_type not in ("partial", "full"):
-        match_type = "partial"
     text_norm = _normalize_for_match(text)
     term_norm = _normalize_for_match(term)
-    effective = "full" if strict_full or _should_force_full(term, match_type) else match_type
-    rx = _build_term_regex(term_norm, effective)
+    rx = _build_term_regex(term_norm)
     if not rx:
         return False
     return bool(rx.search(text_norm))
 
 
-def find_matching_term(text: str, term_configs: list[dict], match_type_map: dict | None = None,
-                       strict_full: bool = False) -> str:
+def find_matching_term(text: str, terms: list[str]) -> str:
+    """Первый найденный термин или пустая строка."""
     if not text:
         return ""
-    for cfg in term_configs or []:
-        term = cfg.get("term") or ""
-        if not term:
-            continue
-        match_type = cfg.get("match_type") or "partial"
-        if match_type_map:
-            match_type = match_type_map.get(term.lower(), match_type)
-        if term_matches(text, term, match_type, strict_full=strict_full):
+    for term in terms or []:
+        if term and term_matches(text, term):
             return term
     return ""
 
 
-def contains_any_term(text: str, term_configs: list[dict], match_type_map: dict | None = None,
-                      strict_full: bool = False) -> bool:
-    return bool(find_matching_term(text, term_configs, match_type_map, strict_full=strict_full))
-
-
-def has_required_keyword(text: str, term: str, match_type: str = "partial",
-                         strict_full: bool = False) -> bool:
-    return term_matches(text, term, match_type, strict_full=strict_full)
+def contains_any_term(text: str, terms: list[str]) -> bool:
+    """True если хотя бы один термин найден в тексте."""
+    return bool(find_matching_term(text, terms))
 
 
 def extract_match_context(text: str, term: str, window: int = 200) -> str:
@@ -254,14 +219,6 @@ def is_url_ignored(url: str, patterns: list[str]) -> bool:
     return False
 
 
-BLOCKED_DOMAINS = {
-    "audit-it.ru", "rusprofile.ru", "zachestnyibiznes.ru", "list-org.com",
-    "focus.kontur.ru", "synapsenet.ru", "spark-interfax.ru", "checko.ru",
-    "sbis.ru", "kartoteka.ru", "2gis.ru", "flagma.ru",
-    "hh.ru", "superjob.ru", "zarplata.ru", "rabota.ru", "trudvsem.ru",
-    "tgsearch.su", "tgramsearch.com", "tgramsearch.ru", "tgstat.ru", "telemetr.me",
-}
-
 IRRELEVANT_TEXT_PATTERNS = [
     re.compile(r"\b(инн|огрн|кпп|оквэд|устав|учредител|регистрац|юр\.?\s*адрес)\b", re.IGNORECASE),
     re.compile(r"\b(ваканс|резюме|карьер|соискател|отклик|работа в)\b", re.IGNORECASE),
@@ -271,19 +228,7 @@ IRRELEVANT_TEXT_PATTERNS = [
 ]
 
 
-def is_blocked_url(url: str) -> bool:
-    if not url:
-        return False
-    try:
-        hostname = (urlparse(url).hostname or "").lower()
-    except Exception:
-        return False
-    return any(hostname == d or hostname.endswith("." + d) for d in BLOCKED_DOMAINS)
-
-
 def is_obviously_irrelevant(text: str, url: str) -> bool:
-    if is_blocked_url(url):
-        return True
     if not text:
         return True
     return any(rx.search(text) for rx in IRRELEVANT_TEXT_PATTERNS)
@@ -452,7 +397,7 @@ def parse_llm_json(response: str) -> dict | None:
         return None
 
 
-async def analyze_mention(text: str, url: str, search_term: str, match_type: str,
+async def analyze_mention(text: str, url: str, search_term: str,
                           session: aiohttp.ClientSession) -> tuple[str, str, bool]:
     """Определяет тональность, summary и релевантность упоминания через Groq.
 
@@ -467,32 +412,16 @@ async def analyze_mention(text: str, url: str, search_term: str, match_type: str
     if is_obviously_irrelevant(text, url):
         return "neutral", "", False
 
-    # Python-уровень проверка: обязательное ключевое слово должно быть в тексте.
-    # Если нет — LLM-вызов не нужен, сразу нерелевантно.
-    force_full = _should_force_full(search_term, match_type)
-    if not has_required_keyword(text, search_term, match_type, strict_full=force_full):
+    if not term_matches(text, search_term):
         return "neutral", "", False
-
-    term_in_text = term_matches(text, search_term, "full", strict_full=True)
-    match_type_label = (
-        "ПОЛНОЕ — весь запрос должен присутствовать в тексте дословно"
-        if (match_type == "full" or force_full)
-        else "ЧАСТИЧНОЕ — достаточно присутствия первого ключевого слова (бренда)"
-    )
 
     prompt = f"""Оцени релевантность поискового результата для мониторинга упоминаний компании.
 
 ПОИСКОВЫЙ ЗАПРОС: «{search_term}»
-ТИП СОВПАДЕНИЯ: {match_type_label}
-ЗАПРОС ПРИСУТСТВУЕТ В ТЕКСТЕ: {"ДА" if term_in_text else "НЕТ — полная фраза отсутствует в сниппете"}
 URL: {url}
 ТЕКСТ СНИППЕТА: {text[:2000]}
 
-ПРАВИЛО №1 (ЖЁСТКОЕ): Если «ЗАПРОС ПРИСУТСТВУЕТ В ТЕКСТЕ» = НЕТ → проверь ТИП СОВПАДЕНИЯ.
-  - Если тип ПОЛНОЕ и фразы нет → is_relevant: false ОБЯЗАТЕЛЬНО.
-  - Если тип ЧАСТИЧНОЕ — допустимо, если первое слово запроса есть в тексте.
-
-ПРАВИЛО №2: Даже если запрос есть в тексте, ставь is_relevant: false если:
+Ставь is_relevant: false если:
 - «{search_term}» просто в списке клиентов/партнёров/портфолио без события
 - Аббревиатура ООО/ЗАО/АО совпала случайно с другой компанией
 - Сайт — справочник юрлиц (audit-it.ru, rusprofile.ru, focus.kontur.ru, zachestnyibiznes.ru и т.п.)
@@ -529,19 +458,14 @@ is_relevant: true ТОЛЬКО если: есть конкретное собы�
 # SUPABASE — ОПЕРАЦИИ
 # ============================================================================
 
-def get_search_terms() -> list[dict]:
-    """Возвращает активные поисковые термины с типом совпадения.
-    Каждый элемент: {"term": str, "match_type": "partial"|"full"}
-    """
+def get_search_terms() -> list[str]:
+    """Возвращает активные поисковые термины."""
     try:
         result = (supabase.table("mention_search_terms")
-                  .select("term, match_type")
+                  .select("term")
                   .eq("is_active", True)
                   .execute())
-        return [
-            {"term": row["term"], "match_type": row.get("match_type") or "partial"}
-            for row in (result.data or []) if row.get("term")
-        ]
+        return [row["term"] for row in (result.data or []) if row.get("term")]
     except Exception as e:
         print(f"❌ Ошибка получения поисковых терминов: {e}")
         return []
@@ -605,9 +529,6 @@ def save_mention(data: dict) -> bool:
     url = data.get("url", "")
     if url and is_url_ignored(url, IGNORED_PATTERNS):
         print(f"  🚫 Игнорируем (в списке исключений): {url[:80]}")
-        return False
-    if url and is_blocked_url(url):
-        print(f"  🚫 Блоклист домена (save_mention): {url[:80]}")
         return False
     try:
         result = supabase.table("mentions").insert(data).execute()
@@ -930,8 +851,7 @@ def parse_tg_posts(html: str, username: str) -> list[dict]:
     return sorted(posts, key=lambda p: p["message_id"])
 
 
-async def scan_tg_channel(source: dict, term_configs: list[dict],
-                          match_type_map: dict, browser_context) -> list[dict]:
+async def scan_tg_channel(source: dict, terms: list[str], browser_context) -> list[dict]:
     """Сканирует TG-канал, фильтрует посты по вхождению терминов."""
     username = source.get("username", "").lstrip("@")
     if not username:
@@ -962,7 +882,7 @@ async def scan_tg_channel(source: dict, term_configs: list[dict],
         text = p.get("text") or ""
         if not text:
             continue
-        term = find_matching_term(text, term_configs, match_type_map)
+        term = find_matching_term(text, terms)
         if not term:
             continue
         p["__matched_term"] = term
@@ -1081,8 +1001,7 @@ def parse_articles_from_html(html: str, base_url: str, css_config: dict) -> list
     return results
 
 
-async def scan_website(source: dict, term_configs: list[dict],
-                       match_type_map: dict, browser_context) -> list[dict]:
+async def scan_website(source: dict, terms: list[str], browser_context) -> list[dict]:
     """Сканирует веб-портал, фильтрует статьи по вхождению терминов."""
     url   = source.get("url", "")
     title = source.get("title") or url
@@ -1107,7 +1026,7 @@ async def scan_website(source: dict, term_configs: list[dict],
     matched = []
     for a in articles:
         combined = f"{a['title']} {a['text']}"
-        term = find_matching_term(combined, term_configs, match_type_map)
+        term = find_matching_term(combined, terms)
         if not term:
             continue
         a["__matched_term"] = term
@@ -1147,18 +1066,6 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
         print("  ℹ️ Необработанных упоминаний нет")
         return 0, 0
 
-    # Загружаем типы совпадения для быстрого поиска по тексту термина
-    try:
-        terms_result = (supabase.table("mention_search_terms")
-                        .select("term, match_type")
-                        .execute())
-        match_type_map = {
-            row["term"].lower(): row.get("match_type") or "partial"
-            for row in (terms_result.data or [])
-        }
-    except Exception:
-        match_type_map = {}
-
     print(f"  🤖 Обрабатываю {len(mentions)} упоминаний через LLM...")
     processed = 0
     deleted   = 0
@@ -1167,9 +1074,8 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
         try:
             text        = mention.get("content_snippet") or mention.get("title") or ""
             search_term = mention.get("search_term") or ""
-            match_type  = match_type_map.get(search_term.lower(), "partial")
             sentiment, summary, is_relevant = await analyze_mention(
-                text, mention.get("url", ""), search_term, match_type, session
+                text, mention.get("url", ""), search_term, session
             )
             if not is_relevant:
                 delete_mention(mention["id"])
@@ -1192,8 +1098,7 @@ async def process_unprocessed_mentions(session: aiohttp.ClientSession) -> tuple[
 # ПОИСК УПОМИНАНИЙ В УЖЕ СОБРАННЫХ TG-ПОСТАХ (конкуренты + новости)
 # ============================================================================
 
-def find_mentions_in_competitor_posts(scan_id: int | None, term_configs: list[dict],
-                                      match_type_map: dict) -> int:
+def find_mentions_in_competitor_posts(scan_id: int | None, terms: list[str]) -> int:
     """Ищет упоминания терминов в уже собранных постах TG-каналов конкурентов.
 
     Не запускает браузер — читает данные из таблицы competitor_tg_posts.
@@ -1221,9 +1126,7 @@ def find_mentions_in_competitor_posts(scan_id: int | None, term_configs: list[di
         url = post.get("post_url", "")
         if not url:
             continue
-        if is_blocked_url(url):
-            continue
-        matched_term = find_matching_term(text, term_configs, match_type_map)
+        matched_term = find_matching_term(text, terms)
         if not matched_term:
             continue
         if is_obviously_irrelevant(text, url=url):
@@ -1251,8 +1154,7 @@ def find_mentions_in_competitor_posts(scan_id: int | None, term_configs: list[di
     return new_count
 
 
-def find_mentions_in_news_posts(scan_id: int | None, term_configs: list[dict],
-                                match_type_map: dict) -> int:
+def find_mentions_in_news_posts(scan_id: int | None, terms: list[str]) -> int:
     """Ищет упоминания терминов в уже собранных постах отраслевых новостных TG-каналов.
 
     Не запускает браузер — читает данные из таблицы news_posts.
@@ -1288,9 +1190,7 @@ def find_mentions_in_news_posts(scan_id: int | None, term_configs: list[dict],
         url = post.get("post_url", "")
         if not url:
             continue
-        if is_blocked_url(url):
-            continue
-        matched_term = find_matching_term(text, term_configs, match_type_map)
+        matched_term = find_matching_term(text, terms)
         if not matched_term:
             continue
         if is_obviously_irrelevant(text, url=url):
@@ -1337,18 +1237,14 @@ async def run_mentions_monitoring():
     IGNORED_PATTERNS = get_ignored_patterns()
     print(f"🚫 Игнорируемых источников: {len(IGNORED_PATTERNS)}")
 
-    search_term_configs = get_search_terms()  # list[{"term": str, "match_type": str}]
-    if not search_term_configs:
+    search_terms = get_search_terms()  # list[str]
+    if not search_terms:
         msg = "❌ Нет активных поисковых терминов — мониторинг упоминаний отменён"
         print(msg)
         send_telegram_message(msg)
         if scan_id:
             fail_scan(scan_id, "Нет активных поисковых терминов")
         return
-
-    # Список строк — для совместимости с функциями, принимающими list[str]
-    search_terms = [t["term"] for t in search_term_configs]
-    match_type_map = {t["term"].lower(): t.get("match_type", "partial") for t in search_term_configs}
 
     sources = get_mention_sources()
     tg_sources  = [s for s in sources if s.get("source_type") == "telegram"]
@@ -1411,7 +1307,7 @@ async def run_mentions_monitoring():
                 print("=" * 60)
                 for i, source in enumerate(tg_sources, 1):
                     print(f"\n[{i}/{len(tg_sources)}] {source.get('title') or source.get('username')}")
-                    results = await scan_tg_channel(source, search_term_configs, match_type_map, browser_context)
+                    results = await scan_tg_channel(source, search_terms, browser_context)
                     all_results.extend(results)
                     if i < len(tg_sources):
                         await asyncio.sleep(DELAY_BETWEEN_SOURCES)
@@ -1423,7 +1319,7 @@ async def run_mentions_monitoring():
                 print("=" * 60)
                 for i, source in enumerate(web_sources, 1):
                     print(f"\n[{i}/{len(web_sources)}] {source.get('title') or source.get('url')}")
-                    results = await scan_website(source, search_term_configs, match_type_map, browser_context)
+                    results = await scan_website(source, search_terms, browser_context)
                     all_results.extend(results)
                     if i < len(web_sources):
                         await asyncio.sleep(DELAY_BETWEEN_SOURCES)
@@ -1453,30 +1349,14 @@ async def run_mentions_monitoring():
             if is_video_url(url):
                 print(f"  🎬 Пропуск видео-URL: {url[:80]}")
                 continue
-            if is_blocked_url(url):
-                print(f"  🚫 Блоклист домена: {url[:80]}")
-                continue
             if not term:
                 print(f"  🚫 Пустой термин: {url[:80]}")
                 continue
 
-            # Для TG-каналов и веб-порталов (не поисковиков) проверяем наличие термина
-            # в заголовке/сниппете. Для Яндекса/Google требуем строгого полного совпадения
-            # во избежание ложных срабатываний.
-            is_search_engine = (
-                item.get("source_type") == "yandex"
-                or item.get("source_name") in ("Google", "Яндекс")
-            )
-            match_type_for_term = match_type_map.get(term.lower(), "partial")
             combined = f"{title} {snippet}"
-            if is_search_engine:
-                if not has_required_keyword(combined, term, "full", strict_full=True):
-                    print(f"  ⏭️  Пропуск (поиск: нет полного термина в сниппете): {url[:80]}")
-                    continue
-            else:
-                if not has_required_keyword(combined, term, match_type_for_term):
-                    print(f"  ⏭️  Пропуск (термин не найден в заголовке/сниппете): {url[:80]}")
-                    continue
+            if not term_matches(combined, term):
+                print(f"  ⏭️  Пропуск (термин не найден в сниппете): {url[:80]}")
+                continue
 
             if is_obviously_irrelevant(combined, url):
                 print(f"  🚫 Нерелевантный контент: {url[:80]}")
@@ -1510,8 +1390,8 @@ async def run_mentions_monitoring():
         print("\n" + "=" * 60)
         print("ФАЗА 2E: ПОИСК УПОМИНАНИЙ В TG КОНКУРЕНТОВ И НОВОСТЯХ")
         print("=" * 60)
-        comp_tg_count = find_mentions_in_competitor_posts(scan_id, search_term_configs, match_type_map)
-        news_tg_count = find_mentions_in_news_posts(scan_id, search_term_configs, match_type_map)
+        comp_tg_count = find_mentions_in_competitor_posts(scan_id, search_terms)
+        news_tg_count = find_mentions_in_news_posts(scan_id, search_terms)
         new_count += comp_tg_count + news_tg_count
         print(f"  ✅ Из TG конкурентов: {comp_tg_count}, из TG новостей: {news_tg_count}")
 
