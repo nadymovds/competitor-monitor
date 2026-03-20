@@ -2,8 +2,7 @@ supabase
 requests
 beautifulsoup4
 lxml
-playwright
 aiohttp
 reportlab
-python-telegram-bot>=20.0
+python-telegram-bot>=20.0,<22.0
 flask
