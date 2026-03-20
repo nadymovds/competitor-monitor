@@ -491,11 +491,29 @@ def format_post_card(post: dict) -> str:
 def webhook():
     try:
         data = request.get_json(force=True)
+        update_type = list(data.keys())
+        user_id = None
+        if "message" in data:
+            user_id = data["message"].get("from", {}).get("id")
+            text = data["message"].get("text", "")
+            print(f"[webhook] message from {user_id}: {text!r}", flush=True)
+        elif "callback_query" in data:
+            user_id = data["callback_query"].get("from", {}).get("id")
+            cbd = data["callback_query"].get("data", "")
+            print(f"[webhook] callback from {user_id}: {cbd!r}", flush=True)
+        else:
+            print(f"[webhook] update keys: {update_type}", flush=True)
+
+        if application is None:
+            print("[webhook] application not ready yet", flush=True)
+            return "ok"
+
         update = Update.de_json(data, application.bot)
         future = asyncio.run_coroutine_threadsafe(application.process_update(update), _loop)
         future.result(timeout=60)
     except Exception as e:
-        print(f"[webhook] error: {e}", flush=True)
+        import traceback
+        print(f"[webhook] error: {e}\n{traceback.format_exc()}", flush=True)
     return "ok"
 
 @app_flask.get("/")
@@ -526,6 +544,8 @@ def _init_bot():
         application.add_handler(CallbackQueryHandler(handle_show_tg_posts, pattern=r"^show_tg_posts:"))
 
         asyncio.run_coroutine_threadsafe(application.initialize(), _loop).result(timeout=30)
+        asyncio.run_coroutine_threadsafe(application.start(), _loop).result(timeout=30)
+        print("[init_bot] application started successfully", flush=True)
 
         import requests as req
         webhook_endpoint = f"{WEBHOOK_URL}/webhook"
