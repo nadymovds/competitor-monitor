@@ -15,6 +15,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # https://your-app.onrender.com
+BOT_URL = os.environ.get("BOT_URL", "https://t.me/skai_compit_bot")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -48,19 +49,28 @@ def is_user_allowed(telegram_id: int) -> bool:
 # HANDLER
 # ============================================================================
 
+def _is_group_chat(chat_id) -> bool:
+    try:
+        return int(chat_id) < 0
+    except (ValueError, TypeError):
+        return False
+
+
 async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+
+    if not is_user_allowed(query.from_user.id):
+        bot_link = f" {BOT_URL}" if BOT_URL else ""
+        try:
+            await query.answer(f"🔒 У вас нет доступа к боту.{bot_link}", show_alert=True)
+        except Exception:
+            pass
+        return
+
     try:
         await query.answer()
     except Exception:
         pass  # callback query истёк — не критично
-
-    if not is_user_allowed(query.from_user.id):
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="🔒 У вас нет доступа к этому боту."
-        )
-        return
 
     parts = query.data.split(":")
     digest_id = int(parts[1])
@@ -133,17 +143,19 @@ async def handle_show_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_show_tg_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+
+    if not is_user_allowed(query.from_user.id):
+        bot_link = f" {BOT_URL}" if BOT_URL else ""
+        try:
+            await query.answer(f"🔒 У вас нет доступа к боту.{bot_link}", show_alert=True)
+        except Exception:
+            pass
+        return
+
     try:
         await query.answer()
     except Exception:
         pass
-
-    if not is_user_allowed(query.from_user.id):
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="🔒 У вас нет доступа к этому боту."
-        )
-        return
 
     parts = query.data.split(":")
     report_id = parts[1]

@@ -45,7 +45,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 _group_ids_raw = os.environ.get("TELEGRAM_GROUP_CHAT_ID", "")
 TELEGRAM_GROUP_CHAT_IDS = [i.strip() for i in _group_ids_raw.split(",") if i.strip()]
-BOT_URL = os.environ.get("BOT_URL")
+BOT_URL = os.environ.get("BOT_URL", "https://t.me/skai_compit_bot")
 TEST_MODE = False  # переопределяется через --test
 
 LLM_MODEL = "llama-3.1-8b-instant"
@@ -180,6 +180,18 @@ def get_notification_recipients() -> list:
         pass
     return recipients
 
+def _is_group_chat(chat_id: str) -> bool:
+    try:
+        return int(chat_id) < 0
+    except (ValueError, TypeError):
+        return False
+
+def _group_caption(caption: str) -> str:
+    """Добавляет ссылку на бот для групповых чатов."""
+    if BOT_URL:
+        return caption + f"\n\n📲 <a href=\"{BOT_URL}\">Открыть подробности в боте</a>"
+    return caption
+
 def send_telegram_message(message: str, reply_markup: dict = None) -> bool:
     success = False
     chat_ids = get_notification_recipients()
@@ -187,9 +199,12 @@ def send_telegram_message(message: str, reply_markup: dict = None) -> bool:
         if chat_id:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
-                if reply_markup:
-                    payload["reply_markup"] = json.dumps(reply_markup)
+                if _is_group_chat(chat_id):
+                    payload = {"chat_id": chat_id, "text": _group_caption(message), "parse_mode": "HTML", "disable_web_page_preview": True}
+                else:
+                    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+                    if reply_markup:
+                        payload["reply_markup"] = json.dumps(reply_markup)
                 requests.post(url, json=payload, timeout=30)
                 success = True
             except:
@@ -204,9 +219,12 @@ def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
                 with open(file_path, 'rb') as f:
-                    data = {'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}
-                    if reply_markup:
-                        data['reply_markup'] = json.dumps(reply_markup)
+                    if _is_group_chat(chat_id):
+                        data = {'chat_id': chat_id, 'caption': _group_caption(caption), 'parse_mode': 'HTML'}
+                    else:
+                        data = {'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}
+                        if reply_markup:
+                            data['reply_markup'] = json.dumps(reply_markup)
                     requests.post(url, data=data, files={'document': f}, timeout=60)
                 success = True
             except:
