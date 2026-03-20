@@ -140,10 +140,11 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     print(f"[access_request] TELEGRAM_CHAT_ID={TELEGRAM_CHAT_ID!r}", flush=True)
     if TELEGRAM_CHAT_ID:
         username_str = f"@{telegram_username}" if telegram_username else f"ID: {user.id}"
-        dept_str = f"\n🏢 <b>Отдел:</b> {department}" if department else ""
+        dept_str = department if department else "не указан"
         admin_text = (
             f"🔔 <b>Новый запрос на доступ</b>\n\n"
-            f"👤 <b>Имя:</b> {display_name}{dept_str}\n"
+            f"👤 <b>Имя:</b> {display_name}\n"
+            f"🏢 <b>Отдел:</b> {dept_str}\n"
             f"📨 <b>Telegram:</b> {username_str}\n"
             f"🆔 <b>ID:</b> <code>{user.id}</code>"
         )
