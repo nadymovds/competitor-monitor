@@ -87,12 +87,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # Сбрасываем предыдущее состояние (если было)
-    access_state[user.id] = "waiting_name"
+    access_state[user.id] = "waiting_info"
     access_data[user.id] = {"telegram_username": user.username or ""}
 
     await update.message.reply_text(
         "👋 Привет! У вас пока нет доступа к системе мониторинга.\n\n"
-        "Чтобы запросить доступ, пришлите ваши <b>имя и фамилию</b>:",
+        "Чтобы запросить доступ, пришлите <b>имя, фамилию и отдел</b> одним сообщением через запятую:\n\n"
+        "<i>Например: Иван Иванов, Маркетинг</i>",
         parse_mode="HTML",
     )
 
@@ -105,54 +106,67 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     state = access_state.get(user.id)
 
-    if state == "waiting_name":
-        access_data[user.id]["display_name"] = update.message.text.strip()
-        access_state[user.id] = "waiting_dept"
-        await update.message.reply_text(
-            "Отлично! Теперь укажите ваш <b>отдел</b>:", parse_mode="HTML"
+    if state != "waiting_info":
+        return
+
+    text = update.message.text.strip()
+    # Разделяем по запятой или переносу строки
+    if "," in text:
+        parts = text.split(",", 1)
+    elif "\n" in text:
+        parts = text.split("\n", 1)
+    else:
+        parts = [text, ""]
+
+    display_name = parts[0].strip()
+    department = parts[1].strip() if len(parts) > 1 else ""
+
+    if not display_name:
+        await update.message.reply_text("Пожалуйста, укажите имя и фамилию.")
+        return
+
+    telegram_username = access_data[user.id].get("telegram_username", "")
+
+    # Сохраняем как ожидающий запрос
+    pending_requests[str(user.id)] = {
+        "display_name": display_name,
+        "department": department,
+        "telegram_username": telegram_username,
+    }
+    del access_state[user.id]
+    del access_data[user.id]
+
+    # Уведомляем администратора
+    print(f"[access_request] TELEGRAM_CHAT_ID={TELEGRAM_CHAT_ID!r}", flush=True)
+    if TELEGRAM_CHAT_ID:
+        username_str = f"@{telegram_username}" if telegram_username else f"ID: {user.id}"
+        dept_str = f"\n🏢 <b>Отдел:</b> {department}" if department else ""
+        admin_text = (
+            f"🔔 <b>Новый запрос на доступ</b>\n\n"
+            f"👤 <b>Имя:</b> {display_name}{dept_str}\n"
+            f"📨 <b>Telegram:</b> {username_str}\n"
+            f"🆔 <b>ID:</b> <code>{user.id}</code>"
         )
-
-    elif state == "waiting_dept":
-        display_name = access_data[user.id].get("display_name", "")
-        department = update.message.text.strip()
-        telegram_username = access_data[user.id].get("telegram_username", "")
-
-        # Сохраняем как ожидающий запрос
-        pending_requests[str(user.id)] = {
-            "display_name": display_name,
-            "department": department,
-            "telegram_username": telegram_username,
-        }
-        del access_state[user.id]
-        del access_data[user.id]
-
-        # Уведомляем администратора
-        if TELEGRAM_CHAT_ID:
-            username_str = f"@{telegram_username}" if telegram_username else f"ID: {user.id}"
-            admin_text = (
-                f"🔔 <b>Новый запрос на доступ</b>\n\n"
-                f"👤 <b>Имя:</b> {display_name}\n"
-                f"🏢 <b>Отдел:</b> {department}\n"
-                f"📨 <b>Telegram:</b> {username_str}\n"
-                f"🆔 <b>ID:</b> <code>{user.id}</code>"
+        approve_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Выдать доступ", callback_data=f"approve_access:{user.id}")
+        ]])
+        try:
+            await context.bot.send_message(
+                chat_id=int(TELEGRAM_CHAT_ID),
+                text=admin_text,
+                parse_mode="HTML",
+                reply_markup=approve_markup,
             )
-            approve_markup = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Выдать доступ", callback_data=f"approve_access:{user.id}")
-            ]])
-            try:
-                await context.bot.send_message(
-                    chat_id=TELEGRAM_CHAT_ID,
-                    text=admin_text,
-                    parse_mode="HTML",
-                    reply_markup=approve_markup,
-                )
-                print(f"[access_request] admin notified about {user.id}", flush=True)
-            except Exception as e:
-                print(f"[access_request] failed to notify admin: {e}", flush=True)
+            print(f"[access_request] admin notified about user {user.id}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[access_request] FAILED to notify admin: {e}\n{traceback.format_exc()}", flush=True)
+    else:
+        print("[access_request] TELEGRAM_CHAT_ID is not set — admin not notified!", flush=True)
 
-        await update.message.reply_text(
-            "✅ Запрос отправлен! Ожидайте подтверждения от администратора."
-        )
+    await update.message.reply_text(
+        "✅ Запрос отправлен! Ожидайте подтверждения от администратора."
+    )
 
 
 async def handle_approve_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
