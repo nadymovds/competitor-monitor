@@ -92,8 +92,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
         "👋 Привет! У вас пока нет доступа к системе мониторинга.\n\n"
-        "Чтобы запросить доступ, пришлите <b>имя, фамилию и отдел</b> одним сообщением через запятую:\n\n"
-        "<i>Например: Иван Иванов, Маркетинг</i>",
+        "Чтобы запросить доступ, напишите <b>кто вы</b> — имя, фамилию, отдел:",
         parse_mode="HTML",
     )
 
@@ -109,28 +108,17 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if state != "waiting_info":
         return
 
-    text = update.message.text.strip()
-    # Разделяем по запятой или переносу строки
-    if "," in text:
-        parts = text.split(",", 1)
-    elif "\n" in text:
-        parts = text.split("\n", 1)
-    else:
-        parts = [text, ""]
+    user_text = update.message.text.strip()
 
-    display_name = parts[0].strip()
-    department = parts[1].strip() if len(parts) > 1 else ""
-
-    if not display_name:
-        await update.message.reply_text("Пожалуйста, укажите имя и фамилию.")
+    if not user_text:
+        await update.message.reply_text("Пожалуйста, напишите кто вы.")
         return
 
     telegram_username = access_data[user.id].get("telegram_username", "")
 
     # Сохраняем как ожидающий запрос
     pending_requests[str(user.id)] = {
-        "display_name": display_name,
-        "department": department,
+        "user_text": user_text,
         "telegram_username": telegram_username,
     }
     del access_state[user.id]
@@ -140,11 +128,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     print(f"[access_request] TELEGRAM_CHAT_ID={TELEGRAM_CHAT_ID!r}", flush=True)
     if TELEGRAM_CHAT_ID:
         username_str = f"@{telegram_username}" if telegram_username else f"ID: {user.id}"
-        dept_str = department if department else "не указан"
         admin_text = (
             f"🔔 <b>Новый запрос на доступ</b>\n\n"
-            f"👤 <b>Имя:</b> {display_name}\n"
-            f"🏢 <b>Отдел:</b> {dept_str}\n"
+            f"💬 {user_text}\n\n"
             f"📨 <b>Telegram:</b> {username_str}\n"
             f"🆔 <b>ID:</b> <code>{user.id}</code>"
         )
@@ -191,7 +177,7 @@ async def handle_approve_access(update: Update, context: ContextTypes.DEFAULT_TY
             {
                 "telegram_id": telegram_id,
                 "telegram_username": req["telegram_username"],
-                "display_name": req["display_name"],
+                "display_name": req["user_text"],
                 "role": "viewer",
                 "last_seen_at": datetime.utcnow().isoformat(),
             },
@@ -204,7 +190,7 @@ async def handle_approve_access(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Обновляем сообщение у администратора
     await query.edit_message_text(
-        f"✅ Доступ выдан: <b>{req['display_name']}</b> ({req['department']})",
+        f"✅ Доступ выдан: <b>{req['user_text']}</b>",
         parse_mode="HTML",
     )
 
