@@ -1166,17 +1166,34 @@ def get_processed_content_hashes(period_start: datetime) -> set:
         print(f"⚠️ Ошибка получения хешей обработанных постов: {e}")
         return set()
 
-def get_posts_for_digest(period_start: datetime, period_end: datetime) -> list:
+def get_posts_for_digest(period_start: datetime, period_end: datetime, tag_filter: str | None = None) -> list:
     """Выборка обработанных постов с видимыми категориями для дайджеста."""
     try:
-        result = (supabase.table('news_posts')
-                  .select('*, news_channels(username, title), news_post_categories!inner(category_id, confidence, news_categories(id, name, color, sort_order, is_visible))')
-                  .eq('is_processed', True)
-                  .gte('post_date', period_start.isoformat())
-                  .lte('post_date', period_end.isoformat())
-                  .order('post_date', desc=True)
-                  .limit(MAX_POSTS_IN_DIGEST)
-                  .execute())
+        # Если задан тег — ограничиваем только каналами с этим тегом
+        channel_ids = None
+        if tag_filter:
+            ch_result = (supabase.table('news_channels')
+                         .select('id')
+                         .eq('is_active', True)
+                         .contains('tags', [tag_filter])
+                         .execute())
+            channel_ids = [r['id'] for r in (ch_result.data or [])]
+            if not channel_ids:
+                print(f"  ℹ️ Нет каналов с тегом «{tag_filter}» — дайджест будет пустым")
+                return []
+
+        query = (supabase.table('news_posts')
+                 .select('*, news_channels(username, title), news_post_categories!inner(category_id, confidence, news_categories(id, name, color, sort_order, is_visible))')
+                 .eq('is_processed', True)
+                 .gte('post_date', period_start.isoformat())
+                 .lte('post_date', period_end.isoformat())
+                 .order('post_date', desc=True)
+                 .limit(MAX_POSTS_IN_DIGEST))
+
+        if channel_ids is not None:
+            query = query.in_('channel_id', channel_ids)
+
+        result = query.execute()
         # inner join уже отфильтровал посты без категорий
         posts = result.data or []
         return posts
@@ -1936,7 +1953,7 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
         print("=" * 60)
 
         # 11. Получение постов для дайджеста
-        digest_posts = get_posts_for_digest(period_start, period_end)
+        digest_posts = get_posts_for_digest(period_start, period_end, tag_filter=tag_filter)
         print(f"📰 Постов для дайджеста: {len(digest_posts)}")
 
         # Инициализация переменных
