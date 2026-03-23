@@ -197,10 +197,10 @@ export default function NewsFilters({
             </div>
           </div>
 
-          {/* Теги */}
+          {/* Теги страны */}
           {availableTags.length > 0 && (
             <div style={{ marginTop: 10 }}>
-              <div style={styles.sectionLabel}>Теги</div>
+              <div style={styles.sectionLabel}>Страна</div>
               <div style={styles.pillRow}>
                 <button
                   onClick={selectAllTags}
@@ -223,31 +223,6 @@ export default function NewsFilters({
               </div>
             </div>
           )}
-
-          {/* Источники */}
-          <div style={{ marginTop: 10 }}>
-            <div style={styles.sectionLabel}>Источники</div>
-            <div style={styles.pillRow}>
-              <button
-                onClick={selectAllChannels}
-                style={selectedChannels.length === 0 ? styles.pillActive : styles.pill}
-              >
-                Все
-              </button>
-              {channels.map(ch => {
-                const active = selectedChannels.includes(ch.id)
-                return (
-                  <button
-                    key={ch.id}
-                    onClick={() => toggleChannel(ch.id)}
-                    style={active ? styles.pillChannelActive : styles.pill}
-                  >
-                    {ch.title || `@${ch.username}`}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
 
           {/* Период */}
           {!hideDate && (

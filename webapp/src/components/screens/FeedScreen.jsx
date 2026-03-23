@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { getUnifiedFeed, getLastScanDate } from '../../services/feed'
-import { getNewsCategories, getNewsChannels } from '../../services/news'
+import { getNewsCategories, getNewsChannelTags } from '../../services/news'
 import { hapticFeedback, openLink, openTelegramLink } from '../../services/telegram'
 import FeedTypeToggle from '../ui/FeedTypeToggle'
 import NewsFilters from '../ui/NewsFilters'
@@ -40,9 +40,9 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
 
   // Фильтры для новостей
   const [newsCategories, setNewsCategories] = useState([])
-  const [newsChannels, setNewsChannels] = useState([])
+  const [availableNewsTags, setAvailableNewsTags] = useState([])
   const [selectedNewsCategories, setSelectedNewsCategories] = useState([])
-  const [selectedNewsChannels, setSelectedNewsChannels] = useState([])
+  const [selectedNewsTags, setSelectedNewsTags] = useState([])
   const [selectedNewsSourceTypes, setSelectedNewsSourceTypes] = useState([])
 
   // Поиск
@@ -62,13 +62,13 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
   useEffect(() => {
     async function loadReferences() {
       try {
-        const [cats, chs, lastScan] = await Promise.all([
+        const [cats, tags, lastScan] = await Promise.all([
           getNewsCategories(),
-          getNewsChannels(),
+          getNewsChannelTags(),
           getLastScanDate()
         ])
         setNewsCategories(cats)
-        setNewsChannels(chs)
+        setAvailableNewsTags(tags)
         setLastScanDate(lastScan)
       } catch (err) {
         console.error('Failed to load references:', err)
@@ -96,7 +96,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
     activeSourceFilter,
     activeCategory,
     selectedNewsCategories,
-    selectedNewsChannels,
+    selectedNewsTags,
     selectedNewsSourceTypes,
     dateRange,
     customDateFrom,
@@ -210,7 +210,7 @@ export default function FeedScreen({ user, groups, onNavigateToCompetitor }) {
       // Фильтры новостей
       if (feedType === 'news') {
         params.newsCategories = selectedNewsCategories
-        params.newsChannels = selectedNewsChannels
+        params.newsTags = selectedNewsTags
         params.newsSourceTypes = selectedNewsSourceTypes
         params.searchQuery = searchQuery
       }
@@ -257,10 +257,10 @@ const resetCompetitorFilters = () => {
     setActiveCategory('all')
   }
 
-  const handleNewsFiltersChange = ({ categories, channels, sourceTypes }) => {
+  const handleNewsFiltersChange = ({ categories, sourceTypes, tags }) => {
     setSelectedNewsCategories(categories || [])
-    setSelectedNewsChannels(channels || [])
     setSelectedNewsSourceTypes(sourceTypes || [])
+    setSelectedNewsTags(tags || [])
   }
 
   // Используем базовые счётчики (независимые от source/category фильтров)
@@ -451,10 +451,12 @@ const resetCompetitorFilters = () => {
       {feedType === 'news' && (
         <NewsFilters
           categories={visibleNewsCategories}
-          channels={newsChannels}
+          channels={[]}
           selectedCategories={selectedNewsCategories}
-          selectedChannels={selectedNewsChannels}
+          selectedChannels={[]}
           selectedSourceTypes={selectedNewsSourceTypes}
+          availableTags={availableNewsTags}
+          selectedTags={selectedNewsTags}
           dateRange="week"
           onChange={handleNewsFiltersChange}
           hideDate={true}

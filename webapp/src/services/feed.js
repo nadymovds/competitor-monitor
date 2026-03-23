@@ -14,6 +14,7 @@ import { supabase } from './supabase.js'
  * @param {number[]} [params.newsCategories] - ID категорий новостей (для feedType='news')
  * @param {number[]} [params.newsChannels] - ID каналов новостей (для feedType='news')
  * @param {string[]} [params.newsSourceTypes] - ['telegram', 'website'] (для feedType='news')
+ * @param {string[]} [params.newsTags] - Теги страны ['kz', 'ru'] (для feedType='news')
  * @param {string} [params.searchQuery] - Текст поиска (для feedType='news')
  * @returns {Promise<{items: FeedItem[], hasMore: boolean}>}
  */
@@ -29,6 +30,7 @@ export async function getUnifiedFeed({
   newsCategories = [],
   newsChannels = [],
   newsSourceTypes = [],
+  newsTags = [],
   searchQuery = ''
 }) {
   let allItems = []
@@ -65,6 +67,7 @@ export async function getUnifiedFeed({
       categories: newsCategories,
       channels: newsChannels,
       sourceTypes: newsSourceTypes,
+      tags: newsTags,
       searchQuery
     })
 
@@ -202,7 +205,7 @@ async function getCompetitorTgPosts({ dateFrom, dateTo, groupIds, sourceType, ca
 /**
  * Получить новости отрасли
  */
-async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceTypes, searchQuery = '' }) {
+async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceTypes, tags = [], searchQuery = '' }) {
   // Всегда используем inner join — посты без категорий (нерелевантные) не показываем
   const categoryJoin = 'news_post_categories!inner(category_id, confidence, is_manual, news_categories(id, name, color, is_visible, sort_order))'
 
@@ -223,7 +226,14 @@ async function getIndustryNews({ dateFrom, dateTo, categories, channels, sourceT
     query = query.in('news_post_categories.category_id', categories)
   }
 
-  if (channels.length > 0) {
+  if (tags.length > 0) {
+    const { data: taggedChannels } = await supabase
+      .from('news_channels')
+      .select('id')
+      .overlaps('tags', tags)
+    const taggedIds = (taggedChannels || []).map(c => c.id)
+    query = query.in('channel_id', taggedIds.length > 0 ? taggedIds : [-1])
+  } else if (channels.length > 0) {
     query = query.in('channel_id', channels)
   }
 
