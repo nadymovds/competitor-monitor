@@ -77,6 +77,19 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
   const isAdmin = user?.role === 'admin'
   const soon = () => { hapticFeedback('warning'); showAlert('Эта функция скоро будет доступна') }
 
+  const [activeSection, setActiveSection] = useState(null)
+  const navigateTo = (section) => { hapticFeedback('light'); setActiveSection(section) }
+  const navigateBack = () => { hapticFeedback('light'); setActiveSection(null) }
+
+  const SECTION_TITLES = {
+    groups: 'Группы конкурентов',
+    news_categories: 'Категории новостей',
+    news_channels: 'Источники новостей',
+    mention_terms: 'Поисковые запросы',
+    mention_sources: 'Источники упоминаний',
+    ignored_sources: 'Исключённые домены',
+  }
+
   useEffect(() => {
     if (!isAdmin) return
     async function loadNewsSettings() {
@@ -691,22 +704,72 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Настройки</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: activeSection ? 12 : 20 }}>
 
-      <Section title="Профиль">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16 }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 600 }}>{user?.display_name?.charAt(0) || '?'}</div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 600 }}>{user?.display_name || 'Пользователь'}</div>
-            <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 4, backgroundColor: isAdmin ? '#f59e0b20' : '#3b82f620', color: isAdmin ? '#f59e0b' : '#3b82f6' }}>{isAdmin ? 'Администратор' : 'Просмотр'}</span>
-          </div>
+      {/* Sub-section header */}
+      {activeSection && (
+        <div style={{ paddingBottom: 4 }}>
+          <button onClick={navigateBack} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: 14, fontWeight: 500, cursor: 'pointer', padding: '0 0 8px 0', display: 'block' }}>
+            ← Настройки
+          </button>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>
+            {SECTION_TITLES[activeSection]}
+          </h1>
         </div>
-        {user?.telegram_username && <div style={{ fontSize: 13, color: '#6b7280', padding: '0 16px 16px', borderTop: '1px solid #2a2a3a', paddingTop: 12 }}>@{user.telegram_username}</div>}
-      </Section>
+      )}
 
-      <Section title="Группы конкурентов" count={groups.length}>
-        {groups.map((g, i) => (
+      {/* ===== MAIN INDEX ===== */}
+      {!activeSection && (
+        <>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Настройки</h1>
+
+          <Section title="Профиль">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16 }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 600 }}>{user?.display_name?.charAt(0) || '?'}</div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>{user?.display_name || 'Пользователь'}</div>
+                <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 4, backgroundColor: isAdmin ? '#f59e0b20' : '#3b82f620', color: isAdmin ? '#f59e0b' : '#3b82f6' }}>{isAdmin ? 'Администратор' : 'Просмотр'}</span>
+              </div>
+            </div>
+            {user?.telegram_username && <div style={{ fontSize: 13, color: '#6b7280', padding: '0 16px 16px', borderTop: '1px solid #2a2a3a', paddingTop: 12 }}>@{user.telegram_username}</div>}
+          </Section>
+
+          <Section title="Конкуренты">
+            <NavRow label="Группы конкурентов" count={groups.length} onClick={() => navigateTo('groups')} />
+          </Section>
+
+          {isAdmin && (
+            <Section title="Новости">
+              <NavRow label="Категории новостей" count={categories.length} onClick={() => navigateTo('news_categories')} />
+              <NavRow label="Источники новостей" count={channels.length} onClick={() => navigateTo('news_channels')} border />
+            </Section>
+          )}
+
+          {isAdmin && (
+            <Section title="Упоминания">
+              <NavRow label="Поисковые запросы" count={mentionTerms.length} onClick={() => navigateTo('mention_terms')} />
+              <NavRow label="Источники" count={mentionSources.length} onClick={() => navigateTo('mention_sources')} border />
+              <NavRow label="Исключённые домены" count={ignoredSources.length} onClick={() => navigateTo('ignored_sources')} border />
+            </Section>
+          )}
+
+          {isAdmin && onNavigateToScans && (
+            <Section title="Данные">
+              <NavRow label="Сканирования" onClick={() => { hapticFeedback('light'); onNavigateToScans() }} />
+            </Section>
+          )}
+
+          <div style={{ textAlign: 'center', padding: '20px 0', marginTop: 20 }}>
+            <div style={{ fontSize: 13, color: '#6b7280' }}>Версия {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'}</div>
+            <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 Competitor Monitor</div>
+          </div>
+        </>
+      )}
+
+      {/* ===== GROUPS ===== */}
+      {activeSection === 'groups' && (
+        <Section>
+          {groups.map((g, i) => (
           <div key={g.id}>
             {editingGroup?.id === g.id ? (
               // Режим редактирования
@@ -799,11 +862,12 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
             + Добавить группу
           </button>
         )}
-      </Section>
+        </Section>
+      )}
 
-      {/* Категории новостей — только для админов */}
-      {isAdmin && (
-        <Section title="Категории новостей" count={categories.length}>
+      {/* ===== NEWS CATEGORIES ===== */}
+      {activeSection === 'news_categories' && (
+        <Section>
           {categories.map((cat, i) => (
             <div key={cat.id}>
               {editingCategory?.id === cat.id ? (
@@ -920,9 +984,9 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         </Section>
       )}
 
-      {/* Источники новостей — только для админов */}
-      {isAdmin && (
-        <Section title="Источники новостей" count={channels.length}>
+      {/* ===== NEWS CHANNELS ===== */}
+      {activeSection === 'news_channels' && (
+        <Section>
           {channels.map((ch, i) => (
             <div key={ch.id}>
               {editingChannel?.id === ch.id ? (
@@ -1142,9 +1206,9 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         </Section>
       )}
 
-      {/* Поиск упоминаний — только для админов */}
-      {isAdmin && (
-        <Section title="Поиск упоминаний" count={mentionTerms.length}>
+      {/* ===== MENTION TERMS ===== */}
+      {activeSection === 'mention_terms' && (
+        <Section>
           {mentionTerms.map((term, i) => (
             <div key={term.id}>
               {editingTerm?.id === term.id ? (
@@ -1216,9 +1280,9 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         </Section>
       )}
 
-      {/* Источники для упоминаний — только для админов */}
-      {isAdmin && (
-        <Section title="Источники для упоминаний" count={mentionSources.length}>
+      {/* ===== MENTION SOURCES ===== */}
+      {activeSection === 'mention_sources' && (
+        <Section>
           {mentionSources.map((src, i) => (
             <div key={src.id}>
               {editingMentionSource?.id === src.id ? (
@@ -1333,9 +1397,9 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         </Section>
       )}
 
-      {/* Исключённые домены — только для админов */}
-      {isAdmin && (
-        <Section title="Исключённые домены" count={ignoredSources.length}>
+      {/* ===== IGNORED SOURCES ===== */}
+      {activeSection === 'ignored_sources' && (
+        <Section>
           <div style={{ padding: '8px 16px 4px', fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>
             Упоминания с этих сайтов не сохраняются. Домен без «/» блокирует сайт целиком включая поддомены. Для TG-каналов: t.me/channel_name
           </div>
@@ -1384,38 +1448,6 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         </Section>
       )}
 
-      {false && <Section title="Уведомления">
-        <Row label="Об изменениях" desc="Получать уведомления о новых изменениях" toggle enabled onToggle={soon} />
-        <Row label="Об ошибках" desc="Получать уведомления о проблемах сканирования" toggle enabled={false} onToggle={soon} border />
-      </Section>}
-
-      {false && isAdmin && (
-        <Section title="Расписание сканирования">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px' }}>
-            <span style={{ fontSize: 15, color: '#fff' }}>Автосканирование</span>
-            <Toggle enabled onToggle={soon} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 12px', fontSize: 14, color: '#9ca3af' }}>🕐 Каждый день в 10:00 (МСК)</div>
-          <button onClick={soon} style={{ width: '100%', padding: 14, background: 'none', border: 'none', borderTop: '1px solid #2a2a3a', color: '#3b82f6', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Изменить расписание</button>
-        </Section>
-      )}
-
-      {isAdmin && onNavigateToScans && (
-        <Section title="Данные">
-          <button
-            onClick={() => { hapticFeedback('light'); onNavigateToScans() }}
-            style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', color: '#fff' }}
-          >
-            <span style={{ fontSize: 15 }}>Сканирования</span>
-            <span style={{ color: '#6b7280', fontSize: 18 }}>›</span>
-          </button>
-        </Section>
-      )}
-
-      <div style={{ textAlign: 'center', padding: '20px 0', marginTop: 20 }}>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>Версия {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'}</div>
-        <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>© 2026 Competitor Monitor</div>
-      </div>
     </div>
   )
 }
@@ -1533,12 +1565,41 @@ function ColorButton({ color, selected, onClick }) {
 function Section({ title, count, children }) {
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: 14, color: '#9ca3af' }}>{title}</span>
-        {count !== undefined && <span style={{ fontSize: 13, color: '#6b7280' }}>{count}</span>}
-      </div>
+      {title !== undefined && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 14, color: '#9ca3af' }}>{title}</span>
+          {count !== undefined && <span style={{ fontSize: 13, color: '#6b7280' }}>{count}</span>}
+        </div>
+      )}
       <div style={{ backgroundColor: '#1a1a24', borderRadius: 12, overflow: 'hidden' }}>{children}</div>
     </div>
+  )
+}
+
+function NavRow({ label, count, onClick, border }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '14px 16px',
+        background: 'none',
+        border: 'none',
+        borderTop: border ? '1px solid #2a2a3a' : 'none',
+        cursor: 'pointer',
+        color: '#fff',
+        textAlign: 'left'
+      }}
+    >
+      <span style={{ fontSize: 15 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {count !== undefined && <span style={{ fontSize: 13, color: '#6b7280' }}>{count}</span>}
+        <span style={{ color: '#6b7280', fontSize: 18 }}>›</span>
+      </div>
+    </button>
   )
 }
 
