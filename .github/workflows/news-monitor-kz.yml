@@ -1,0 +1,52 @@
+name: News Monitor (KZ)
+
+"on":
+  schedule:
+    - cron: '30 6 * * 5'    # каждую пятницу в 9:30 МСК (06:30 UTC)
+  workflow_dispatch:
+    inputs:
+      period_days:
+        description: 'Период в днях'
+        required: false
+        default: '7'
+      test_mode:
+        description: 'Тестовый режим (уведомления только администратору)'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  monitor-news-kz:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run news monitoring (KZ)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
+          NEWS_PERIOD_DAYS: ${{ github.event.inputs.period_days || '7' }}
+        run: python news_monitor.py --tags kz ${{ github.event.inputs.test_mode == 'true' && '--test' || '' }}

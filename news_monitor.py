@@ -1486,12 +1486,15 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
 # ============================================================================
 
 def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_end: datetime,
-                              posts: list, channels_count: int, stats_extra: dict = None) -> str:
+                              posts: list, channels_count: int, stats_extra: dict = None,
+                              tag: str | None = None) -> str:
     """Генерация PDF-дайджеста новостей, отсортированных по дате публикации.
 
     posts: плоский список постов с полем category_tags.
+    tag: если указан, используется в заголовке и имени файла.
     """
-    filename = f"/tmp/news_digest_{digest_date}.pdf"
+    tag_suffix = f"_{tag}" if tag else ""
+    filename = f"/tmp/news_digest_{digest_date}{tag_suffix}.pdf"
 
     doc = SimpleDocTemplate(filename, pagesize=A4,
                             rightMargin=15*mm, leftMargin=15*mm,
@@ -1521,7 +1524,8 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
     content = []
 
     # Заголовок
-    content.append(Paragraph("Дайджест новостей отрасли", styles['title']))
+    title_text = f"Дайджест новостей: {tag.upper()}" if tag else "Дайджест новостей отрасли"
+    content.append(Paragraph(title_text, styles['title']))
 
     period_str = f"{period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}"
     content.append(Paragraph(f"Период: {period_str}", styles['subtitle']))
@@ -1664,7 +1668,7 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
 # ОРКЕСТРАЦИЯ
 # ============================================================================
 
-async def run_news_monitoring_async():
+async def run_news_monitoring_async(tag_filter: str | None = None):
     """Главная функция: сканирование каналов и веб-сайтов → LLM-обработка → PDF-дайджест → Telegram."""
     print("🚀 Запуск мониторинга новостей...")
     start_time = time.time()
@@ -1674,6 +1678,16 @@ async def run_news_monitoring_async():
 
     # 2. Загрузка источников из БД
     all_sources = get_active_channels()
+
+    # Фильтрация по тегу, если передан аргумент --tags
+    if tag_filter:
+        all_sources = [s for s in all_sources if tag_filter in (s.get('tags') or [])]
+        if not all_sources:
+            send_telegram_message(f"❌ Нет активных источников с тегом «{tag_filter}»")
+            print(f"❌ Нет активных источников с тегом «{tag_filter}»")
+            return
+        print(f"🏷️ Фильтр по тегу «{tag_filter}»: {len(all_sources)} источников")
+
     if not all_sources:
         send_telegram_message("❌ Нет активных источников для мониторинга")
         print("❌ Нет активных источников")
@@ -2002,6 +2016,7 @@ async def run_news_monitoring_async():
                     'without_categories': posts_without_categories,
                     'duplicates': duplicate_urls,
                 },
+                tag=tag_filter,
             )
 
             # Сохранение ID постов для связи с дайджестом
@@ -2026,6 +2041,7 @@ async def run_news_monitoring_async():
             'posts_count': total_digest_posts,
             'categories_summary': categories_summary if categories_summary else None,
             'pdf_url': pdf_path if pdf_path else None,
+            'tag': tag_filter,
         }
         
         digest_id = save_digest(digest_data, all_post_ids)
@@ -2042,7 +2058,8 @@ async def run_news_monitoring_async():
     total_digest = len(digest_posts) if digest_posts else 0
     total_all_new = total_new_posts + total_web_posts
 
-    summary_msg = f"""📊 <b>Мониторинг новостей завершён</b>
+    tag_line = f"\n🏷️ Тег: <b>{tag_filter.upper()}</b>" if tag_filter else ""
+    summary_msg = f"""📊 <b>Мониторинг новостей завершён</b>{tag_line}
 
 📅 Период: {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}
 ⏱️ Время: {elapsed} сек
@@ -2113,7 +2130,10 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--test', action='store_true', help='Тестовый режим: уведомления только администратору')
+    parser.add_argument('--tags', type=str, default=None,
+                        help='Тег для фильтрации источников (например: kz, ru). '
+                             'Только каналы с этим тегом будут обработаны.')
     args = parser.parse_args()
     if args.test:
         TEST_MODE = True
-    asyncio.run(run_news_monitoring_async())
+    asyncio.run(run_news_monitoring_async(tag_filter=args.tags))

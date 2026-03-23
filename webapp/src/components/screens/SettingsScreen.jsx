@@ -44,6 +44,8 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
   const [editChSourceType, setEditChSourceType] = useState('telegram')
   const [editChUrl, setEditChUrl] = useState('')
   const [editChCssConfig, setEditChCssConfig] = useState('')
+  const [editChTags, setEditChTags] = useState('')
+  const [newChTags, setNewChTags] = useState('')
 
   // Mention search terms state
   const [mentionTerms, setMentionTerms] = useState([])
@@ -314,6 +316,7 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
     setEditChSourceType(ch.source_type || 'telegram')
     setEditChUrl(ch.url || '')
     setEditChCssConfig(ch.css_config || '')
+    setEditChTags((ch.tags || []).join(', '))
   }
 
   const handleCancelEditChannel = () => {
@@ -324,6 +327,7 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
     setEditChSourceType('telegram')
     setEditChUrl('')
     setEditChCssConfig('')
+    setEditChTags('')
   }
 
   const handleSaveChannel = async () => {
@@ -348,7 +352,8 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         username: editChSourceType === 'telegram' ? editChUsername.trim() : null,
         title: editChTitle.trim() || null,
         url: editChSourceType === 'website' ? editChUrl.trim() : null,
-        cssConfig: editChSourceType === 'website' && editChCssConfig.trim() ? editChCssConfig.trim() : null
+        cssConfig: editChSourceType === 'website' && editChCssConfig.trim() ? editChCssConfig.trim() : null,
+        tags: editChTags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
       })
       setChannels(prev => prev.map(c => c.id === updated.id ? updated : c))
       setEditingChannel(null)
@@ -357,6 +362,7 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
       setEditChSourceType('telegram')
       setEditChUrl('')
       setEditChCssConfig('')
+      setEditChTags('')
       hapticFeedback('success')
     } catch (err) {
       console.error('Error updating channel:', err)
@@ -411,7 +417,8 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
         title: newChTitle.trim() || null,
         sourceType: newChSourceType,
         url: newChSourceType === 'website' ? newChUrl.trim() : null,
-        cssConfig: newChSourceType === 'website' && newChCssConfig.trim() ? newChCssConfig.trim() : null
+        cssConfig: newChSourceType === 'website' && newChCssConfig.trim() ? newChCssConfig.trim() : null,
+        tags: newChTags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
       })
       setChannels(prev => [...prev, created])
       setShowNewChannelForm(false)
@@ -420,6 +427,7 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
       setNewChSourceType('telegram')
       setNewChUrl('')
       setNewChCssConfig('')
+      setNewChTags('')
       hapticFeedback('success')
     } catch (err) {
       console.error('Error creating channel:', err)
@@ -976,6 +984,14 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
                       style={inputStyle}
                     />
 
+                    <input
+                      type="text"
+                      value={editChTags}
+                      onChange={(e) => setEditChTags(e.target.value)}
+                      placeholder="Теги через запятую (например: ru, kz)"
+                      style={inputStyle}
+                    />
+
                     <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                       <button onClick={handleSaveChannel} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
                         {saving ? 'Сохранение...' : 'Сохранить'}
@@ -1000,17 +1016,28 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
                       {ch.is_active && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>✓</span>}
                     </button>
                     <span style={{ fontSize: 14, flexShrink: 0 }}>{ch.source_type === 'website' ? '🌐' : '📱'}</span>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {ch.source_type === 'website' ? (
-                        <>
-                          <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>{ch.title || ch.url}</span>
-                          {ch.title && ch.url && <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>{ch.url}</span>}
-                        </>
-                      ) : (
-                        <>
-                          <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>@{ch.username}</span>
-                          {ch.title && <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>{ch.title}</span>}
-                        </>
+                    <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ch.source_type === 'website' ? (
+                          <>
+                            <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>{ch.title || ch.url}</span>
+                            {ch.title && ch.url && <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>{ch.url}</span>}
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 15, color: ch.is_active ? '#fff' : '#6b7280' }}>@{ch.username}</span>
+                            {ch.title && <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 8 }}>{ch.title}</span>}
+                          </>
+                        )}
+                      </div>
+                      {(ch.tags || []).length > 0 && (
+                        <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
+                          {ch.tags.map(tag => (
+                            <span key={tag} style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, backgroundColor: '#3b82f620', color: '#3b82f6' }}>
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1084,11 +1111,19 @@ export default function SettingsScreen({ user, groups: initialGroups, onNavigate
                   style={inputStyle}
                 />
 
+                <input
+                  type="text"
+                  value={newChTags}
+                  onChange={(e) => setNewChTags(e.target.value)}
+                  placeholder="Теги через запятую (например: ru, kz)"
+                  style={inputStyle}
+                />
+
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                   <button onClick={handleCreateChannel} disabled={saving} style={{ ...btnSuccess, opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
                     {saving ? 'Создание...' : 'Создать источник'}
                   </button>
-                  <button onClick={() => { hapticFeedback('light'); setShowNewChannelForm(false); setNewChUsername(''); setNewChTitle(''); setNewChSourceType('telegram'); setNewChUrl(''); setNewChCssConfig('') }} disabled={saving} style={btnSecondary}>
+                  <button onClick={() => { hapticFeedback('light'); setShowNewChannelForm(false); setNewChUsername(''); setNewChTitle(''); setNewChSourceType('telegram'); setNewChUrl(''); setNewChCssConfig(''); setNewChTags('') }} disabled={saving} style={btnSecondary}>
                     Отмена
                   </button>
                 </div>

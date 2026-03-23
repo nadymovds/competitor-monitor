@@ -19,6 +19,8 @@ export default function NewsFilters({
   selectedCategories,
   selectedChannels,
   selectedSourceTypes = [],
+  availableTags = [],
+  selectedTags = [],
   dateRange,
   customDateFrom,
   customDateTo,
@@ -33,12 +35,12 @@ export default function NewsFilters({
     const next = selectedCategories.includes(id)
       ? selectedCategories.filter(c => c !== id)
       : [...selectedCategories, id]
-    onChange({ categories: next, channels: selectedChannels, sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: next, channels: selectedChannels, sourceTypes: selectedSourceTypes, tags: selectedTags, dateRange, customDateFrom, customDateTo })
   }
 
   const selectAllCategories = () => {
     hapticFeedback('light')
-    onChange({ categories: [], channels: selectedChannels, sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: [], channels: selectedChannels, sourceTypes: selectedSourceTypes, tags: selectedTags, dateRange, customDateFrom, customDateTo })
   }
 
   const toggleChannel = (id) => {
@@ -46,12 +48,12 @@ export default function NewsFilters({
     const next = selectedChannels.includes(id)
       ? selectedChannels.filter(c => c !== id)
       : [...selectedChannels, id]
-    onChange({ categories: selectedCategories, channels: next, sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: next, sourceTypes: selectedSourceTypes, tags: selectedTags, dateRange, customDateFrom, customDateTo })
   }
 
   const selectAllChannels = () => {
     hapticFeedback('light')
-    onChange({ categories: selectedCategories, channels: [], sourceTypes: selectedSourceTypes, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: [], sourceTypes: selectedSourceTypes, tags: selectedTags, dateRange, customDateFrom, customDateTo })
   }
 
   const toggleSourceType = (type) => {
@@ -59,17 +61,30 @@ export default function NewsFilters({
     const next = selectedSourceTypes.includes(type)
       ? selectedSourceTypes.filter(t => t !== type)
       : [...selectedSourceTypes, type]
-    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: next, dateRange, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: next, tags: selectedTags, dateRange, customDateFrom, customDateTo })
   }
 
   const selectAllSourceTypes = () => {
     hapticFeedback('light')
-    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: [], dateRange, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: [], tags: selectedTags, dateRange, customDateFrom, customDateTo })
+  }
+
+  const toggleTag = (tag) => {
+    hapticFeedback('light')
+    const next = selectedTags.includes(tag)
+      ? selectedTags.filter(t => t !== tag)
+      : [...selectedTags, tag]
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: selectedSourceTypes, tags: next, dateRange, customDateFrom, customDateTo })
+  }
+
+  const selectAllTags = () => {
+    hapticFeedback('light')
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: selectedSourceTypes, tags: [], dateRange, customDateFrom, customDateTo })
   }
 
   const changeDateRange = (value) => {
     hapticFeedback('light')
-    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: selectedSourceTypes, dateRange: value, customDateFrom, customDateTo })
+    onChange({ categories: selectedCategories, channels: selectedChannels, sourceTypes: selectedSourceTypes, tags: selectedTags, dateRange: value, customDateFrom, customDateTo })
   }
 
   const changeCustomDate = (field, value) => {
@@ -77,6 +92,7 @@ export default function NewsFilters({
       categories: selectedCategories,
       channels: selectedChannels,
       sourceTypes: selectedSourceTypes,
+      tags: selectedTags,
       dateRange,
       customDateFrom: field === 'from' ? value : customDateFrom,
       customDateTo: field === 'to' ? value : customDateTo,
@@ -95,6 +111,9 @@ export default function NewsFilters({
     if (selectedSourceTypes.length > 0) {
       const names = selectedSourceTypes.map(t => sourceTypeLabels[t] || t)
       parts.push(names.join(', '))
+    }
+    if (selectedTags.length > 0) {
+      parts.push(selectedTags.map(t => t.toUpperCase()).join(', '))
     }
     if (selectedChannels.length > 0) {
       const names = channels
@@ -177,6 +196,33 @@ export default function NewsFilters({
               })}
             </div>
           </div>
+
+          {/* Теги */}
+          {availableTags.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={styles.sectionLabel}>Теги</div>
+              <div style={styles.pillRow}>
+                <button
+                  onClick={selectAllTags}
+                  style={selectedTags.length === 0 ? styles.pillActive : styles.pill}
+                >
+                  Все
+                </button>
+                {availableTags.map(tag => {
+                  const active = selectedTags.includes(tag)
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => toggleTag(tag)}
+                      style={active ? styles.pillActive : styles.pill}
+                    >
+                      {tag.toUpperCase()}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Источники */}
           <div style={{ marginTop: 10 }}>

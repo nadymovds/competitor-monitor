@@ -139,7 +139,14 @@ export default function ScanCard({ scan, scanType, onExpand, onNavigateToCompeti
       <div style={styles.card}>
         {/* Заголовок */}
         <button onClick={handleToggle} style={styles.header}>
-          <span style={styles.date}>{formatDate(digestDate)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={styles.date}>{formatDate(digestDate)}</span>
+            {scan.tag && (
+              <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, backgroundColor: '#3b82f620', color: '#3b82f6' }}>
+                {scan.tag.toUpperCase()}
+              </span>
+            )}
+          </div>
           <span style={{ ...styles.arrow, transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
         </button>
 

@@ -22,10 +22,25 @@ export async function getNewsChannels() {
 export async function getAllNewsChannels() {
   const { data, error } = await supabase
     .from('news_channels')
-    .select('id, username, title, is_active, source_type, url, css_config')
+    .select('id, username, title, is_active, source_type, url, css_config, tags')
     .order('title')
   if (error) throw error
   return data
+}
+
+export async function getNewsChannelTags() {
+  const { data, error } = await supabase
+    .from('news_channels')
+    .select('tags')
+    .eq('is_active', true)
+  if (error) throw error
+  const allTags = new Set()
+  for (const ch of data || []) {
+    for (const tag of ch.tags || []) {
+      if (tag) allTags.add(tag)
+    }
+  }
+  return Array.from(allTags).sort()
 }
 
 export async function getNewsPosts({ categories = [], channels = [], sourceTypes = [], searchQuery = '', dateFrom, dateTo, limit = 20, offset = 0 } = {}) {
@@ -210,10 +225,11 @@ export async function deleteCategory(categoryId) {
   if (error) throw error
 }
 
-export async function createChannel({ username, title, sourceType = 'telegram', url, cssConfig }) {
+export async function createChannel({ username, title, sourceType = 'telegram', url, cssConfig, tags = [] }) {
   const insertData = {
     title: title || null,
-    source_type: sourceType
+    source_type: sourceType,
+    tags: tags || []
   }
 
   if (sourceType === 'telegram') {
@@ -234,13 +250,14 @@ export async function createChannel({ username, title, sourceType = 'telegram', 
   return data
 }
 
-export async function updateChannel(channelId, { username, title, isActive, url, cssConfig }) {
+export async function updateChannel(channelId, { username, title, isActive, url, cssConfig, tags }) {
   const updates = { updated_at: new Date().toISOString() }
   if (username !== undefined) updates.username = username?.replace(/^@/, '') || null
   if (title !== undefined) updates.title = title
   if (isActive !== undefined) updates.is_active = isActive
   if (url !== undefined) updates.url = url
   if (cssConfig !== undefined) updates.css_config = cssConfig
+  if (tags !== undefined) updates.tags = tags
 
   const { data, error } = await supabase
     .from('news_channels')
@@ -262,7 +279,7 @@ export async function deleteChannel(channelId) {
 
 // === Функции для страницы "Сканирования" ===
 
-export async function getNewsDigests(limit = 10, offset = 0) {
+export async function getNewsDigests(limit = 10, offset = 0, tag = null) {
   const twoMonthsAgo = new Date()
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
 
@@ -277,12 +294,21 @@ export async function getNewsDigests(limit = 10, offset = 0) {
     }
   }
 
-  const { data, error, count } = await supabase
+  let digestQuery = supabase
     .from('news_digests')
     .select('*', { count: 'exact' })
     .gte('created_at', twoMonthsAgo.toISOString())
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
+
+  if (tag === '') {
+    // Пустая строка = только глобальные дайджесты без тега
+    digestQuery = digestQuery.is('tag', null)
+  } else if (tag !== null) {
+    digestQuery = digestQuery.eq('tag', tag)
+  }
+
+  const { data, error, count } = await digestQuery
 
   if (error) throw error
 

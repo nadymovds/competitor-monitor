@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { hapticFeedback } from '../../services/telegram'
 import { getCompetitorScans, getCompetitorScanDetails } from '../../services/supabase'
-import { getNewsDigests, getNewsDigestDetails } from '../../services/news'
+import { getNewsDigests, getNewsDigestDetails, getNewsChannelTags } from '../../services/news'
 import ScanCard from '../ui/ScanCard'
 import NextScanInfo from '../ui/NextScanInfo'
 
@@ -11,6 +11,8 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(true)
   const [offset, setOffset] = useState(0)
+  const [availableTags, setAvailableTags] = useState([])
+  const [selectedTag, setSelectedTag] = useState(null) // null = все
   const loadMoreRef = useRef(null)
 
   const PAGE_SIZE = 10
@@ -20,7 +22,11 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
     setScans([])
     setOffset(0)
     setHasMore(true)
-    loadScans(scanType, 0, true)
+    setSelectedTag(null)
+    loadScans(scanType, 0, null, true)
+    if (scanType === 'news') {
+      getNewsChannelTags().then(setAvailableTags).catch(() => {})
+    }
   }, [scanType])
 
   useEffect(() => {
@@ -29,7 +35,7 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && !loading && hasMore) {
-          loadScans(scanType, offset, false)
+          loadScans(scanType, offset, selectedTag, false)
         }
       },
       { rootMargin: '100px' }
@@ -37,9 +43,9 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
 
     observer.observe(loadMoreRef.current)
     return () => observer.disconnect()
-  }, [loading, hasMore, offset, scanType])
+  }, [loading, hasMore, offset, scanType, selectedTag])
 
-  const loadScans = async (type, currentOffset, isInitial = false) => {
+  const loadScans = async (type, currentOffset, tag, isInitial = false) => {
     if (loading && !isInitial) return
     setLoading(true)
 
@@ -48,7 +54,7 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
       if (type === 'competitors') {
         result = await getCompetitorScans(PAGE_SIZE, currentOffset)
       } else {
-        result = await getNewsDigests(PAGE_SIZE, currentOffset)
+        result = await getNewsDigests(PAGE_SIZE, currentOffset, tag)
       }
 
       // Извлекаем данные из объекта {scans/digests, hasMore}
@@ -75,6 +81,15 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
   const handleScanTypeChange = (type) => {
     hapticFeedback('light')
     setScanType(type)
+  }
+
+  const handleTagChange = (tag) => {
+    hapticFeedback('light')
+    setSelectedTag(tag)
+    setScans([])
+    setOffset(0)
+    setHasMore(true)
+    loadScans(scanType, 0, tag, true)
   }
 
   return (
@@ -113,6 +128,26 @@ export default function ScansScreen({ onNavigateToCompetitor, onBack }) {
 
       {/* Next Scan Info */}
       <NextScanInfo scanType={scanType} />
+
+      {/* Tag filter (news only) */}
+      {scanType === 'news' && availableTags.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: 12, scrollbarWidth: 'none' }}>
+          {[null, ...availableTags].map(tag => (
+            <button
+              key={tag ?? '__all__'}
+              onClick={() => handleTagChange(tag)}
+              style={{
+                borderRadius: 16, padding: '6px 12px', fontSize: 13, fontWeight: 500,
+                border: 'none', cursor: 'pointer', flexShrink: 0,
+                backgroundColor: selectedTag === tag ? '#3b82f620' : '#1a1a24',
+                color: selectedTag === tag ? '#3b82f6' : '#9ca3af',
+              }}
+            >
+              {tag === null ? 'Все' : tag.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Scans List */}
       <div style={styles.scansList}>
