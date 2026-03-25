@@ -1768,14 +1768,11 @@ def save_competitor_tg_post(competitor_id: str, url_id: str, channel_username: s
             'report_id': report_id,
         }
 
-        result = supabase.table('competitor_tg_posts').upsert(
+        supabase.table('competitor_tg_posts').upsert(
             data, on_conflict='channel_username,message_id'
-        ).select('id').execute()
+        ).execute()
 
-        if result.data:
-            return result.data[0].get('id')
-
-        # Fallback: получаем id отдельным запросом
+        # Получаем id отдельным запросом
         fallback = supabase.table('competitor_tg_posts') \
             .select('id') \
             .eq('channel_username', channel_username) \
