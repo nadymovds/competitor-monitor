@@ -183,12 +183,12 @@ webapp/
 │   ├── components/
 │   │   ├── screens/      # Экраны приложения
 │   │   │   ├── FeedScreen.jsx        # Единая лента (конкуренты + новости)
-│   │   │   ├── ScansScreen.jsx       # История сканирований
+│   │   │   ├── ScansScreen.jsx       # История сканирований (подстраница Settings)
 │   │   │   ├── CompetitorsScreen.jsx # Список конкурентов
 │   │   │   ├── MentionsScreen.jsx    # Упоминания компании
-│   │   │   └── SettingsScreen.jsx    # Настройки
+│   │   │   └── SettingsScreen.jsx    # Настройки (включает кнопку → ScansScreen)
 │   │   └── ui/           # UI компоненты
-│   │       ├── BottomNav.jsx         # 5 вкладок: feed/scans/competitors/mentions/settings
+│   │       ├── BottomNav.jsx         # 4 вкладки: feed/competitors/mentions/settings
 │   │       ├── FeedTypeToggle.jsx    # Переключатель Все/Конкуренты/Новости
 │   │       ├── MultiSelect.jsx       # Dropdown с множественным выбором
 │   │       ├── NewsCard.jsx
@@ -233,10 +233,11 @@ webapp/
 
 **SettingsScreen** - Настройки и управление
 - Управление категориями новостей
-- Управление каналами новостей
+- Управление каналами новостей (включая редактирование тегов `tags` для фильтрации по странам)
 - Группы конкурентов
 - Поиск упоминаний: CRUD для `mention_search_terms` (только admin)
 - Источники упоминаний: CRUD для `mention_sources` (только admin)
+- Кнопка «История сканирований» → открывает ScansScreen как подстраницу
 
 #### Работа с API
 
@@ -266,7 +267,8 @@ const { data, error } = await supabase
 #### Файлы
 
 - **`bot.py`** — Flask webhook-сервер, задеплоен на Render.com (обрабатывает инлайн-кнопки)
-- **`news_monitor.py`** / **`competitor_monitor.py`** — cron-скрипты, запускаются по расписанию в GitHub Actions
+- **`monitor.py`** / **`news_monitor.py`** / **`mentions_monitor.py`** — cron-скрипты, запускаются по расписанию в GitHub Actions
+- **`resend_digest_to_groups.py`** — утилита для переотправки последнего дайджеста в групповые чаты (без инлайн-кнопок, со ссылкой на бот); запускается вручную через workflow_dispatch
 
 #### Интеграция
 
@@ -310,16 +312,26 @@ schedule:
 schedule:
   - cron: '0 6 * * *'  # UTC
 
-# news_monitor.py — каждую пятницу 9:00 МСК
+# news_monitor.py — каждую пятницу 9:00 МСК (RU)
 schedule:
   - cron: '0 6 * * 5'  # UTC
+
+# news_monitor.py --tags kz — каждую пятницу 9:30 МСК (KZ)
+schedule:
+  - cron: '30 6 * * 5'  # UTC
 
 # mentions_monitor.py — каждый понедельник 9:00 МСК
 schedule:
   - cron: '0 6 * * 1'  # UTC
 ```
 
-**2. По требованию (через Telegram Bot):**
+**2. Ручной запуск:**
+```yaml
+# resend_digest_to_groups.py — workflow_dispatch (по требованию)
+# Переотправляет последний дайджест в групповые чаты
+```
+
+**3. По требованию (через Telegram Bot):**
 - Пользователь отправляет `/scan` или `/news`
 - Bot создаёт запись в `scan_requests`
 - GitHub Actions webhook срабатывает на новую запись

@@ -221,6 +221,7 @@ URL-адреса конкурентов для мониторинга.
 | source_type | text | 'telegram' или 'website' |
 | url | text | URL (для website, например https://site.com/news) |
 | css_config | jsonb | Конфигурация CSS-селекторов для парсинга (title, content, date, pagination) |
+| tags | text[] | Теги страны/региона для фильтрации (например, ['kz'], ['ru']) |
 
 ### `news_categories`
 Категории новостей.
