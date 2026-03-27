@@ -1704,6 +1704,10 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
             print(f"❌ Нет активных источников с тегом «{tag_filter}»")
             return
         print(f"🏷️ Фильтр по тегу «{tag_filter}»: {len(all_sources)} источников")
+    else:
+        # Без тега — только источники без региональных тегов
+        all_sources = [s for s in all_sources if not (s.get('tags') or [])]
+        print(f"🏷️ Без тега (общий дайджест): {len(all_sources)} источников")
 
     if not all_sources:
         send_telegram_message("❌ Нет активных источников для мониторинга")
@@ -2075,8 +2079,9 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
     total_digest = len(digest_posts) if digest_posts else 0
     total_all_new = total_new_posts + total_web_posts
 
-    tag_line = f"\n🏷️ Тег: <b>{tag_filter.upper()}</b>" if tag_filter else ""
-    summary_msg = f"""📊 <b>Мониторинг новостей завершён</b>{tag_line}
+    tag_labels = {"kz": "Казахстан", "ru": "Россия"}
+    tag_suffix = f" — {tag_labels.get(tag_filter.lower(), tag_filter.upper())}" if tag_filter else ""
+    summary_msg = f"""📊 <b>Мониторинг новостей завершён{tag_suffix}</b>
 
 📅 Период: {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}
 ⏱️ Время: {elapsed} сек
