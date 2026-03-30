@@ -136,6 +136,7 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
   const handleStartEdit = () => {
     hapticFeedback('light')
     setEditData({
+      name: selectedCompetitor.name || '',
       description: details?.description || selectedCompetitor.description || '',
       is_active: selectedCompetitor.is_active !== false
     })
@@ -179,7 +180,13 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
     setSaving(true)
     try {
       // Сохраняем основные данные конкурента
+      if (!editData.name.trim()) {
+        showAlert('Название конкурента не может быть пустым')
+        setSaving(false)
+        return
+      }
       await updateCompetitor(selectedCompetitor.id, {
+        name: editData.name.trim(),
         description: editData.description,
         is_active: editData.is_active
       })
@@ -210,11 +217,11 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
 
       // Обновляем локальное состояние
-      setSelectedCompetitor(prev => ({ ...prev, description: editData.description, is_active: editData.is_active, urls: finalUrls }))
+      setSelectedCompetitor(prev => ({ ...prev, name: editData.name.trim(), description: editData.description, is_active: editData.is_active, urls: finalUrls }))
       setDetails(prev => prev ? { ...prev, description: editData.description, urls: finalUrls } : prev)
       setCompetitors(prev => prev.map(c =>
         c.id === selectedCompetitor.id
-          ? { ...c, description: editData.description, is_active: editData.is_active, urls: finalUrls }
+          ? { ...c, name: editData.name.trim(), description: editData.description, is_active: editData.is_active, urls: finalUrls }
           : c
       ))
 
@@ -385,7 +392,17 @@ export default function CompetitorsScreen({ user, groups: initialGroups, selecte
           </div>
 
           <div style={{ fontSize: 22, fontWeight: 700 }}>Редактирование</div>
-          <div style={{ fontSize: 14, color: '#9ca3af' }}>{selectedCompetitor.name}</div>
+
+          {/* Название */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 14, color: '#9ca3af' }}>Название</label>
+            <input
+              value={editData.name}
+              onChange={e => setEditData(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Название конкурента"
+              style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8, padding: '10px 12px', color: '#f9fafb', fontSize: 15, outline: 'none' }}
+            />
+          </div>
 
           {/* URLs */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
