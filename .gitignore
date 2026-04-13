@@ -20,3 +20,6 @@ __pycache__/
 optimize_news_prompt.py
 post_examples.md
 optimized_prompt.txt
+
+# Design concepts
+platform-concept/
