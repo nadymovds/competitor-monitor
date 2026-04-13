@@ -430,11 +430,20 @@ def _post_unique_key(post: dict) -> str:
     return str(post.get('id') or post.get('post_url') or f"{post.get('title', '')}|{post.get('post_date', '')}")
 
 
-def score_for_digest_top(post: dict, reference_time: datetime | None = None) -> dict:
+def _strip_hashtags(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r'(?<!\w)#[\w-]+', ' ', text, flags=re.UNICODE)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    return cleaned.strip()
+
+
+def score_for_digest_top(post: dict, reference_time: datetime | None = None,
+                         preferred_geo: str = 'ru') -> dict:
     """Оценка релевантности поста для TOP-дайджеста (0..100)."""
-    title = (post.get('title') or '').strip()
-    summary = (post.get('summary') or '').strip()
-    content_text = (post.get('content_text') or '').strip()
+    title = _strip_hashtags((post.get('title') or '').strip())
+    summary = _strip_hashtags((post.get('summary') or '').strip())
+    content_text = _strip_hashtags((post.get('content_text') or '').strip())
     text_blob = " ".join([title, summary, content_text]).lower()
 
     reasons: list[str] = []
@@ -454,6 +463,19 @@ def score_for_digest_top(post: dict, reference_time: datetime | None = None) -> 
     if fms_score:
         score += fms_score
         reasons.append(f"FMS-fit +{fms_score}")
+
+    # 1.1) Ядро тем (высший приоритет): 0..35
+    core_priority_terms = [
+        'управлени автопарк', 'управление автопарком', 'fleet management',
+        'телематик', 'глонасс', 'видеоаналитик', 'video analytics',
+        'ии в логист', 'ai в логист', 'искусственн интеллект в логист',
+        'автотранспортн логистик', 'логистик автотранспорт'
+    ]
+    core_hits = sum(1 for term in core_priority_terms if term in text_blob)
+    core_score = min(35, core_hits * 12)
+    if core_score:
+        score += core_score
+        reasons.append(f"Ядро тем +{core_score}")
 
     # 2) Бизнес-значимость: 0..30
     business_terms = [
@@ -481,6 +503,36 @@ def score_for_digest_top(post: dict, reference_time: datetime | None = None) -> 
     if specificity_score:
         score += specificity_score
         reasons.append(f"Конкретика +{specificity_score}")
+
+    # 3.1) Гео-приоритет: РФ выше других стран
+    geo_bonus = 0
+    geo_penalty = 0
+    ru_terms = ['росси', 'рф', 'российск', 'минтранс', '.ru', 'москва', 'санкт-петербург', 'регион рф']
+    foreign_terms = [
+        'узбекистан', 'казахстан', 'беларус', 'китай', 'сша', 'европ', 'германи',
+        'франц', 'испан', 'оаэ', 'дубай', 'турци', 'индия'
+    ]
+    has_ru = any(t in text_blob for t in ru_terms)
+    has_foreign = any(t in text_blob for t in foreign_terms)
+
+    if preferred_geo == 'ru':
+        if has_ru:
+            geo_bonus = 16
+        elif has_foreign:
+            geo_penalty = 14
+    elif preferred_geo == 'kz':
+        if 'казахстан' in text_blob or 'рк' in text_blob:
+            geo_bonus = 16
+        elif has_foreign and not has_ru:
+            geo_penalty = 8
+
+    if geo_bonus:
+        score += geo_bonus
+        reasons.append(f"Гео-приоритет +{geo_bonus}")
+    if geo_penalty:
+        score -= geo_penalty
+        penalty_flags.append('geo_not_priority')
+        reasons.append(f"Гео-штраф -{geo_penalty}")
 
     # 4) Свежесть: 0..15
     ref_time = reference_time or datetime.now()
@@ -535,11 +587,25 @@ def score_for_digest_top(post: dict, reference_time: datetime | None = None) -> 
 
     generic_logistics_terms = [
         'ремонт дорог', 'биометр', 'общественн транспорт', 'метро',
-        'трамва', 'самокат', 'курьер-робот', 'робот-курьер'
+        'трамва', 'самокат'
     ]
     if any(t in text_blob for t in generic_logistics_terms):
         penalties += 24
         penalty_flags.append('generic_transport_logistics')
+
+    road_repair_terms = [
+        'ремонтные работы на трассе', 'ремонт на трассе', 'перекрытие трассы',
+        'ремонт трасс', 'дорожные работы на трассе', 'ограничение движения на трассе'
+    ]
+    if any(t in text_blob for t in road_repair_terms):
+        penalties += 45
+        penalty_flags.append('road_repair')
+
+    # Роботы: допустимо как fallback, но не приоритет TOP
+    robot_terms = ['робот', 'роботы', 'робот-курьер', 'курьер-робот', 'гуманоид']
+    if any(t in text_blob for t in robot_terms):
+        penalties += 8
+        penalty_flags.append('robot_low_priority')
 
     other_transport_terms = ['железнодорож', 'ж/д', 'морск', 'авиац', 'порт', 'судоход']
     if any(t in text_blob for t in other_transport_terms):
@@ -550,8 +616,12 @@ def score_for_digest_top(post: dict, reference_time: datetime | None = None) -> 
         reasons.append(f"Штраф -{penalties}")
     score = max(0, min(100, score - penalties))
 
+    final_score = max(0, min(100, score - penalties))
+    if 'road_repair' in penalty_flags:
+        final_score = min(final_score, 12)
+
     return {
-        'score': int(round(score)),
+        'score': int(round(final_score)),
         'reasons': reasons,
         'penalty_flags': penalty_flags,
     }
@@ -569,6 +639,10 @@ def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
             post['digest_score'] = s['score']
             post['digest_reasons'] = s['reasons']
             post['digest_penalty_flags'] = s['penalty_flags']
+        # Хештеги из оригинала в TOP не показываем
+        post['title'] = _strip_hashtags(post.get('title', ''))
+        post['summary'] = _strip_hashtags(post.get('summary', ''))
+        post['content_text'] = _strip_hashtags(post.get('content_text', ''))
         post['_source_key'] = _top_source_key(post)
         post['_sort_dt'] = _parse_post_datetime(post.get('post_date')) or datetime.min
         post['_key'] = _post_unique_key(post)
@@ -584,6 +658,9 @@ def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
     for post in prepared:
         if len(selected) >= max_posts:
             break
+        flags = set(post.get('digest_penalty_flags') or [])
+        if 'road_repair' in flags:
+            continue
         if int(post.get('digest_score', 0)) < min_score:
             continue
         src = post['_source_key']
@@ -600,6 +677,9 @@ def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
             if len(selected) >= target_min:
                 break
             if post['_key'] in selected_keys:
+                continue
+            flags = set(post.get('digest_penalty_flags') or [])
+            if 'road_repair' in flags:
                 continue
             src = post['_source_key']
             if source_counts.get(src, 0) >= per_source_cap:
@@ -2272,7 +2352,8 @@ async def run_news_monitoring_async(tag_filter: str | None = None, delivery: str
                 'category_tags': category_tags,
                 'source_type': source_type,
             }
-            score_data = score_for_digest_top(flat_post, reference_time=period_end)
+            preferred_geo = 'kz' if (tag_filter or '').lower() == 'kz' else 'ru'
+            score_data = score_for_digest_top(flat_post, reference_time=period_end, preferred_geo=preferred_geo)
             flat_post['digest_score'] = score_data['score']
             flat_post['digest_reasons'] = score_data['reasons']
             flat_post['digest_penalty_flags'] = score_data['penalty_flags']

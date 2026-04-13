@@ -71,6 +71,56 @@ class NewsRelevanceTests(unittest.TestCase):
         counts = Counter(source_keys)
         self.assertTrue(all(v <= 2 for v in counts.values()))
 
+    def test_road_repair_excluded_from_top(self):
+        candidates = [
+            {
+                "id": 1,
+                "title": "Ремонтные работы на трассе М-4",
+                "summary": "Ограничение движения на трассе",
+                "content_text": "Ремонт дороги и перекрытие трассы",
+                "post_date": "2026-04-01T10:00:00",
+                "source_type": "telegram",
+                "channel_id": 1,
+                "digest_score": 95,
+                "digest_reasons": ["test"],
+                "digest_penalty_flags": ["road_repair"],
+            },
+            {
+                "id": 2,
+                "title": "Внедрение FMS для коммерческого автопарка",
+                "summary": "Телематика и видеоаналитика",
+                "content_text": "ГЛОНАСС, управление автопарком, ИИ в логистике",
+                "post_date": "2026-04-01T11:00:00",
+                "source_type": "telegram",
+                "channel_id": 2,
+                "digest_score": 70,
+                "digest_reasons": ["test"],
+                "digest_penalty_flags": [],
+            },
+        ]
+        top = news_monitor.select_top_posts(candidates, min_score=0)
+        ids = {p["id"] for p in top}
+        self.assertIn(2, ids)
+        self.assertNotIn(1, ids)
+
+    def test_hashtags_are_stripped_in_top(self):
+        candidates = [{
+            "id": 1,
+            "title": "Новость #бутовуха",
+            "summary": "Текст с #хештегом",
+            "content_text": "Контент #foo",
+            "post_date": "2026-04-01T10:00:00",
+            "source_type": "telegram",
+            "channel_id": 1,
+            "digest_score": 80,
+            "digest_reasons": ["test"],
+            "digest_penalty_flags": [],
+        }]
+        top = news_monitor.select_top_posts(candidates, min_score=0)
+        self.assertEqual(len(top), 1)
+        self.assertNotIn("#", top[0]["title"])
+        self.assertNotIn("#", top[0]["summary"])
+
 
 if __name__ == "__main__":
     unittest.main()
