@@ -16,7 +16,7 @@ name: News Monitor (KZ)
           - pdf
           - telegram
         required: false
-        default: 'pdf'
+        default: 'telegram'
       replay:
         description: 'Replay-режим (без сканирования источников)'
         type: boolean
@@ -70,7 +70,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
           NEWS_PERIOD_DAYS: ${{ github.event.inputs.period_days || '7' }}
-          DELIVERY: ${{ github.event.inputs.delivery || 'pdf' }}
+          DELIVERY: ${{ github.event.inputs.delivery || 'telegram' }}
           REPLAY: ${{ github.event.inputs.replay || 'false' }}
           PERIOD_START: ${{ github.event.inputs.period_start || '' }}
           PERIOD_END: ${{ github.event.inputs.period_end || '' }}

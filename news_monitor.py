@@ -700,16 +700,13 @@ def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
 
 
 def format_top_digest_telegram_message(top_posts: list[dict], period_start: datetime, period_end: datetime,
-                                       tag_filter: str | None, total_candidates: int,
-                                       replay_mode: bool = False) -> str:
+                                       tag_filter: str | None, replay_mode: bool = False) -> str:
     tag_labels = {"kz": "Казахстан", "ru": "Россия"}
     tag_suffix = f" — {tag_labels.get(tag_filter.lower(), tag_filter.upper())}" if tag_filter else ""
     mode_label = " (replay)" if replay_mode else ""
     header = (
-        f"🧭 <b>ТОП релевантных новостей{tag_suffix}{mode_label}</b>\n"
+        f"🧭 <b>Дайджест новостей{tag_suffix}{mode_label}</b>\n"
         f"📅 {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}\n"
-        f"📌 В пуле релевантных: <b>{total_candidates}</b>\n"
-        f"✅ В ТОП: <b>{len(top_posts)}</b>\n"
     )
 
     lines = [header]
@@ -718,14 +715,11 @@ def format_top_digest_telegram_message(top_posts: list[dict], period_start: date
         summary = html.escape((post.get('summary') or '').strip())
         if len(summary) > 190:
             summary = summary[:187] + "..."
-        score = post.get('digest_score', 0)
         url = post.get('post_url') or post.get('article_url') or ''
-        source = html.escape(post.get('channel_title') or 'Источник')
 
-        line = f"{idx}. <b>{title}</b> — {score}/100\n"
+        line = f"{idx}. <b>{title}</b>\n"
         if summary:
             line += f"{summary}\n"
-        line += f"Источник: {source}\n"
         if url:
             safe_url = html.escape(url, quote=True)
             line += f"<a href=\"{safe_url}\">Открыть источник</a>\n"
@@ -2488,7 +2482,6 @@ async def run_news_monitoring_async(tag_filter: str | None = None, delivery: str
             period_start=period_start,
             period_end=period_end,
             tag_filter=tag_filter,
-            total_candidates=total_digest_posts,
             replay_mode=replay,
         )
         if not top_posts:
@@ -2529,8 +2522,8 @@ if __name__ == "__main__":
     parser.add_argument('--tags', type=str, default=None,
                         help='Тег для фильтрации источников (например: kz, ru). '
                              'Только каналы с этим тегом будут обработаны.')
-    parser.add_argument('--delivery', choices=['pdf', 'telegram'], default='pdf',
-                        help='Формат weekly-дайджеста: PDF (для пилота) или Telegram-сообщение')
+    parser.add_argument('--delivery', choices=['pdf', 'telegram'], default='telegram',
+                        help='Формат weekly-дайджеста: Telegram-сообщение (по умолчанию) или PDF')
     parser.add_argument('--replay', action='store_true',
                         help='Replay-режим: не сканировать источники, работать по уже собранным постам в БД')
     parser.add_argument('--period-start', type=str, default=None,
