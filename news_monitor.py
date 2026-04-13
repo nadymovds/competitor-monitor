@@ -438,6 +438,20 @@ def _strip_hashtags(text: str) -> str:
     return cleaned.strip()
 
 
+def _safe_title(post: dict) -> str:
+    title = _strip_hashtags((post.get('title') or '').strip())
+    if title:
+        return title
+    summary = _strip_hashtags((post.get('summary') or '').strip())
+    if summary:
+        return summary[:120] + ("..." if len(summary) > 120 else "")
+    content = _strip_hashtags((post.get('content_text') or '').strip())
+    if content:
+        first_line = content.split('\n')[0].strip()
+        return first_line[:120] + ("..." if len(first_line) > 120 else "")
+    return "Без заголовка"
+
+
 def score_for_digest_top(post: dict, reference_time: datetime | None = None,
                          preferred_geo: str = 'ru') -> dict:
     """Оценка релевантности поста для TOP-дайджеста (0..100)."""
@@ -607,6 +621,19 @@ def score_for_digest_top(post: dict, reference_time: datetime | None = None,
         penalties += 8
         penalty_flags.append('robot_low_priority')
 
+    # Мелкие локальные инциденты (уровень район/область без отраслевой значимости)
+    local_scope_terms = [
+        'в рязанской области', 'в белгородской области', 'в тверской области',
+        'в районе', 'район', 'поселок', 'посёлок', 'село', 'деревн', 'на улице',
+        'в муниципал', 'городск округ'
+    ]
+    minor_incident_terms = ['увяз', 'застрял', 'съехал', 'занесло', 'в кювет', 'заглох']
+    high_impact_terms = ['федеральн', 'массов', 'погиб', 'пострад', 'перекрыли магистраль', 'коллапс']
+    if any(t in text_blob for t in local_scope_terms) and any(t in text_blob for t in minor_incident_terms):
+        if not any(t in text_blob for t in high_impact_terms):
+            penalties += 40
+            penalty_flags.append('local_minor_incident')
+
     other_transport_terms = ['железнодорож', 'ж/д', 'морск', 'авиац', 'порт', 'судоход']
     if any(t in text_blob for t in other_transport_terms):
         penalties += 28
@@ -619,6 +646,8 @@ def score_for_digest_top(post: dict, reference_time: datetime | None = None,
     final_score = max(0, min(100, score - penalties))
     if 'road_repair' in penalty_flags:
         final_score = min(final_score, 12)
+    if 'local_minor_incident' in penalty_flags:
+        final_score = min(final_score, 8)
 
     return {
         'score': int(round(final_score)),
@@ -659,7 +688,7 @@ def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
         if len(selected) >= max_posts:
             break
         flags = set(post.get('digest_penalty_flags') or [])
-        if 'road_repair' in flags:
+        if 'road_repair' in flags or 'local_minor_incident' in flags:
             continue
         if int(post.get('digest_score', 0)) < min_score:
             continue
@@ -679,7 +708,7 @@ def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
             if post['_key'] in selected_keys:
                 continue
             flags = set(post.get('digest_penalty_flags') or [])
-            if 'road_repair' in flags:
+            if 'road_repair' in flags or 'local_minor_incident' in flags:
                 continue
             src = post['_source_key']
             if source_counts.get(src, 0) >= per_source_cap:
@@ -711,7 +740,7 @@ def format_top_digest_telegram_message(top_posts: list[dict], period_start: date
 
     lines = [header]
     for idx, post in enumerate(top_posts, start=1):
-        title = html.escape((post.get('title') or 'Без заголовка').strip())
+        title = html.escape(_safe_title(post))
         summary = html.escape((post.get('summary') or '').strip())
         if len(summary) > 190:
             summary = summary[:187] + "..."

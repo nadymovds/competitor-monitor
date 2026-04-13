@@ -121,6 +121,34 @@ class NewsRelevanceTests(unittest.TestCase):
         self.assertNotIn("#", top[0]["title"])
         self.assertNotIn("#", top[0]["summary"])
 
+    def test_local_minor_incident_excluded_from_top(self):
+        local_post = {
+            "id": 1,
+            "title": "",
+            "summary": "Грузовик увяз в колеях на дороге в Рязанской области",
+            "content_text": "В одном из районов водитель застрял в колеях",
+            "post_date": "2026-04-01T10:00:00",
+            "source_type": "telegram",
+            "channel_id": 1,
+        }
+        major_post = {
+            "id": 2,
+            "title": "Внедрение FMS в коммерческих автопарках РФ",
+            "summary": "Телематика и ГЛОНАСС для управления автопарком",
+            "content_text": "Федеральный масштаб и бизнес-эффект",
+            "post_date": "2026-04-01T11:00:00",
+            "source_type": "telegram",
+            "channel_id": 2,
+        }
+
+        s = news_monitor.score_for_digest_top(local_post)
+        self.assertIn("local_minor_incident", s["penalty_flags"])
+
+        top = news_monitor.select_top_posts([local_post, major_post], min_score=0)
+        ids = {p["id"] for p in top}
+        self.assertIn(2, ids)
+        self.assertNotIn(1, ids)
+
 
 if __name__ == "__main__":
     unittest.main()
