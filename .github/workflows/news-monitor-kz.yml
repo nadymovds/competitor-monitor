@@ -9,6 +9,27 @@ name: News Monitor (KZ)
         description: 'Период в днях'
         required: false
         default: '7'
+      delivery:
+        description: 'Формат дайджеста'
+        type: choice
+        options:
+          - pdf
+          - telegram
+        required: false
+        default: 'pdf'
+      replay:
+        description: 'Replay-режим (без сканирования источников)'
+        type: boolean
+        required: false
+        default: false
+      period_start:
+        description: 'Начало периода (YYYY-MM-DD)'
+        required: false
+        default: ''
+      period_end:
+        description: 'Конец периода (YYYY-MM-DD)'
+        required: false
+        default: ''
       test_mode:
         description: 'Тестовый режим (уведомления только администратору)'
         type: boolean
@@ -49,4 +70,16 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
           NEWS_PERIOD_DAYS: ${{ github.event.inputs.period_days || '7' }}
-        run: python news_monitor.py --tags kz ${{ github.event.inputs.test_mode == 'true' && '--test' || '' }}
+          DELIVERY: ${{ github.event.inputs.delivery || 'pdf' }}
+          REPLAY: ${{ github.event.inputs.replay || 'false' }}
+          PERIOD_START: ${{ github.event.inputs.period_start || '' }}
+          PERIOD_END: ${{ github.event.inputs.period_end || '' }}
+          TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
+        run: |
+          args=(python news_monitor.py --tags kz --delivery "$DELIVERY")
+          if [ "$REPLAY" = "true" ]; then args+=(--replay); fi
+          if [ -n "$PERIOD_START" ]; then args+=(--period-start "$PERIOD_START"); fi
+          if [ -n "$PERIOD_END" ]; then args+=(--period-end "$PERIOD_END"); fi
+          if [ "$TEST_MODE" = "true" ]; then args+=(--test); fi
+          echo "Running: ${args[*]}"
+          "${args[@]}"

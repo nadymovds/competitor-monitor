@@ -9,12 +9,14 @@ import os
 import hashlib
 import json
 import re
+import html
 import requests
 import aiohttp
 import asyncio
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
@@ -59,6 +61,10 @@ DELAY_BETWEEN_CHANNELS = 3
 MAX_POSTS_IN_DIGEST = 100
 MAX_CONCURRENT_LLM_NEWS = 1
 DEFAULT_DIGEST_PERIOD_DAYS = 7
+TOP_MIN_POSTS = 5
+TOP_MAX_POSTS = 7
+TOP_SOURCE_CAP = 2
+TOP_SCORE_THRESHOLD = 55
 
 # === ВЕБ-СКАНИРОВАНИЕ ===
 WEB_PLAYWRIGHT_TIMEOUT = 45000
@@ -383,6 +389,272 @@ def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict
 
 def calculate_hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _parse_post_datetime(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    return None
+
+
+def _top_source_key(post: dict) -> str:
+    source_type = post.get('source_type', 'telegram')
+    channel_id = post.get('channel_id')
+    if channel_id:
+        return f"{source_type}:{channel_id}"
+
+    raw_url = post.get('article_url') or post.get('post_url') or ''
+    if source_type == 'website' and raw_url:
+        try:
+            host = urlparse(raw_url).netloc
+            if host:
+                return f"website:{host.lower()}"
+        except Exception:
+            pass
+        return f"website:{raw_url.lower()}"
+
+    channel_title = post.get('channel_title') or ''
+    if channel_title:
+        return f"{source_type}:{channel_title.lower()}"
+    if raw_url:
+        return f"{source_type}:{raw_url.lower()}"
+    return f"{source_type}:unknown"
+
+
+def _post_unique_key(post: dict) -> str:
+    return str(post.get('id') or post.get('post_url') or f"{post.get('title', '')}|{post.get('post_date', '')}")
+
+
+def score_for_digest_top(post: dict, reference_time: datetime | None = None) -> dict:
+    """Оценка релевантности поста для TOP-дайджеста (0..100)."""
+    title = (post.get('title') or '').strip()
+    summary = (post.get('summary') or '').strip()
+    content_text = (post.get('content_text') or '').strip()
+    text_blob = " ".join([title, summary, content_text]).lower()
+
+    reasons: list[str] = []
+    penalty_flags: list[str] = []
+    score = 0
+
+    # 1) FMS / автопарк-fit: 0..35
+    fms_terms = [
+        'fms', 'мониторинг транспорта', 'телематик', 'глонасс', 'gps',
+        'тахограф', 'автопарк', 'весогабарит', 'wim', 'tms', 'wialon',
+        'цифров', 'грузоперевоз', 'перевозчик', 'логистическ платформа',
+        'маршрутизац', 'диспетчер', 'шина can', 'топлив', 'лицензирован',
+        'водител', 'режим труда', 'каршеринг', 'беспилотн грузовик'
+    ]
+    fms_hits = sum(1 for term in fms_terms if term in text_blob)
+    fms_score = min(35, fms_hits * 4)
+    if fms_score:
+        score += fms_score
+        reasons.append(f"FMS-fit +{fms_score}")
+
+    # 2) Бизнес-значимость: 0..30
+    business_terms = [
+        'запустил', 'внедрил', 'масштабир', 'подписал', 'контракт', 'проект',
+        'инвестици', 'регулятор', 'закон', 'постановлен', 'приказ',
+        'рынок', 'доля рынка', 'лизинг', 'продажи', 'оборот', 'выручк',
+        'пилот', 'эксплуатаци', 'реестр'
+    ]
+    business_hits = sum(1 for term in business_terms if term in text_blob)
+    has_metrics = bool(re.search(r'(\d+[.,]?\d*\s*%|\d[\d\s]{2,}\s*(?:млн|млрд|тыс)?\b)', text_blob))
+    biz_score = min(30, business_hits * 4 + (8 if has_metrics else 0))
+    if biz_score:
+        score += biz_score
+        reasons.append(f"Бизнес-значимость +{biz_score}")
+
+    # 3) Конкретика / доказательность: 0..20
+    specificity_score = 0
+    if has_metrics:
+        specificity_score += 8
+    if re.search(r'\b(фз|№\s*\d+|постановлени[ея]|приказ|mintrans|минтранс)\b', text_blob):
+        specificity_score += 7
+    if re.search(r'\b(яндекс|wildberries|магнит|ozon|камаз|navio|evocargo|natcar)\b', text_blob):
+        specificity_score += 5
+    specificity_score = min(20, specificity_score)
+    if specificity_score:
+        score += specificity_score
+        reasons.append(f"Конкретика +{specificity_score}")
+
+    # 4) Свежесть: 0..15
+    ref_time = reference_time or datetime.now()
+    post_dt = _parse_post_datetime(post.get('post_date'))
+    freshness_score = 3
+    if post_dt:
+        # Нормализуем aware/naive, чтобы не падать на вычитании
+        if post_dt.tzinfo and not ref_time.tzinfo:
+            ref_time = ref_time.replace(tzinfo=timezone.utc)
+        if ref_time.tzinfo and not post_dt.tzinfo:
+            post_dt = post_dt.replace(tzinfo=timezone.utc)
+        age_hours = max(0, (ref_time - post_dt).total_seconds() / 3600)
+        if age_hours <= 24:
+            freshness_score = 15
+        elif age_hours <= 72:
+            freshness_score = 12
+        elif age_hours <= 7 * 24:
+            freshness_score = 9
+        elif age_hours <= 14 * 24:
+            freshness_score = 5
+        else:
+            freshness_score = 2
+    score += freshness_score
+    reasons.append(f"Свежесть +{freshness_score}")
+
+    # 5) Штрафы по нежелательным темам
+    penalties = 0
+
+    session_terms = [
+        'выступил на сесс', 'сессии', 'панельн', 'конференц', 'форум',
+        'круглый стол', 'дискусси', 'доклад'
+    ]
+    if any(t in text_blob for t in session_terms):
+        penalties += 22
+        penalty_flags.append('session_speech')
+
+    if re.search(r'\bтакси\b', text_blob):
+        penalties += 28
+        penalty_flags.append('taxi')
+
+    mode_terms = ['летн', 'зимн', 'скоростн режим']
+    if 'скоростн режим' in text_blob and any(t in text_blob for t in mode_terms):
+        penalties += 26
+        penalty_flags.append('seasonal_speed_mode')
+
+    dtp_terms = ['дтп', 'авар', 'столкновен', 'опрокинул', 'наезд']
+    if any(t in text_blob for t in dtp_terms):
+        fms_cause_terms = ['уснул', 'заснул', 'дистанц', 'тахограф', 'переработ', 'режим труда']
+        if not any(t in text_blob for t in fms_cause_terms):
+            penalties += 30
+            penalty_flags.append('dtp_without_fms_cause')
+
+    generic_logistics_terms = [
+        'ремонт дорог', 'биометр', 'общественн транспорт', 'метро',
+        'трамва', 'самокат', 'курьер-робот', 'робот-курьер'
+    ]
+    if any(t in text_blob for t in generic_logistics_terms):
+        penalties += 24
+        penalty_flags.append('generic_transport_logistics')
+
+    other_transport_terms = ['железнодорож', 'ж/д', 'морск', 'авиац', 'порт', 'судоход']
+    if any(t in text_blob for t in other_transport_terms):
+        penalties += 28
+        penalty_flags.append('non_road_transport')
+
+    if penalties:
+        reasons.append(f"Штраф -{penalties}")
+    score = max(0, min(100, score - penalties))
+
+    return {
+        'score': int(round(score)),
+        'reasons': reasons,
+        'penalty_flags': penalty_flags,
+    }
+
+
+def select_top_posts(candidates: list[dict], max_posts: int = TOP_MAX_POSTS,
+                     min_posts: int = TOP_MIN_POSTS, per_source_cap: int = TOP_SOURCE_CAP,
+                     min_score: int = TOP_SCORE_THRESHOLD) -> list[dict]:
+    """Отбирает TOP-посты по score с ограничением повторов источников."""
+    prepared: list[dict] = []
+    for raw in candidates:
+        post = dict(raw)
+        if post.get('digest_score') is None:
+            s = score_for_digest_top(post)
+            post['digest_score'] = s['score']
+            post['digest_reasons'] = s['reasons']
+            post['digest_penalty_flags'] = s['penalty_flags']
+        post['_source_key'] = _top_source_key(post)
+        post['_sort_dt'] = _parse_post_datetime(post.get('post_date')) or datetime.min
+        post['_key'] = _post_unique_key(post)
+        prepared.append(post)
+
+    prepared.sort(key=lambda p: (p.get('digest_score', 0), p['_sort_dt']), reverse=True)
+
+    selected: list[dict] = []
+    selected_keys: set[str] = set()
+    source_counts: dict[str, int] = {}
+
+    # Первая волна: только посты выше порога качества
+    for post in prepared:
+        if len(selected) >= max_posts:
+            break
+        if int(post.get('digest_score', 0)) < min_score:
+            continue
+        src = post['_source_key']
+        if source_counts.get(src, 0) >= per_source_cap:
+            continue
+        selected.append(post)
+        selected_keys.add(post['_key'])
+        source_counts[src] = source_counts.get(src, 0) + 1
+
+    # Вторая волна: добираем до min_posts (если есть из чего)
+    target_min = min(min_posts, len(prepared))
+    if len(selected) < target_min:
+        for post in prepared:
+            if len(selected) >= target_min:
+                break
+            if post['_key'] in selected_keys:
+                continue
+            src = post['_source_key']
+            if source_counts.get(src, 0) >= per_source_cap:
+                continue
+            selected.append(post)
+            selected_keys.add(post['_key'])
+            source_counts[src] = source_counts.get(src, 0) + 1
+
+    # Финальная подрезка до max_posts
+    selected = selected[:max_posts]
+
+    for idx, post in enumerate(selected, start=1):
+        post['top_rank'] = idx
+        post.pop('_source_key', None)
+        post.pop('_sort_dt', None)
+        post.pop('_key', None)
+    return selected
+
+
+def format_top_digest_telegram_message(top_posts: list[dict], period_start: datetime, period_end: datetime,
+                                       tag_filter: str | None, total_candidates: int,
+                                       replay_mode: bool = False) -> str:
+    tag_labels = {"kz": "Казахстан", "ru": "Россия"}
+    tag_suffix = f" — {tag_labels.get(tag_filter.lower(), tag_filter.upper())}" if tag_filter else ""
+    mode_label = " (replay)" if replay_mode else ""
+    header = (
+        f"🧭 <b>ТОП релевантных новостей{tag_suffix}{mode_label}</b>\n"
+        f"📅 {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}\n"
+        f"📌 В пуле релевантных: <b>{total_candidates}</b>\n"
+        f"✅ В ТОП: <b>{len(top_posts)}</b>\n"
+    )
+
+    lines = [header]
+    for idx, post in enumerate(top_posts, start=1):
+        title = html.escape((post.get('title') or 'Без заголовка').strip())
+        summary = html.escape((post.get('summary') or '').strip())
+        if len(summary) > 190:
+            summary = summary[:187] + "..."
+        score = post.get('digest_score', 0)
+        url = post.get('post_url') or post.get('article_url') or ''
+        source = html.escape(post.get('channel_title') or 'Источник')
+
+        line = f"{idx}. <b>{title}</b> — {score}/100\n"
+        if summary:
+            line += f"{summary}\n"
+        line += f"Источник: {source}\n"
+        if url:
+            safe_url = html.escape(url, quote=True)
+            line += f"<a href=\"{safe_url}\">Открыть источник</a>\n"
+        lines.append(line)
+
+    msg = "\n".join(lines).strip()
+    if len(msg) > 3900:
+        msg = msg[:3890] + "…"
+    return msg
 
 
 def format_error_summary(scan_results: list) -> str:
@@ -1139,28 +1411,31 @@ def mark_post_processed(post_id: int, title: str, summary: str, source_type: str
     except Exception as e:
         print(f"  ⚠️ Ошибка обновления поста {post_id}: {e}")
 
-def get_unprocessed_posts(period_start: datetime) -> list:
-    """Выборка необработанных постов начиная с period_start."""
+def get_unprocessed_posts(period_start: datetime, period_end: datetime | None = None) -> list:
+    """Выборка необработанных постов за период."""
     try:
-        result = (supabase.table('news_posts')
-                  .select('*, news_channels(username, title)')
-                  .eq('is_processed', False)
-                  .gte('post_date', period_start.isoformat())
-                  .order('post_date', desc=False)
-                  .execute())
+        query = (supabase.table('news_posts')
+                 .select('*, news_channels(username, title)')
+                 .eq('is_processed', False)
+                 .gte('post_date', period_start.isoformat()))
+        if period_end is not None:
+            query = query.lte('post_date', period_end.isoformat())
+        result = query.order('post_date', desc=False).execute()
         return result.data or []
     except Exception as e:
         print(f"❌ Ошибка получения необработанных постов: {e}")
         return []
 
-def get_processed_content_hashes(period_start: datetime) -> set:
+def get_processed_content_hashes(period_start: datetime, period_end: datetime | None = None) -> set:
     """Выборка content_hash уже обработанных постов за период (для дедупликации)."""
     try:
-        result = (supabase.table('news_posts')
-                  .select('content_hash')
-                  .eq('is_processed', True)
-                  .gte('post_date', period_start.isoformat())
-                  .execute())
+        query = (supabase.table('news_posts')
+                 .select('content_hash')
+                 .eq('is_processed', True)
+                 .gte('post_date', period_start.isoformat()))
+        if period_end is not None:
+            query = query.lte('post_date', period_end.isoformat())
+        result = query.execute()
         return {r['content_hash'] for r in (result.data or []) if r.get('content_hash')}
     except Exception as e:
         print(f"⚠️ Ошибка получения хешей обработанных постов: {e}")
@@ -1504,7 +1779,8 @@ async def process_post_with_llm(post: dict, categories: list, session: aiohttp.C
 
 def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_end: datetime,
                               posts: list, channels_count: int, stats_extra: dict = None,
-                              tag: str | None = None) -> str:
+                              tag: str | None = None, title_override: str | None = None,
+                              subtitle_extra: str | None = None) -> str:
     """Генерация PDF-дайджеста новостей, отсортированных по дате публикации.
 
     posts: плоский список постов с полем category_tags.
@@ -1541,11 +1817,13 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
     content = []
 
     # Заголовок
-    title_text = f"Дайджест новостей: {tag.upper()}" if tag else "Дайджест новостей отрасли"
+    title_text = title_override or (f"Дайджест новостей: {tag.upper()}" if tag else "Дайджест новостей отрасли")
     content.append(Paragraph(title_text, styles['title']))
 
     period_str = f"{period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}"
     content.append(Paragraph(f"Период: {period_str}", styles['subtitle']))
+    if subtitle_extra:
+        content.append(Paragraph(subtitle_extra, styles['subtitle']))
 
     # Очистка текста постов для PDF (удаление эмодзи, обработка пустых заголовков)
     cleaned_posts = []
@@ -1685,13 +1963,19 @@ def generate_news_digest_pdf(digest_date: str, period_start: datetime, period_en
 # ОРКЕСТРАЦИЯ
 # ============================================================================
 
-async def run_news_monitoring_async(tag_filter: str | None = None):
-    """Главная функция: сканирование каналов и веб-сайтов → LLM-обработка → PDF-дайджест → Telegram."""
+async def run_news_monitoring_async(tag_filter: str | None = None, delivery: str = 'pdf',
+                                    replay: bool = False, period_start_override: datetime | None = None,
+                                    period_end_override: datetime | None = None):
+    """Главная функция: сканирование/реплей → LLM-обработка → TOP-дайджест → Telegram."""
     print("🚀 Запуск мониторинга новостей...")
     start_time = time.time()
 
     # 1. Инициализация семафоров
     init_semaphores()
+
+    if TEST_MODE and delivery != 'pdf':
+        print("⚠️ TEST MODE принудительно переключён на delivery=pdf")
+        delivery = 'pdf'
 
     # 2. Загрузка источников из БД
     all_sources = get_active_channels()
@@ -1717,7 +2001,6 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
     # 3.1 Разделение на TG-каналы и веб-сайты
     tg_channels = [s for s in all_sources if s.get('source_type', 'telegram') == 'telegram']
     web_sources = [s for s in all_sources if s.get('source_type') == 'website']
-
     print(f"📋 Загружено источников: {len(all_sources)} (📱 TG: {len(tg_channels)}, 🌐 Web: {len(web_sources)})")
 
     if web_sources:
@@ -1735,10 +2018,13 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
     print(f"📂 Загружено категорий: {len(categories)}")
 
     # 5. Расчёт периода
-    period_end = datetime.now()
-    period_start = period_end - timedelta(days=NEWS_PERIOD_DAYS)
+    period_end = period_end_override or datetime.now()
+    period_start = period_start_override or (period_end - timedelta(days=NEWS_PERIOD_DAYS))
+    if period_start > period_end:
+        raise ValueError("period_start не может быть позже period_end")
     current_date = period_end.strftime("%Y-%m-%d")
     print(f"📅 Период: {period_start.strftime('%d.%m.%Y')} — {period_end.strftime('%d.%m.%Y')}")
+    print(f"🧪 Режимы: delivery={delivery}, replay={replay}, test={TEST_MODE}")
 
     # Счётчики
     total_new_posts = 0
@@ -1748,155 +2034,138 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
     web_sources_with_errors = 0
     total_web_posts = 0
     processed_count = 0
-    digest_posts = []
+    digest_posts: list = []
+    top_posts: list = []
     pdf_path = None
     digest_id = None
+    posts_without_categories = 0
+    duplicate_urls = 0
+    total_digest_posts = 0
+    all_post_ids: list = []
+    web_scan_results: list = []
+    filter_stats: dict = {}
 
-    # 6. Запуск Playwright
+    # 6. Запуск HTTP-сессии (и Playwright только если не replay)
     connector = aiohttp.TCPConnector(limit=5, ssl=False)
-
     async with aiohttp.ClientSession(connector=connector) as http_session:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--disable-gpu',
-                    '--window-size=1920,1080',
-                    '--disable-blink-features=AutomationControlled',
-                ]
-            )
+        if not replay:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--disable-gpu',
+                        '--window-size=1920,1080',
+                        '--disable-blink-features=AutomationControlled',
+                    ]
+                )
 
-            browser_context = await browser.new_context(
-                user_agent=get_random_user_agent(),
-                viewport={'width': 1920, 'height': 1080},
-                ignore_https_errors=True,
-                locale='ru-RU',
-                timezone_id='Europe/Moscow',
-                extra_http_headers={
-                    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                }
-            )
+                browser_context = await browser.new_context(
+                    user_agent=get_random_user_agent(),
+                    viewport={'width': 1920, 'height': 1080},
+                    ignore_https_errors=True,
+                    locale='ru-RU',
+                    timezone_id='Europe/Moscow',
+                    extra_http_headers={
+                        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                    }
+                )
 
-            # === ФАЗА 1A: СКАНИРОВАНИЕ TG КАНАЛОВ ===
-            if tg_channels:
-                print("\n" + "=" * 60)
-                print("ФАЗА 1A: СКАНИРОВАНИЕ TG КАНАЛОВ")
-                print("=" * 60)
+                # === ФАЗА 1A: СКАНИРОВАНИЕ TG КАНАЛОВ ===
+                if tg_channels:
+                    print("\n" + "=" * 60)
+                    print("ФАЗА 1A: СКАНИРОВАНИЕ TG КАНАЛОВ")
+                    print("=" * 60)
 
-                for i, channel in enumerate(tg_channels, start=1):
-                    channel_id = channel['id']
-                    username = channel['username']
-                    last_message_id = channel.get('last_message_id')
+                    for i, channel in enumerate(tg_channels, start=1):
+                        channel_id = channel['id']
+                        username = channel['username']
+                        last_message_id = channel.get('last_message_id')
+                        print(f"\n📱 [{i}/{len(tg_channels)}] Сканирование @{username} (last_id: {last_message_id})...")
+                        try:
+                            posts = await fetch_channel_posts(
+                                channel_username=username,
+                                browser_context=browser_context,
+                                after_message_id=last_message_id,
+                                max_posts=MAX_POSTS_PER_CHANNEL,
+                            )
 
-                    print(f"\n📱 [{i}/{len(tg_channels)}] Сканирование @{username} (last_id: {last_message_id})...")
-
-                    try:
-                        posts = await fetch_channel_posts(
-                            channel_username=username,
-                            browser_context=browser_context,
-                            after_message_id=last_message_id,
-                            max_posts=MAX_POSTS_PER_CHANNEL,
-                        )
-
-                        if posts:
-                            saved_count = 0
-                            max_msg_id = last_message_id or 0
-
-                            for post_data in posts:
-                                post_id = save_post(channel_id, post_data, source_type='telegram')
-                                if post_id:
-                                    saved_count += 1
-                                if post_data['message_id'] > max_msg_id:
-                                    max_msg_id = post_data['message_id']
-
-                            # Обновление last_message_id
-                            if max_msg_id > (last_message_id or 0):
-                                update_channel_after_scan(channel_id, max_msg_id)
-
-                            total_new_posts += saved_count
-                            print(f"  ✅ Найдено {len(posts)} постов, сохранено {saved_count}, max_id={max_msg_id}")
-                        else:
-                            print(f"  ℹ️ Новых постов нет")
-
-                        tg_channels_scanned += 1
-                    except Exception as e:
-                        print(f"  ❌ Ошибка сканирования @{username}: {e}")
-                        tg_channels_with_errors += 1
-
-                    # Пауза между каналами
-                    if i < len(tg_channels):
-                        await asyncio.sleep(DELAY_BETWEEN_CHANNELS)
-
-                print(f"\n📊 Фаза 1A завершена: {tg_channels_scanned} каналов, {total_new_posts} новых постов, {tg_channels_with_errors} ошибок")
-
-            # === ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ ===
-            web_scan_results = []  # Для сбора статистики по каждому источнику
-
-            if web_sources:
-                print("\n" + "=" * 60)
-                print("ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ")
-                print("=" * 60)
-
-                # Получаем существующие хеши для дедупликации
-                existing_hashes = get_processed_content_hashes(period_start)
-
-                for i, source in enumerate(web_sources, start=1):
-                    source_id = source['id']
-                    source_title = source.get('title') or source.get('url', '')
-
-                    print(f"\n🌐 [{i}/{len(web_sources)}] Сканирование {source_title}...")
-
-                    try:
-                        scan_result = await scan_website_source(source, browser_context, http_session, existing_hashes)
-                        web_scan_results.append(scan_result)
-
-                        if scan_result['is_success']:
-                            # Сохранение новых записей в БД
-                            saved_count = 0
-                            for item in scan_result['new_items']:
-                                post_id = save_web_post(source_id, item)
-                                if post_id:
-                                    saved_count += 1
-
-                            scan_result['items_saved'] = saved_count
-                            total_web_posts += saved_count
-                            web_sources_scanned += 1
-
-                            if saved_count > 0:
-                                print(f"  ✅ Сохранено {saved_count} новых новостей (найдено {scan_result['items_found']})")
+                            if posts:
+                                saved_count = 0
+                                max_msg_id = last_message_id or 0
+                                for post_data in posts:
+                                    post_id = save_post(channel_id, post_data, source_type='telegram')
+                                    if post_id:
+                                        saved_count += 1
+                                    if post_data['message_id'] > max_msg_id:
+                                        max_msg_id = post_data['message_id']
+                                if max_msg_id > (last_message_id or 0):
+                                    update_channel_after_scan(channel_id, max_msg_id)
+                                total_new_posts += saved_count
+                                print(f"  ✅ Найдено {len(posts)} постов, сохранено {saved_count}, max_id={max_msg_id}")
                             else:
-                                print(f"  ℹ️ Новых новостей нет (все дубликаты)")
-                        else:
+                                print("  ℹ️ Новых постов нет")
+                            tg_channels_scanned += 1
+                        except Exception as e:
+                            print(f"  ❌ Ошибка сканирования @{username}: {e}")
+                            tg_channels_with_errors += 1
+                        if i < len(tg_channels):
+                            await asyncio.sleep(DELAY_BETWEEN_CHANNELS)
+
+                # === ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ ===
+                if web_sources:
+                    print("\n" + "=" * 60)
+                    print("ФАЗА 1B: СКАНИРОВАНИЕ ВЕБ-САЙТОВ")
+                    print("=" * 60)
+                    existing_hashes = get_processed_content_hashes(period_start, period_end)
+
+                    for i, source in enumerate(web_sources, start=1):
+                        source_id = source['id']
+                        source_title = source.get('title') or source.get('url', '')
+                        print(f"\n🌐 [{i}/{len(web_sources)}] Сканирование {source_title}...")
+
+                        try:
+                            scan_result = await scan_website_source(source, browser_context, http_session, existing_hashes)
+                            web_scan_results.append(scan_result)
+                            if scan_result['is_success']:
+                                saved_count = 0
+                                for item in scan_result['new_items']:
+                                    post_id = save_web_post(source_id, item)
+                                    if post_id:
+                                        saved_count += 1
+                                scan_result['items_saved'] = saved_count
+                                total_web_posts += saved_count
+                                web_sources_scanned += 1
+                                if saved_count > 0:
+                                    print(f"  ✅ Сохранено {saved_count} новых новостей (найдено {scan_result['items_found']})")
+                                else:
+                                    print("  ℹ️ Новых новостей нет (все дубликаты)")
+                            else:
+                                web_sources_with_errors += 1
+                        except Exception as e:
+                            print(f"  ❌ Исключение при сканировании: {e}")
+                            web_scan_results.append({
+                                'source_id': source_id,
+                                'source_title': source_title,
+                                'source_url': source.get('url', ''),
+                                'is_success': False,
+                                'error_type': 'exception',
+                                'error_message': str(e)[:200],
+                                'items_found': 0,
+                                'items_saved': 0,
+                                'new_items': [],
+                            })
                             web_sources_with_errors += 1
+                        if i < len(web_sources):
+                            await asyncio.sleep(DELAY_BETWEEN_WEBSITES)
 
-                    except Exception as e:
-                        print(f"  ❌ Исключение при сканировании: {e}")
-                        web_scan_results.append({
-                            'source_id': source_id,
-                            'source_title': source_title,
-                            'source_url': source.get('url', ''),
-                            'is_success': False,
-                            'error_type': 'exception',
-                            'error_message': str(e)[:200],
-                            'items_found': 0,
-                            'items_saved': 0,
-                            'new_items': [],
-                        })
-                        web_sources_with_errors += 1
-
-                    # Пауза между сайтами
-                    if i < len(web_sources):
-                        await asyncio.sleep(DELAY_BETWEEN_WEBSITES)
-
-                print(f"\n📊 Фаза 1B завершена: {web_sources_scanned} сайтов, {total_web_posts} новых новостей, {web_sources_with_errors} ошибок")
-
-            # 8. Закрытие браузера
-            await browser_context.close()
-            await browser.close()
+                await browser_context.close()
+                await browser.close()
+        else:
+            print("ℹ️ REPLAY MODE: фаза сканирования источников пропущена")
 
         # Общая статистика по фазе 1
         total_sources_scanned = tg_channels_scanned + web_sources_scanned
@@ -1909,176 +2178,190 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
         print("ФАЗА 2: LLM-ОБРАБОТКА")
         print("=" * 60)
 
-        # 9. Получение необработанных постов
-        unprocessed = get_unprocessed_posts(period_start)
-        print(f"📝 Необработанных постов: {len(unprocessed)}")
+        if replay:
+            unprocessed = []
+            print("ℹ️ REPLAY MODE: LLM-обработка новых постов пропущена")
+        else:
+            unprocessed = get_unprocessed_posts(period_start, period_end)
+            print(f"📝 Необработанных постов: {len(unprocessed)}")
 
-        filter_stats: dict = {}
+            if unprocessed:
+                processed_hashes = get_processed_content_hashes(period_start, period_end)
+                unique_posts = []
+                skipped_duplicates = 0
+                seen_hashes = set()
 
-        if unprocessed:
-            # 9.1 Дедупликация по content_hash — пропуск постов с уже обработанным контентом
-            processed_hashes = get_processed_content_hashes(period_start)
-            unique_posts = []
-            skipped_duplicates = 0
-            seen_hashes = set()
+                for post in unprocessed:
+                    h = post.get('content_hash')
+                    if h:
+                        if h in processed_hashes or h in seen_hashes:
+                            source_type = post.get('source_type', 'telegram')
+                            title_to_save = post.get('title', '') if source_type == 'website' else extract_title(post.get('content_text', ''))
+                            mark_post_processed(post['id'], title_to_save, '', source_type)
+                            skipped_duplicates += 1
+                            continue
+                        seen_hashes.add(h)
+                    unique_posts.append(post)
 
-            for post in unprocessed:
-                h = post.get('content_hash')
-                if h:
-                    if h in processed_hashes or h in seen_hashes:
-                        source_type = post.get('source_type', 'telegram')
-                        # Для web новостей используем существующий title, для телеграма извлекаем
-                        title_to_save = post.get('title', '') if source_type == 'website' else extract_title(post.get('content_text', ''))
-                        mark_post_processed(post['id'], title_to_save, '', source_type)
-                        skipped_duplicates += 1
-                        continue
-                    seen_hashes.add(h)
-                unique_posts.append(post)
+                if skipped_duplicates > 0:
+                    print(f"⏭️ Пропущено дубликатов по content_hash: {skipped_duplicates}")
 
-            if skipped_duplicates > 0:
-                print(f"⏭️ Пропущено дубликатов по content_hash: {skipped_duplicates}")
-
-            # 10. Последовательная обработка с задержкой между LLM-вызовами
-            for i, post in enumerate(unique_posts):
-                try:
-                    result = await process_post_with_llm(post, categories, http_session, filter_stats)
-                    if result is not None:
-                        processed_count += 1
-                except Exception as e:
-                    print(f"  ❌ Исключение при обработке: {e}")
-                if i < len(unique_posts) - 1:
-                    await asyncio.sleep(4)
+                for i, post in enumerate(unique_posts):
+                    try:
+                        result = await process_post_with_llm(post, categories, http_session, filter_stats)
+                        if result is not None:
+                            processed_count += 1
+                    except Exception as e:
+                        print(f"  ❌ Исключение при обработке: {e}")
+                    if i < len(unique_posts) - 1:
+                        await asyncio.sleep(4)
 
         print(f"✅ Обработано LLM: {processed_count} из {len(unprocessed)}")
 
-        # === ФАЗА 3: ДАЙДЖЕСТ И СТАТИСТИКА ===
+        # === ФАЗА 3: ДАЙДЖЕСТ И РАНЖИРОВАНИЕ ===
         print("\n" + "=" * 60)
-        print("ФАЗА 3: ГЕНЕРАЦИЯ ДАЙДЖЕСТА И СОХРАНЕНИЕ СТАТИСТИКИ")
+        print("ФАЗА 3: ГЕНЕРАЦИЯ ДАЙДЖЕСТА И РЕЛЕВАНТНОСТЬ TOP")
         print("=" * 60)
 
-        # 11. Получение постов для дайджеста
         digest_posts = get_posts_for_digest(period_start, period_end, tag_filter=tag_filter)
         print(f"📰 Постов для дайджеста: {len(digest_posts)}")
 
-        # Инициализация переменных
-        pdf_path = None
-        all_post_ids = []
-        total_digest_posts = 0
+        posts_flat = []
+        seen_urls = set()
         posts_without_categories = 0
-        
-        if digest_posts:
-            # Плоский список постов с тегами категорий (без группировки)
-            posts_flat = []
-            seen_urls = set()
-            posts_without_categories = 0
-            duplicate_urls = 0
+        duplicate_urls = 0
 
-            for post in digest_posts:
-                post_url = post.get('post_url', '')
-                if post_url in seen_urls:
-                    duplicate_urls += 1
+        for post in digest_posts:
+            post_url = post.get('post_url', '')
+            article_url = post.get('article_url', '')
+            dedupe_key = post_url or article_url or str(post.get('id'))
+            if dedupe_key in seen_urls:
+                duplicate_urls += 1
+                continue
+            seen_urls.add(dedupe_key)
+
+            post_categories = post.get('news_post_categories', [])
+            category_tags = []
+            for pc in post_categories:
+                cat_info_raw = pc.get('news_categories', {})
+                if not cat_info_raw or not cat_info_raw.get('is_visible', True):
                     continue
-                seen_urls.add(post_url)
-
-                # Собираем категории поста как теги
-                post_categories = post.get('news_post_categories', [])
-                category_tags = []
-                for pc in post_categories:
-                    cat_info_raw = pc.get('news_categories', {})
-                    if not cat_info_raw or not cat_info_raw.get('is_visible', True):
-                        continue
-                    category_tags.append({
-                        'name': cat_info_raw['name'],
-                        'color': cat_info_raw.get('color', '#2c5aa0'),
-                    })
-
-                if not category_tags:
-                    posts_without_categories += 1
-                    print(f"  ℹ️ Пост без видимых категорий, назначена «Прочее»: {post.get('title', post_url)[:80]}")
-                    category_tags = [{'name': 'Прочее', 'color': '#888888'}]
-
-                channel_info = post.get('news_channels', {})
-                source_type = post.get('source_type', 'telegram')
-                posts_flat.append({
-                    'title': post.get('title', ''),
-                    'summary': post.get('summary', ''),
-                    'content_text': post.get('content_text', ''),
-                    'post_url': post_url,
-                    'channel_title': channel_info.get('title') or channel_info.get('username', ''),
-                    'post_date': post.get('post_date', ''),
-                    'views_count': post.get('views_count', 0),
-                    'category_tags': category_tags,
-                    'source_type': source_type,
+                category_tags.append({
+                    'name': cat_info_raw['name'],
+                    'color': cat_info_raw.get('color', '#2c5aa0'),
                 })
 
-            print(f"📊 Дайджест: {len(posts_flat)} постов (без категорий: {posts_without_categories}, дубликатов: {duplicate_urls})")
+            if not category_tags:
+                posts_without_categories += 1
+                print(f"  ℹ️ Пост без видимых категорий, назначена «Прочее»: {post.get('title', post_url)[:80]}")
+                category_tags = [{'name': 'Прочее', 'color': '#888888'}]
 
-            # Сортировка по дате (свежие первыми)
-            def parse_date_for_sort(d):
-                if not d:
-                    return datetime.min
-                if isinstance(d, str):
-                    try:
-                        return datetime.fromisoformat(d.replace('Z', '+00:00'))
-                    except ValueError:
-                        return datetime.min
-                return d
-            posts_flat.sort(key=lambda p: parse_date_for_sort(p['post_date']), reverse=True)
+            channel_info = post.get('news_channels', {})
+            source_type = post.get('source_type', 'telegram')
+            flat_post = {
+                'id': post.get('id'),
+                'channel_id': post.get('channel_id'),
+                'title': post.get('title', ''),
+                'summary': post.get('summary', ''),
+                'content_text': post.get('content_text', ''),
+                'post_url': post_url,
+                'article_url': article_url,
+                'channel_title': channel_info.get('title') or channel_info.get('username', ''),
+                'post_date': post.get('post_date', ''),
+                'views_count': post.get('views_count', 0),
+                'category_tags': category_tags,
+                'source_type': source_type,
+            }
+            score_data = score_for_digest_top(flat_post, reference_time=period_end)
+            flat_post['digest_score'] = score_data['score']
+            flat_post['digest_reasons'] = score_data['reasons']
+            flat_post['digest_penalty_flags'] = score_data['penalty_flags']
+            posts_flat.append(flat_post)
 
-            # 12. Генерация PDF
+        posts_flat.sort(key=lambda p: (_parse_post_datetime(p.get('post_date')) or datetime.min), reverse=True)
+        total_digest_posts = len(posts_flat)
+        all_post_ids = [p.get('id') for p in digest_posts if p.get('id')]
+        top_posts = select_top_posts(posts_flat)
+
+        print(
+            f"📊 Дайджест: {total_digest_posts} постов "
+            f"(без категорий: {posts_without_categories}, дубликатов: {duplicate_urls})"
+        )
+        print(f"🧭 TOP отобрано: {len(top_posts)} (порог: {TOP_SCORE_THRESHOLD}, cap/источник: {TOP_SOURCE_CAP})")
+
+        # Генерация PDF-отчёта для delivery=pdf (TOP-only)
+        if delivery == 'pdf' and top_posts:
+            top_pdf_posts = []
+            for p in top_posts:
+                reasons = ", ".join(p.get('digest_reasons', [])[:3]) or "базовая релевантность"
+                penalties = ", ".join(p.get('digest_penalty_flags', [])) or "нет"
+                score_line = f"Релевантность {p.get('digest_score', 0)}/100; причины: {reasons}; штрафы: {penalties}."
+                summary = (p.get('summary') or '').strip()
+                full_summary = f"{summary} {score_line}".strip() if summary else score_line
+                top_pdf_posts.append({
+                    **p,
+                    'title': f"#{p.get('top_rank', 0)} {p.get('title', '')}".strip(),
+                    'summary': full_summary,
+                })
+
+            subtitle_parts = [f"Отобрано в TOP: {len(top_posts)} из {total_digest_posts}"]
+            if TEST_MODE:
+                subtitle_parts.append("Тестовый режим: только администратор")
+            if replay:
+                subtitle_parts.append("Replay: без сканирования источников")
+            subtitle_extra = " | ".join(subtitle_parts)
+            title_override = "ТЕСТОВЫЙ TOP 5-7 релевантных новостей" if TEST_MODE else "TOP 5-7 релевантных новостей отрасли"
+
             pdf_path = generate_news_digest_pdf(
                 digest_date=current_date,
                 period_start=period_start,
                 period_end=period_end,
-                posts=posts_flat,
+                posts=top_pdf_posts,
                 channels_count=len(all_sources),
                 stats_extra={
-                    'total_from_db': len(digest_posts),
+                    'total_from_db': total_digest_posts,
                     'without_categories': posts_without_categories,
                     'duplicates': duplicate_urls,
                 },
                 tag=tag_filter,
+                title_override=title_override,
+                subtitle_extra=subtitle_extra,
             )
 
-            # Сохранение ID постов для связи с дайджестом
-            all_post_ids = [p.get('id') for p in digest_posts if p.get('id')]
-            total_digest_posts = len(posts_flat)
+    # 13. Сохранение дайджеста в БД (в test-режиме не сохраняем)
+    categories_summary = {}
+    for post in digest_posts:
+        post_categories = post.get('news_post_categories', [])
+        for pc in post_categories:
+            cat_info = pc.get('news_categories', {})
+            if cat_info and cat_info.get('is_visible', True):
+                cat_name = cat_info['name']
+                categories_summary[cat_name] = categories_summary.get(cat_name, 0) + 1
 
-        # 13. Сохранение дайджеста в БД (сохраняем ВСЕГДА, даже если нет постов)
-        # Подсчет категорий для статистики
-        categories_summary = {}
-        for post in digest_posts:
-            post_categories = post.get('news_post_categories', [])
-            for pc in post_categories:
-                cat_info = pc.get('news_categories', {})
-                if cat_info and cat_info.get('is_visible', True):
-                    cat_name = cat_info['name']
-                    categories_summary[cat_name] = categories_summary.get(cat_name, 0) + 1
+    digest_data = {
+        'digest_date': current_date,
+        'period_start': period_start.date().isoformat(),
+        'period_end': period_end.date().isoformat(),
+        'posts_count': total_digest_posts,
+        'categories_summary': categories_summary if categories_summary else None,
+        'pdf_url': pdf_path if pdf_path else None,
+        'tag': tag_filter,
+    }
 
-        digest_data = {
-            'digest_date': current_date,
-            'period_start': period_start.date().isoformat(),
-            'period_end': period_end.date().isoformat(),
-            'posts_count': total_digest_posts,
-            'categories_summary': categories_summary if categories_summary else None,
-            'pdf_url': pdf_path if pdf_path else None,
-            'tag': tag_filter,
-        }
-        
+    if TEST_MODE:
+        print("⚠️ TEST MODE: запись в news_digests/news_digest_posts пропущена")
+    else:
         digest_id = save_digest(digest_data, all_post_ids)
         if digest_id:
             print(f"✅ Дайджест сохранён в БД (ID: {digest_id})")
         else:
-            print(f"⚠️ Не удалось сохранить дайджест в БД")
+            print("⚠️ Не удалось сохранить дайджест в БД")
 
     # Итоговая статистика
     elapsed = int(time.time() - start_time)
     print(f"\n⏱️ Время выполнения: {elapsed} сек")
 
-    # 14. Отправка PDF + сводного сообщения в Telegram
-    total_digest = len(digest_posts) if digest_posts else 0
     total_all_new = total_new_posts + total_web_posts
-
     tag_labels = {"kz": "Казахстан", "ru": "Россия"}
     tag_suffix = f" — {tag_labels.get(tag_filter.lower(), tag_filter.upper())}" if tag_filter else ""
     summary_msg = f"""📊 <b>Мониторинг новостей завершён{tag_suffix}</b>
@@ -2090,9 +2373,12 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
 🌐 Веб-сайтов: <b>{web_sources_scanned}</b> из {len(web_sources)}
 📝 Новых записей: <b>{total_all_new}</b> (📱 {total_new_posts} + 🌐 {total_web_posts})
 🤖 Обработано LLM: <b>{processed_count}</b>
-📰 Постов в дайджесте: <b>{total_digest_posts}</b>"""
+📰 Релевантных в пуле: <b>{total_digest_posts}</b>
+🧭 TOP 5-7: <b>{len(top_posts)}</b>"""
 
-    # Добавить разбивку по причинам отсева (если что-то отсеяно)
+    if replay:
+        summary_msg += "\n🔁 Replay-режим: сканирование источников было отключено"
+
     if filter_stats:
         labels = {
             'short': 'кор.',
@@ -2107,40 +2393,47 @@ async def run_news_monitoring_async(tag_filter: str | None = None):
             summary_msg += f"\n🔍 Отсеяно: {', '.join(parts)}"
 
     if posts_without_categories > 0:
-        summary_msg += f"\n  ℹ️ Из них без категорий: {posts_without_categories}"
+        summary_msg += f"\nℹ️ Без видимых категорий: {posts_without_categories}"
 
-    # Общая статистика ошибок
     if tg_channels_with_errors or web_sources_with_errors:
         summary_msg += f"\n⚠️ Ошибки: 📱 {tg_channels_with_errors}, 🌐 {web_sources_with_errors}"
 
-    # Детальная статистика ошибок веб-сканирования
-    error_summary = format_error_summary(web_scan_results)
-    summary_msg += error_summary
+    summary_msg += format_error_summary(web_scan_results)
 
-    if pdf_path and os.path.exists(pdf_path):
-        summary_msg += "\n\n📎 Подробный дайджест во вложении\n⏳ Первый ответ на кнопку может занять ~1 мин — сервис просыпается"
+    # 14. Доставка результата
+    if delivery == 'telegram':
+        top_msg = format_top_digest_telegram_message(
+            top_posts=top_posts,
+            period_start=period_start,
+            period_end=period_end,
+            tag_filter=tag_filter,
+            total_candidates=total_digest_posts,
+            replay_mode=replay,
+        )
+        if not top_posts:
+            top_msg += "\n\nℹ️ За указанный период TOP не сформирован."
+        send_telegram_message(top_msg)
+    elif pdf_path and os.path.exists(pdf_path):
+        summary_msg += "\n\n📎 Во вложении TOP 5-7 релевантных новостей"
         keyboard = None
-        if digest_id:
+        if digest_id and not TEST_MODE:
             keyboard = {
                 "inline_keyboard": [[
-                    {"text": f"📰 Читать новости ({total_digest_posts}) — по одной",
+                    {"text": f"📰 Читать все релевантные ({total_digest_posts}) — по одной",
                      "callback_data": f"show_posts:{digest_id}:0"}
                 ]]
             }
         send_telegram_document(pdf_path, summary_msg, reply_markup=keyboard)
-
-        # 15. Удаление временных файлов
         try:
             os.remove(pdf_path)
             print(f"🗑️ Временный файл удалён: {pdf_path}")
         except OSError:
             pass
     else:
-        if total_digest == 0:
+        if total_digest_posts == 0:
             summary_msg += "\n\nℹ️ За указанный период новых публикаций не обнаружено."
         send_telegram_message(summary_msg)
 
-    # 16. Уведомление о завершении
     print(f"\n✅ Мониторинг новостей завершён за {elapsed} сек")
 
 
@@ -2155,7 +2448,43 @@ if __name__ == "__main__":
     parser.add_argument('--tags', type=str, default=None,
                         help='Тег для фильтрации источников (например: kz, ru). '
                              'Только каналы с этим тегом будут обработаны.')
+    parser.add_argument('--delivery', choices=['pdf', 'telegram'], default='pdf',
+                        help='Формат weekly-дайджеста: PDF (для пилота) или Telegram-сообщение')
+    parser.add_argument('--replay', action='store_true',
+                        help='Replay-режим: не сканировать источники, работать по уже собранным постам в БД')
+    parser.add_argument('--period-start', type=str, default=None,
+                        help='Начало периода для replay/ручного запуска (YYYY-MM-DD)')
+    parser.add_argument('--period-end', type=str, default=None,
+                        help='Конец периода для replay/ручного запуска (YYYY-MM-DD)')
     args = parser.parse_args()
+
+    def _parse_cli_datetime(value: str | None, *, end_of_day: bool = False) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+            if len(value) == 10:
+                if end_of_day:
+                    parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+                else:
+                    parsed = parsed.replace(hour=0, minute=0, second=0, microsecond=0)
+            return parsed
+        except ValueError as e:
+            parser.error(f"Некорректная дата {value!r}: {e}")
+            return None
+
     if args.test:
         TEST_MODE = True
-    asyncio.run(run_news_monitoring_async(tag_filter=args.tags))
+
+    period_start_override = _parse_cli_datetime(args.period_start, end_of_day=False)
+    period_end_override = _parse_cli_datetime(args.period_end, end_of_day=True)
+    if period_start_override and period_end_override and period_start_override > period_end_override:
+        parser.error("--period-start не может быть позже --period-end")
+
+    asyncio.run(run_news_monitoring_async(
+        tag_filter=args.tags,
+        delivery=args.delivery,
+        replay=args.replay,
+        period_start_override=period_start_override,
+        period_end_override=period_end_override,
+    ))

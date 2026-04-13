@@ -23,3 +23,12 @@ optimized_prompt.txt
 
 # Design concepts
 platform-concept/
+
+# skai-knowledge-base: keep only prototypes
+skai-knowledge-base/воронка*.csv
+skai-knowledge-base/*reestr*.csv
+skai-knowledge-base/Презентации*
+skai-knowledge-base/knowledge_*.json
+skai-knowledge-base/*метрики*.md
+skai-knowledge-base/HSE_Days*
+skai-knowledge-base/hse_days*
