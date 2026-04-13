@@ -13,7 +13,6 @@ name: News Monitor (KZ)
         description: 'Формат дайджеста'
         type: choice
         options:
-          - pdf
           - telegram
         required: false
         default: 'telegram'

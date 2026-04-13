@@ -2047,9 +2047,9 @@ async def run_news_monitoring_async(tag_filter: str | None = None, delivery: str
     # 1. Инициализация семафоров
     init_semaphores()
 
-    if TEST_MODE and delivery != 'pdf':
-        print("⚠️ TEST MODE принудительно переключён на delivery=pdf")
-        delivery = 'pdf'
+    if delivery != 'telegram':
+        print("⚠️ PDF-формат отключён: принудительно переключаю на delivery=telegram")
+        delivery = 'telegram'
 
     # 2. Загрузка источников из БД
     all_sources = get_active_channels()
@@ -2368,11 +2368,8 @@ async def run_news_monitoring_async(tag_filter: str | None = None, delivery: str
         if delivery == 'pdf' and top_posts:
             top_pdf_posts = []
             for p in top_posts:
-                reasons = ", ".join(p.get('digest_reasons', [])[:3]) or "базовая релевантность"
-                penalties = ", ".join(p.get('digest_penalty_flags', [])) or "нет"
-                score_line = f"Релевантность {p.get('digest_score', 0)}/100; причины: {reasons}; штрафы: {penalties}."
                 summary = (p.get('summary') or '').strip()
-                full_summary = f"{summary} {score_line}".strip() if summary else score_line
+                full_summary = summary
                 top_pdf_posts.append({
                     **p,
                     'title': f"#{p.get('top_rank', 0)} {p.get('title', '')}".strip(),
@@ -2523,7 +2520,7 @@ if __name__ == "__main__":
                         help='Тег для фильтрации источников (например: kz, ru). '
                              'Только каналы с этим тегом будут обработаны.')
     parser.add_argument('--delivery', choices=['pdf', 'telegram'], default='telegram',
-                        help='Формат weekly-дайджеста: Telegram-сообщение (по умолчанию) или PDF')
+                        help='Формат weekly-дайджеста (сейчас используется telegram)')
     parser.add_argument('--replay', action='store_true',
                         help='Replay-режим: не сканировать источники, работать по уже собранным постам в БД')
     parser.add_argument('--period-start', type=str, default=None,
