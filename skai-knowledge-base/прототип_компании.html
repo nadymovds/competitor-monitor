@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний - Компании</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f8fafc 100%);
+            color: #1e293b;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .logo a.logo-link { display: flex; align-items: center; gap: 0.75rem; color: inherit; text-decoration: none; }
+        .logo .logo-img { height: 36px; width: auto; color: #fff; }
+        .logo .logo-title { display: none; }
+        .logo .logo-img rect, .logo .logo-img path { display: none; }
+        .logo .logo-img * { display: none !important; }
+        .logo .logo-img text { display: block !important; }
+.logo .logo-link { color: #fff; }
+        .logo .logo-title { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .nav-tabs {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .nav-tabs .nav-tab {
+            padding: 0.75rem 1.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+        .nav-tabs .nav-tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.25);
+        }
+        .nav-tabs .nav-tab.active {
+            background: white;
+            color: #1e40af;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .search-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .search-bar input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 1rem;
+            padding: 0.5rem;
+        }
+        .search-bar input::placeholder {
+            color: #999;
+        }
+        .companies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+        .company-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .company-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .card-icon {
+            color: #2563eb;
+            font-size: 24px;
+        }
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+        }
+        .card-content {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .card-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .card-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: #f0f0f0;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: #666;
+            width: fit-content;
+        }
+        .card-revenue {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: #f8f9ff;
+            border-radius: 8px;
+            margin-top: 0.5rem;
+        }
+        .revenue-value {
+            font-weight: 600;
+            color: #2563eb;
+            font-size: 1rem;
+        }
+        .card-solutions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: auto;
+            padding-top: 1rem;
+            border-top: 1px solid #f0f0f0;
+        }
+        .solution-tag {
+            padding: 0.25rem 0.5rem;
+            background: #e8eaf6;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-link">
+                    <svg class="logo-img" viewBox="0 0 100 36" width="100" height="36" aria-hidden="true" focusable="false"><g fill="currentColor" opacity="0.78"><rect x="2" y="2" width="2.5" height="2.5"/><rect x="6" y="2" width="2.5" height="2.5"/><rect x="10" y="2" width="2.5" height="2.5"/><rect x="14" y="2" width="2.5" height="2.5"/><rect x="18" y="2" width="2.5" height="2.5"/><rect x="22" y="2" width="2.5" height="2.5"/><rect x="26" y="2" width="2.5" height="2.5"/><rect x="30" y="2" width="2.5" height="2.5"/><rect x="34" y="2" width="2.5" height="2.5"/><rect x="38" y="2" width="2.5" height="2.5"/><rect x="42" y="2" width="2.5" height="2.5"/><rect x="46" y="2" width="2.5" height="2.5"/><rect x="50" y="2" width="2.5" height="2.5"/><rect x="54" y="2" width="2.5" height="2.5"/><rect x="58" y="2" width="2.5" height="2.5"/><rect x="62" y="2" width="2.5" height="2.5"/><rect x="66" y="2" width="2.5" height="2.5"/><rect x="70" y="2" width="2.5" height="2.5"/><rect x="74" y="2" width="2.5" height="2.5"/><rect x="78" y="2" width="2.5" height="2.5"/><rect x="82" y="2" width="2.5" height="2.5"/><rect x="86" y="2" width="2.5" height="2.5"/><rect x="90" y="2" width="2.5" height="2.5"/><rect x="94" y="2" width="2.5" height="2.5"/><rect x="2" y="5.5" width="2.5" height="2.5"/><rect x="6" y="5.5" width="2.5" height="2.5"/><rect x="10" y="5.5" width="2.5" height="2.5"/><rect x="14" y="5.5" width="2.5" height="2.5"/><rect x="18" y="5.5" width="2.5" height="2.5"/><rect x="22" y="5.5" width="2.5" height="2.5"/><rect x="26" y="5.5" width="2.5" height="2.5"/><rect x="30" y="5.5" width="2.5" height="2.5"/><rect x="34" y="5.5" width="2.5" height="2.5"/><rect x="38" y="5.5" width="2.5" height="2.5"/><rect x="42" y="5.5" width="2.5" height="2.5"/><rect x="46" y="5.5" width="2.5" height="2.5"/><rect x="50" y="5.5" width="2.5" height="2.5"/><rect x="54" y="5.5" width="2.5" height="2.5"/><rect x="58" y="5.5" width="2.5" height="2.5"/><rect x="62" y="5.5" width="2.5" height="2.5"/><rect x="66" y="5.5" width="2.5" height="2.5"/><rect x="70" y="5.5" width="2.5" height="2.5"/><rect x="74" y="5.5" width="2.5" height="2.5"/><rect x="78" y="5.5" width="2.5" height="2.5"/><rect x="82" y="5.5" width="2.5" height="2.5"/><rect x="86" y="5.5" width="2.5" height="2.5"/><rect x="90" y="5.5" width="2.5" height="2.5"/><rect x="94" y="5.5" width="2.5" height="2.5"/><rect x="2" y="9" width="2.5" height="2.5"/><rect x="6" y="9" width="2.5" height="2.5"/><rect x="10" y="9" width="2.5" height="2.5"/><rect x="14" y="9" width="2.5" height="2.5"/><rect x="18" y="9" width="2.5" height="2.5"/><rect x="22" y="9" width="2.5" height="2.5"/><rect x="26" y="9" width="2.5" height="2.5"/><rect x="30" y="9" width="2.5" height="2.5"/><rect x="34" y="9" width="2.5" height="2.5"/><rect x="38" y="9" width="2.5" height="2.5"/><rect x="42" y="9" width="2.5" height="2.5"/><rect x="46" y="9" width="2.5" height="2.5"/><rect x="50" y="9" width="2.5" height="2.5"/><rect x="54" y="9" width="2.5" height="2.5"/><rect x="58" y="9" width="2.5" height="2.5"/><rect x="62" y="9" width="2.5" height="2.5"/><rect x="66" y="9" width="2.5" height="2.5"/><rect x="70" y="9" width="2.5" height="2.5"/><rect x="74" y="9" width="2.5" height="2.5"/><rect x="78" y="9" width="2.5" height="2.5"/><rect x="82" y="9" width="2.5" height="2.5"/><rect x="86" y="9" width="2.5" height="2.5"/><rect x="90" y="9" width="2.5" height="2.5"/><rect x="94" y="9" width="2.5" height="2.5"/></g><path d="M 0 14 Q 25 6 50 14 T 100 14" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/><text x="50" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="18" fill="currentColor">SKAI</text></svg>
+                    <h1 class="logo-title">База знаний рынка</h1>
+                </a>
+            </div>
+            <nav class="nav-tabs">
+                <span class="nav-tab">📊 Дашборд</span>
+                <span class="nav-tab active">🔍 Компании</span>
+                <span class="nav-tab">🎯 Воронка</span>
+                <span class="nav-tab">🎯 Бенчмарк</span>
+                <span class="nav-tab">🗺️ Регионы</span>
+                <span class="nav-tab">📁 Загрузка</span>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="search-bar">
+            <span>🔍</span>
+            <input type="text" placeholder="Поиск по ИНН, названию компании, региону...">
+        </div>
+
+        <div class="companies-grid">
+            <div class="company-card">
+                <div class="card-header">
+                    <span class="card-icon">🏢</span>
+                    <h3 class="card-title">СКАУТ-РС</h3>
+                </div>
+                <div class="card-content">
+                    <div class="card-info">📍 Санкт-Петербург</div>
+                    <div class="card-badge">вендор/интегратор</div>
+                    <div class="card-revenue">
+                        <span>💰</span>
+                        <span>Потенциальная выручка:</span>
+                        <span class="revenue-value">1.2 млн ₽</span>
+                    </div>
+                    <div class="card-info">📊 Выручка 2024: 450 тыс. ₽</div>
+                    <div class="card-info">🚗 Парк ТС: 120</div>
+                </div>
+                <div class="card-solutions">
+                    <span class="solution-tag">Видеомониторинг</span>
+                    <span class="solution-tag">Мониторинг ТС</span>
+                    <span class="solution-tag">Контроль топлива</span>
+                </div>
+            </div>
+
+            <div class="company-card">
+                <div class="card-header">
+                    <span class="card-icon">🏢</span>
+                    <h3 class="card-title">Форт-Телеком</h3>
+                </div>
+                <div class="card-content">
+                    <div class="card-info">📍 Москва</div>
+                    <div class="card-badge">вендор</div>
+                    <div class="card-revenue">
+                        <span>💰</span>
+                        <span>Потенциальная выручка:</span>
+                        <span class="revenue-value">980 тыс. ₽</span>
+                    </div>
+                    <div class="card-info">📊 Выручка 2024: 320 тыс. ₽</div>
+                    <div class="card-info">🚗 Парк ТС: 95</div>
+                </div>
+                <div class="card-solutions">
+                    <span class="solution-tag">Мониторинг ТС</span>
+                    <span class="solution-tag">Контроль топлива</span>
+                </div>
+            </div>
+
+            <div class="company-card">
+                <div class="card-header">
+                    <span class="card-icon">🏢</span>
+                    <h3 class="card-title">NAVITEL</h3>
+                </div>
+                <div class="card-content">
+                    <div class="card-info">📍 Москва</div>
+                    <div class="card-badge">вендор</div>
+                    <div class="card-revenue">
+                        <span>💰</span>
+                        <span>Потенциальная выручка:</span>
+                        <span class="revenue-value">850 тыс. ₽</span>
+                    </div>
+                    <div class="card-info">📊 Выручка 2024: 280 тыс. ₽</div>
+                    <div class="card-info">🚗 Парк ТС: 78</div>
+                </div>
+                <div class="card-solutions">
+                    <span class="solution-tag">Мониторинг ТС</span>
+                </div>
+            </div>
+
+            <div class="company-card">
+                <div class="card-header">
+                    <span class="card-icon">🏢</span>
+                    <h3 class="card-title">Автограф</h3>
+                </div>
+                <div class="card-content">
+                    <div class="card-info">📍 Москва</div>
+                    <div class="card-badge">вендор</div>
+                    <div class="card-revenue">
+                        <span>💰</span>
+                        <span>Потенциальная выручка:</span>
+                        <span class="revenue-value">720 тыс. ₽</span>
+                    </div>
+                    <div class="card-info">📊 Выручка 2024: 240 тыс. ₽</div>
+                    <div class="card-info">🚗 Парк ТС: 65</div>
+                </div>
+                <div class="card-solutions">
+                    <span class="solution-tag">Мониторинг ТС</span>
+                    <span class="solution-tag">Контроль топлива</span>
+                </div>
+            </div>
+
+            <div class="company-card">
+                <div class="card-header">
+                    <span class="card-icon">🏢</span>
+                    <h3 class="card-title">Омникомм</h3>
+                </div>
+                <div class="card-content">
+                    <div class="card-info">📍 Москва</div>
+                    <div class="card-badge">вендор</div>
+                    <div class="card-revenue">
+                        <span>💰</span>
+                        <span>Потенциальная выручка:</span>
+                        <span class="revenue-value">680 тыс. ₽</span>
+                    </div>
+                    <div class="card-info">📊 Выручка 2024: 220 тыс. ₽</div>
+                    <div class="card-info">🚗 Парк ТС: 58</div>
+                </div>
+                <div class="card-solutions">
+                    <span class="solution-tag">Мониторинг ТС</span>
+                    <span class="solution-tag">Контроль топлива</span>
+                </div>
+            </div>
+
+            <div class="company-card">
+                <div class="card-header">
+                    <span class="card-icon">🏢</span>
+                    <h3 class="card-title">ГЛОНАСС Софт</h3>
+                </div>
+                <div class="card-content">
+                    <div class="card-info">📍 Москва</div>
+                    <div class="card-badge">вендор</div>
+                    <div class="card-revenue">
+                        <span>💰</span>
+                        <span>Потенциальная выручка:</span>
+                        <span class="revenue-value">550 тыс. ₽</span>
+                    </div>
+                    <div class="card-info">📊 Выручка 2024: 180 тыс. ₽</div>
+                    <div class="card-info">🚗 Парк ТС: 45</div>
+                </div>
+                <div class="card-solutions">
+                    <span class="solution-tag">Мониторинг ТС</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

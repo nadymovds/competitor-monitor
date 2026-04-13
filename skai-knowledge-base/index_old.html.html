@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний — Единая база рынка с ИИ</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f0f9ff 100%);
+            min-height: 100vh;
+        }
+        .header-bar {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .header-bar .logo-wrap {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            text-decoration: none;
+            color: #fff;
+        }
+        .header-bar .logo-inline {
+            height: 42px;
+            width: auto;
+            display: block;
+            flex-shrink: 0;
+            color: #fff;
+        }
+        .header-bar .logo-sub {
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 400;
+            margin-left: 0.25rem;
+        }
+        .header-bar .logo-right { margin-left: auto; }
+        .header-bar .logo-inline.logo-small { height: 32px; width: 80px; }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 2.5rem;
+            max-width: 1100px;
+            margin: 2rem auto;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.12);
+            border: 1px solid #bfdbfe;
+        }
+        h1 {
+            font-size: 1.9rem;
+            color: #1e40af;
+            margin-bottom: 0.5rem;
+            text-align: left;
+            font-weight: 700;
+        }
+        .subtitle-main {
+            color: #0f172a;
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+            max-width: 720px;
+            line-height: 1.5;
+        }
+        .goals-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.75rem;
+        }
+        .goal-card {
+            background: #eff6ff;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            border: 1px solid #bfdbfe;
+        }
+        .goal-card h3 {
+            font-size: 1rem;
+            color: #1e40af;
+            margin-bottom: 0.4rem;
+        }
+        .goal-card p {
+            font-size: 0.9rem;
+            color: #1f2933;
+            line-height: 1.5;
+        }
+        .metrics-block {
+            margin-bottom: 2rem;
+        }
+        .metrics-title {
+            font-size: 1.1rem;
+            color: #1e40af;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+        }
+        .metric-card {
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            padding: 1rem 1.25rem;
+        }
+        .metric-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: #64748b;
+            letter-spacing: 0.03em;
+        }
+        .metric-main {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-top: 0.25rem;
+        }
+        .metric-sub {
+            font-size: 0.85rem;
+            color: #475569;
+            margin-top: 0.25rem;
+        }
+        .sections-title {
+            font-size: 1.1rem;
+            color: #1e40af;
+            margin: 1.5rem 0 0.75rem;
+            font-weight: 600;
+        }
+        .groups-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .group-card {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            border-radius: 10px;
+            border: 1px solid #93c5fd;
+            padding: 1.25rem 1.4rem;
+        }
+        .group-card h3 {
+            font-size: 1rem;
+            color: #1e40af;
+            margin-bottom: 0.5rem;
+        }
+        .group-card ul {
+            list-style: disc;
+            padding-left: 1.1rem;
+            font-size: 0.9rem;
+            color: #1f2933;
+            line-height: 1.45;
+        }
+        .query-block {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            border: 1px solid #93c5fd;
+            border-radius: 10px;
+            padding: 1.25rem;
+            margin-bottom: 2rem;
+        }
+        .query-block label {
+            display: block;
+            font-weight: 600;
+            color: #1e40af;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+        .query-input-wrap {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-end;
+        }
+        .query-block textarea {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: 1px solid #93c5fd;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 44px;
+        }
+        .query-block textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+        .query-send {
+            display: inline-block;
+            padding: 0.75rem 1.25rem;
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        .query-send:hover { background: #1d4ed8; }
+        .query-hint {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: #3b82f6;
+        }
+        .role-block { margin-bottom: 2.25rem; }
+        .role-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.45rem 1rem;
+            border-radius: 999px;
+            background: #0f172a;
+            color: #f9fafb;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        .role-badge span.icon { font-size: 1.1rem; }
+        .scenario-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+        }
+        .scenario-card {
+            display: flex;
+            gap: 0.9rem;
+            padding: 1rem 1.25rem;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            text-decoration: none;
+            color: inherit;
+            transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s, background 0.2s;
+        }
+        .scenario-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+        .scenario-number {
+            min-width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #1e40af;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: 700;
+            margin-top: 0.2rem;
+        }
+        .scenario-main h3 {
+            font-size: 1.05rem;
+            color: #111827;
+            margin-bottom: 0.15rem;
+        }
+        .scenario-main p {
+            font-size: 0.9rem;
+            color: #4b5563;
+            line-height: 1.45;
+        }
+        .scenario-main p.links {
+            font-size: 0.8rem;
+            color: #1d4ed8;
+            margin-top: 0.4rem;
+        }
+    </style>
+</head>
+<body>
+    <header class="header-bar">
+        <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-wrap">
+            <img src="logo_skai.svg?v=2" alt="SKAI" class="logo-inline">
+        </a>
+    </header>
+
+    <div class="container">
+        <h1>Единая база знаний о рынке с ИИ</h1>
+        <p class="subtitle-main">
+            Внутренний продукт SKAI для коммерческого департамента и продуктовой команды.
+            База помогает <strong>быстрее находить рыночные ответы</strong> и за счёт этого улучшать выручку, конверсию и решения по продукту.
+        </p>
+
+        <div class="query-block">
+            <label for="mainQuery">Вопрос по базе знаний с ИИ‑помощником</label>
+            <div class="query-input-wrap">
+                <textarea id="mainQuery" placeholder="Например: Какие конкуренты предлагают видеомониторинг для грузового транспорта в ЦФО и как они позиционируют цену?" rows="2"></textarea>
+                <span class="query-send">Задать вопрос</span>
+            </div>
+            <p class="query-hint">ИИ формирует ответ на основе данных о конкурентах, клиентах, SKAI и партнёрах.</p>
+        </div>
+
+        <div class="role-block">
+            <div class="role-badge"><span class="icon">👥</span>Сотрудник коммерческого департамента</div>
+            <div class="scenario-grid">
+                <a href="прототип_дашборд_клиента.html" class="scenario-card">
+                    <div class="scenario-number">1</div>
+                    <div class="scenario-main">
+                        <h3>Профиль клиента</h3>
+                        <p class="links">Ключевые показатели, справка по компании, контакты, регионы присутствия, публичные выступления и подтверждённые потребности.</p>
+                    </div>
+                </a>
+                <a href="прототип_сравнение_компаний.html" class="scenario-card">
+                    <div class="scenario-number">2</div>
+                    <div class="scenario-main">
+                        <h3>Сравнение с конкурентами</h3>
+                        <p class="links">Гибкая таблица сравнения, рейтинг конкурентов, потенциал по выручке и аргументы SKAI против выбранного конкурента.</p>
+                    </div>
+                </a>
+                <a href="прототип_скрипт_встречи.html" class="scenario-card">
+                    <div class="scenario-number">3</div>
+                    <div class="scenario-main">
+                        <h3>Адаптивный скрипт для встречи</h3>
+                        <p class="links">Профиль компании перед встречей, выбор задачи встречи, готовые блоки скрипта и факты/цитаты из прошлых коммуникаций.</p>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <div class="role-block">
+            <div class="role-badge"><span class="icon">💡</span>Маркетолог и продакт‑менеджер</div>
+            <div class="scenario-grid">
+                <a href="прототип_мониторинг_конкурентов.html" class="scenario-card">
+                    <div class="scenario-number">1</div>
+                    <div class="scenario-main">
+                        <h3>Мониторинг обновлений конкурентов</h3>
+                        <p class="links">Лента новостей и релизов конкурентов, карта фич по вендорам и фильтры по типу обновлений.</p>
+                    </div>
+                </a>
+                <a href="прототип_анализ_джобов.html" class="scenario-card">
+                    <div class="scenario-number">2</div>
+                    <div class="scenario-main">
+                        <h3>Анализ клиентских работ</h3>
+                        <p class="links">Типовые jobs‑to‑be‑done по сегментам, частота работ и таблица триггеров для спроса.</p>
+                    </div>
+                </a>
+                <a href="прототип_дашборд.html" class="scenario-card">
+                    <div class="scenario-number">3</div>
+                    <div class="scenario-main">
+                        <h3>Анализ рыночных трендов</h3>
+                        <p class="links">Обзор рынка по регионам и сегментам, потенциал выручки, новости конкурентов и топ возможностей.</p>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SKAI - База знаний рынка</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

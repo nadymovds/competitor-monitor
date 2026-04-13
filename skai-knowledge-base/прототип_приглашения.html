@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний — Персональные приглашения</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f8fafc 100%);
+            color: #1e293b;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo { display: flex; align-items: center; gap: 1rem; }
+        .logo a.logo-link { display: flex; align-items: center; gap: 0.75rem; color: #fff; text-decoration: none; }
+        .logo .logo-img { height: 36px; width: auto; color: #fff; }
+        .logo .logo-title { display: none; }
+        .logo .logo-img rect, .logo .logo-img path { display: none; }
+        .logo .logo-img * { display: none !important; }
+        .logo .logo-img text { display: block !important; }
+        .logo .logo-title { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .nav-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .nav-tabs .nav-tab {
+            padding: 0.75rem 1.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+        .nav-tabs .nav-tab:hover:not(.active) { background: rgba(255, 255, 255, 0.25); }
+        .nav-tabs .nav-tab.active { background: white; color: #1e40af; }
+        .container {
+            max-width: 1200px;
+            margin: 1.5rem auto 2rem;
+            padding: 0 2rem 2rem;
+        }
+        .hero {
+            background: #fff;
+            border: 1px solid #dbeafe;
+            border-radius: 14px;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.08);
+            padding: 1.75rem 2rem;
+            margin-bottom: 1.5rem;
+        }
+        .page-title {
+            font-size: 1.7rem;
+            margin-bottom: 0.4rem;
+            color: #111827;
+        }
+        .page-subtitle {
+            font-size: 0.95rem;
+            color: #64748b;
+            margin-bottom: 1.5rem;
+            max-width: 760px;
+        }
+        .hero .page-title {
+            margin: 0 0 0.55rem;
+            color: #1e40af;
+        }
+        .hero .page-subtitle {
+            margin: 0;
+            color: #334155;
+            line-height: 1.6;
+            max-width: 900px;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 1.4fr 1.6fr;
+            gap: 1.5rem;
+            align-items: flex-start;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 1.25rem;
+        }
+        .card h3 {
+            font-size: 1.05rem;
+            margin-bottom: 0.75rem;
+            color: #111827;
+        }
+        .card-sub {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-bottom: 0.75rem;
+        }
+        label {
+            display: block;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+        }
+        select, input, textarea {
+            width: 100%;
+            padding: 0.55rem 0.75rem;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.9rem;
+            font-family: inherit;
+        }
+        select:focus, input:focus, textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        .field-row {
+            margin-bottom: 0.85rem;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem 1rem;
+        }
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.25rem;
+        }
+        .chip {
+            padding: 0.25rem 0.6rem;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .chip.active {
+            background: #1d4ed8;
+            color: #ffffff;
+        }
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.7rem 1.3rem;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: #ffffff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-primary:hover { background: #1d4ed8; }
+        .preview-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 520px;
+            overflow: auto;
+        }
+        .preview-item {
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            padding: 0.85rem 1rem;
+            background: #f8fafc;
+        }
+        .preview-meta {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+        }
+        .preview-subject {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 0.25rem;
+        }
+        .preview-body {
+            font-size: 0.9rem;
+            color: #374151;
+            line-height: 1.45;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4f46e5;
+            font-size: 0.75rem;
+            margin-left: 0.35rem;
+        }
+        .nav-back {
+            max-width: 1200px;
+            margin: 0.75rem auto 0;
+            padding: 0 2rem;
+        }
+        .nav-back a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.7rem 1rem;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #1e40af;
+            text-decoration: none;
+            font-size: 0.92rem;
+            font-weight: 700;
+            border: 1px solid #bfdbfe;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12);
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+        }
+        .nav-back a:hover {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            box-shadow: 0 6px 18px rgba(37, 99, 235, 0.18);
+            transform: translateY(-1px);
+        }
+        @media (max-width: 980px) {
+            .container { padding: 0 1rem 2rem; }
+            .layout { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-link">
+                    <svg class="logo-img" viewBox="0 0 100 36" width="100" height="36" aria-hidden="true" focusable="false"><g fill="currentColor" opacity="0.78"><rect x="2" y="2" width="2.5" height="2.5"/><rect x="6" y="2" width="2.5" height="2.5"/><rect x="10" y="2" width="2.5" height="2.5"/><rect x="14" y="2" width="2.5" height="2.5"/><rect x="18" y="2" width="2.5" height="2.5"/><rect x="22" y="2" width="2.5" height="2.5"/><rect x="26" y="2" width="2.5" height="2.5"/><rect x="30" y="2" width="2.5" height="2.5"/><rect x="34" y="2" width="2.5" height="2.5"/><rect x="38" y="2" width="2.5" height="2.5"/><rect x="42" y="2" width="2.5" height="2.5"/><rect x="46" y="2" width="2.5" height="2.5"/><rect x="50" y="2" width="2.5" height="2.5"/><rect x="54" y="2" width="2.5" height="2.5"/><rect x="58" y="2" width="2.5" height="2.5"/><rect x="62" y="2" width="2.5" height="2.5"/><rect x="66" y="2" width="2.5" height="2.5"/><rect x="70" y="2" width="2.5" height="2.5"/><rect x="74" y="2" width="2.5" height="2.5"/><rect x="78" y="2" width="2.5" height="2.5"/><rect x="82" y="2" width="2.5" height="2.5"/><rect x="86" y="2" width="2.5" height="2.5"/><rect x="90" y="2" width="2.5" height="2.5"/><rect x="94" y="2" width="2.5" height="2.5"/><rect x="2" y="5.5" width="2.5" height="2.5"/><rect x="6" y="5.5" width="2.5" height="2.5"/><rect x="10" y="5.5" width="2.5" height="2.5"/><rect x="14" y="5.5" width="2.5" height="2.5"/><rect x="18" y="5.5" width="2.5" height="2.5"/><rect x="22" y="5.5" width="2.5" height="2.5"/><rect x="26" y="5.5" width="2.5" height="2.5"/><rect x="30" y="5.5" width="2.5" height="2.5"/><rect x="34" y="5.5" width="2.5" height="2.5"/><rect x="38" y="5.5" width="2.5" height="2.5"/><rect x="42" y="5.5" width="2.5" height="2.5"/><rect x="46" y="5.5" width="2.5" height="2.5"/><rect x="50" y="5.5" width="2.5" height="2.5"/><rect x="54" y="5.5" width="2.5" height="2.5"/><rect x="58" y="5.5" width="2.5" height="2.5"/><rect x="62" y="5.5" width="2.5" height="2.5"/><rect x="66" y="5.5" width="2.5" height="2.5"/><rect x="70" y="5.5" width="2.5" height="2.5"/><rect x="74" y="5.5" width="2.5" height="2.5"/><rect x="78" y="5.5" width="2.5" height="2.5"/><rect x="82" y="5.5" width="2.5" height="2.5"/><rect x="86" y="5.5" width="2.5" height="2.5"/><rect x="90" y="5.5" width="2.5" height="2.5"/><rect x="94" y="5.5" width="2.5" height="2.5"/><rect x="2" y="9" width="2.5" height="2.5"/><rect x="6" y="9" width="2.5" height="2.5"/><rect x="10" y="9" width="2.5" height="2.5"/><rect x="14" y="9" width="2.5" height="2.5"/><rect x="18" y="9" width="2.5" height="2.5"/><rect x="22" y="9" width="2.5" height="2.5"/><rect x="26" y="9" width="2.5" height="2.5"/><rect x="30" y="9" width="2.5" height="2.5"/><rect x="34" y="9" width="2.5" height="2.5"/><rect x="38" y="9" width="2.5" height="2.5"/><rect x="42" y="9" width="2.5" height="2.5"/><rect x="46" y="9" width="2.5" height="2.5"/><rect x="50" y="9" width="2.5" height="2.5"/><rect x="54" y="9" width="2.5" height="2.5"/><rect x="58" y="9" width="2.5" height="2.5"/><rect x="62" y="9" width="2.5" height="2.5"/><rect x="66" y="9" width="2.5" height="2.5"/><rect x="70" y="9" width="2.5" height="2.5"/><rect x="74" y="9" width="2.5" height="2.5"/><rect x="78" y="9" width="2.5" height="2.5"/><rect x="82" y="9" width="2.5" height="2.5"/><rect x="86" y="9" width="2.5" height="2.5"/><rect x="90" y="9" width="2.5" height="2.5"/><rect x="94" y="9" width="2.5" height="2.5"/></g><path d="M 0 14 Q 25 6 50 14 T 100 14" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/><text x="50" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="18" fill="currentColor">SKAI</text></svg>
+                    <h1 class="logo-title">База знаний рынка</h1>
+                </a>
+            </div>
+            <nav class="nav-tabs" id="navMarketing">
+                <a class="nav-tab" href="прототип_мониторинг_конкурентов.html">Мониторинг обновлений конкурентов</a>
+                <a class="nav-tab" href="прототип_анализ_джобов.html">Анализ клиентских работ</a>
+                <a class="nav-tab" href="прототип_дашборд.html">Анализ рыночных трендов</a>
+                <a class="nav-tab" href="прототип_спикеры_и_участники_конференций.html">Спикеры и участники конференций</a>
+            </nav>
+
+            <nav class="nav-tabs" id="navSales" style="display:none;">
+                <a class="nav-tab" href="прототип_дашборд_клиента.html">Профиль клиента</a>
+                <a class="nav-tab" href="прототип_сравнение_компаний.html">Сравнение с конкурентами</a>
+                <a class="nav-tab" href="прототип_скрипт_встречи.html">Адаптивный скрипт для встречи</a>
+                <a class="nav-tab" href="прототип_холдинги.html">Холдинги</a>
+            </nav>
+        </div>
+    </header>
+    <div class="nav-back">
+        <a href="index.html">← На главную страницу базы знаний</a>
+    </div>
+
+    <div class="container">
+        <div class="hero">
+            <h2 class="page-title">Персональные приглашения на мероприятия</h2>
+            <p class="page-subtitle">
+                Сценарий для маркетологов и менеджеров по продажам: выбираем клиентов и мероприятие, настраиваем стиль обращения и отраслевые акценты — получаем пачку персонализированных писем для отправки из Outlook.
+            </p>
+        </div>
+
+        <div class="layout">
+            <div>
+                <div class="card">
+                    <h3>1. Мероприятие</h3>
+                    <p class="card-sub">Описание мероприятия: дата, формат и ключевой акцент.</p>
+                    <div class="field-row">
+                        <label for="evName">Название мероприятия</label>
+                        <input id="evName" type="text" value="Конференция «Цифровой автопарк 16 апреля»">
+                    </div>
+                    <div class="grid-2">
+                        <div class="field-row">
+                            <label for="evDate">Дата</label>
+                            <input id="evDate" type="date">
+                        </div>
+                        <div class="field-row">
+                            <label for="evFormat">Формат</label>
+                            <select id="evFormat">
+                                <option>Офлайн‑конференция</option>
+                                <option>Онлайн‑вебинар</option>
+                                <option>Гибридное мероприятие</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <label for="evFocus">Главный акцент в приглашении</label>
+                        <textarea id="evFocus" rows="3" placeholder="Например: кейсы по снижению затрат на автопарк и повышению безопасности на маршрутах."></textarea>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>2. Аудитория</h3>
+                    <p class="card-sub">Кого приглашаем: выбор клиентов из базы и базовые фильтры.</p>
+                    <div class="grid-2">
+                        <div class="field-row">
+                            <label for="audIndustry">Отрасль клиентов</label>
+                            <select id="audIndustry">
+                                <option>Все отрасли</option>
+                                <option>Нефтегаз</option>
+                                <option>FMCG / ритейл</option>
+                                <option>Промышленные компании</option>
+                                <option>Логистика и грузоперевозки</option>
+                            </select>
+                        </div>
+                        <div class="field-row">
+                            <label for="audFleet">Размер автопарка</label>
+                            <select id="audFleet">
+                                <option>Любой</option>
+                                <option>от 10 до 50 ТС</option>
+                                <option>от 50 до 200 ТС</option>
+                                <option>больше 200 ТС</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <label for="audList">Клиенты (список ИНН или названий)</label>
+                        <textarea id="audList" rows="3" placeholder="Можно вставить список ИНН или названий компаний для точечного приглашения."></textarea>
+                    </div>
+                    <button class="btn-primary" type="button" style="margin-top:0.25rem;">Подобрать клиентов из базы</button>
+                </div>
+
+                <div class="card">
+                    <h3>3. Стиль и акценты писем</h3>
+                    <p class="card-sub">Как будем обращаться и что подчёркивать в тексте.</p>
+                    <div class="field-row">
+                        <label>Обращение</label>
+                        <div class="chips">
+                            <span class="chip active">По имени и отчеству</span>
+                            <span class="chip">По должности</span>
+                            <span class="chip">Общее обращение (без имени)</span>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <label>Степень знакомства</label>
+                        <div class="chips">
+                            <span class="chip active">Более официально</span>
+                            <span class="chip">Нейтрально</span>
+                            <span class="chip">Менее официально</span>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <label>Отраслевой подшаблон</label>
+                        <div class="chips">
+                            <span class="chip active">Для нефтегаза</span>
+                            <span class="chip">Для FMCG / ритейла</span>
+                            <span class="chip">Для промышленных компаний</span>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <label for="attach">Официальное письмо‑приглашение</label>
+                        <input id="attach" type="text" placeholder="Ссылка на PDF / файл приглашения, который будет приложен к письму.">
+                    </div>
+                    <div class="field-row">
+                        <label for="templateCsv">CSV с шаблонами писем</label>
+                        <input id="templateCsv" type="file" accept=".csv">
+                        <p class="card-sub" style="margin-top:0.35rem;">
+                            В будущей версии сюда можно будет загрузить CSV‑файл с шаблонами писем по отраслям и стилям обращения.
+                            База знаний выберет подходящий вариант для каждого клиента в зависимости от отрасли и выбранных критериев.
+                        </p>
+                    </div>
+                    <button class="btn-primary" type="button" style="margin-top:0.25rem;">Сформировать письма</button>
+                </div>
+            </div>
+
+            <div>
+                <div class="card">
+                    <h3>4. Превью писем для отправки</h3>
+                    <p class="card-sub">Примеры того, что менеджер увидит у себя в Outlook для ручной отправки.</p>
+                    <div class="preview-list">
+                        <div class="preview-item">
+                            <div class="preview-meta">
+                                Клиент: ООО «Нефтетранс» · Отрасль: нефтегаз
+                                <span class="pill">официальный стиль</span>
+                            </div>
+                            <div class="preview-subject">Приглашение на конференцию «Цифровой автопарк 16 апреля»</div>
+                            <div class="preview-body">
+                                Уважаемый Алексей Викторович!<br><br>
+                                Приглашаем вас принять участие в конференции «Цифровой автопарк 16 апреля», где мы покажем кейсы по снижению потерь топлива и повышению безопасности колонн на опасных маршрутах.
+                                Отдельный блок будет посвящён проектам с крупнейшими нефтегазовыми перевозчиками.<br><br>
+                                Во вложении — официальное письмо‑приглашение с программой мероприятия.
+                            </div>
+                        </div>
+                        <div class="preview-item">
+                            <div class="preview-meta">
+                                Клиент: АО «ФрешМаркет» · Отрасль: FMCG / ритейл
+                                <span class="pill">нейтральный стиль</span>
+                            </div>
+                            <div class="preview-subject">Встреча на конференции «Цифровой автопарк 16 апреля»</div>
+                            <div class="preview-body">
+                                Добрый день, Мария!<br><br>
+                                16 апреля проводим конференцию «Цифровой автопарк» — расскажем, как сети FMCG оптимизируют городскую логистику, снижают простои у магазинов и управляют качеством сервиса в доставке.
+                                Будем рады видеть вас и коллег из транспортной службы.<br><br>
+                                Прикладываю официальное приглашение с подробной программой.
+                            </div>
+                        </div>
+                        <div class="preview-item">
+                            <div class="preview-meta">
+                                Клиент: ПАО «ПромЛогистик» · Отрасль: промышленность
+                                <span class="pill">менее официально</span>
+                            </div>
+                            <div class="preview-subject">Давайте встретимся на «Цифровом автопарке» 16 апреля</div>
+                            <div class="preview-body">
+                                Здравствуйте, Илья!<br><br>
+                                Будем рады встретиться с вами на конференции «Цифровой автопарк 16 апреля»: мы покажем, как промышленные компании используют аналитику по рейсам и простоям для планирования производства и логистики.
+                                Это отличный формат, чтобы обсудить ваши задачи по транспорту и безопасности.<br><br>
+                                Во вложении — официальное приглашение, которое можно переслать коллегам.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            var params = new URLSearchParams(window.location.search);
+            var role = params.get('role'); // 'sales' | 'marketing'
+
+            var navMarketing = document.getElementById('navMarketing');
+            var navSales = document.getElementById('navSales');
+            if (!navMarketing || !navSales) return;
+
+            if (role === 'sales') {
+                navMarketing.style.display = 'none';
+                navSales.style.display = 'flex';
+            } else {
+                navSales.style.display = 'none';
+                navMarketing.style.display = 'flex';
+            }
+        })();
+    </script>
+</body>
+</html>

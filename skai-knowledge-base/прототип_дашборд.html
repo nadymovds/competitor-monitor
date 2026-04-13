@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний - Анализ рыночных трендов</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f8fafc 100%);
+            color: #1e293b;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .logo a.logo-link {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: inherit;
+            text-decoration: none;
+        }
+        .logo .logo-img { height: 36px; width: auto; color: #fff; }
+        .logo .logo-title { display: none; }
+        .logo .logo-img rect, .logo .logo-img path { display: none; }
+        .logo .logo-img * { display: none !important; }
+        .logo .logo-img text { display: block !important; }
+.logo .logo-link { color: #fff; }
+        .logo .logo-title { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .nav-tabs {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .nav-tabs .nav-tab {
+            padding: 0.75rem 1.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+        .nav-tabs .nav-tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.25);
+        }
+        .nav-tabs .nav-tab.active {
+            background: white;
+            color: #1e40af;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .dashboard-header {
+            background: #fff;
+            border: 1px solid #dbeafe;
+            border-radius: 14px;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.08);
+            padding: 1.75rem 2rem;
+            margin-bottom: 2rem;
+        }
+        .dashboard-header h2 {
+            font-size: 2rem;
+            color: #1e40af;
+            margin: 0 0 0.55rem;
+        }
+        .dashboard-header p {
+            margin: 0;
+            color: #334155 !important;
+            line-height: 1.6;
+            max-width: 980px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-top: 4px solid;
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+        .stat-card:nth-child(1) { border-top-color: #1e40af; }
+        .stat-card:nth-child(2) { border-top-color: #2563eb; }
+        .stat-card:nth-child(3) { border-top-color: #0ea5e9; }
+        .stat-card:nth-child(4) { border-top-color: #3b82f6; }
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        .stat-card:nth-child(1) .stat-icon { background: #dbeafe; color: #1e40af; }
+        .stat-card:nth-child(2) .stat-icon { background: #dbeafe; color: #2563eb; }
+        .stat-card:nth-child(3) .stat-icon { background: #e0f2fe; color: #0ea5e9; }
+        .stat-card:nth-child(4) .stat-icon { background: #dbeafe; color: #3b82f6; }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 0.25rem;
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .stat-sub {
+            font-size: 0.75rem;
+            color: #9ca3af;
+        }
+        .table-wrap {
+            background: #ffffff;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            overflow: hidden;
+        }
+        .table-scroll {
+            max-height: 260px;
+            overflow: auto;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .data-table thead th {
+            background: #f9fafb;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: #6b7280;
+        }
+        .data-table th,
+        .data-table td {
+            padding: 0.8rem 1.1rem;
+            border-bottom: 1px solid #e5e7eb;
+            border-right: 1px solid #e5e7eb;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        .data-table th:last-child,
+        .data-table td:last-child {
+            border-right: none;
+        }
+        .data-table tbody tr:nth-child(even) {
+            background: #f9fafb;
+        }
+        .risk-pill {
+            white-space: nowrap;
+            display: inline-block;
+        }
+        .status-select {
+            padding: 0.3rem 0.6rem;
+            border-radius: 999px;
+            border: 1px solid #e5e7eb;
+            background: #ffffff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        .chart-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .chart-card h3 {
+            margin: 0;
+            font-size: 1.2rem;
+            color: #333;
+        }
+        .chart-placeholder {
+            height: 300px;
+            background: #f8fafc;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            font-size: 1rem;
+        }
+        .chart-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            padding: 1rem 0;
+            height: 280px;
+        }
+        .chart-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .chart-bar-label {
+            width: 140px;
+            font-size: 0.9rem;
+            color: #475569;
+        }
+        .chart-bar-track {
+            flex: 1;
+            height: 28px;
+            background: #e2e8f0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .chart-bar-fill {
+            height: 100%;
+            border-radius: 6px;
+            background: linear-gradient(90deg, #2563eb, #3b82f6);
+            min-width: 4px;
+        }
+        .chart-bar-value {
+            width: 56px;
+            text-align: right;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #1e40af;
+        }
+        .chart-donut-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2rem;
+            height: 280px;
+            padding: 1rem;
+        }
+        .chart-donut {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: conic-gradient(#1e40af 0% 45%, #2563eb 45% 80%, #60a5fa 80% 100%);
+        }
+        .chart-donut-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .chart-donut-legend span {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: #475569;
+        }
+        .chart-donut-legend .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .chart-donut-legend .dot.d1 { background: #1e40af; }
+        .chart-donut-legend .dot.d2 { background: #2563eb; }
+        .chart-donut-legend .dot.d3 { background: #60a5fa; }
+        .opportunities-section {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-top: 2rem;
+        }
+        .opportunities-section h3 {
+            margin: 0 0 1.5rem 0;
+            font-size: 1.5rem;
+            color: #333;
+        }
+        .opportunities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1rem;
+        }
+        .opportunity-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+        .opportunity-rank {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1e40af;
+            min-width: 40px;
+        }
+        .opportunity-content h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1rem;
+            color: #333;
+        }
+        .opportunity-details {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.85rem;
+            color: #666;
+        }
+        .opportunity-revenue {
+            font-weight: 600;
+            color: #2563eb;
+        }
+        .news-block {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+        .news-title {
+            margin: 0 0 1rem 0;
+            font-size: 1.2rem;
+            color: #333;
+        }
+        .news-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .news-item {
+            display: grid;
+            grid-template-columns: 90px 120px 1fr;
+            gap: 1rem;
+            align-items: start;
+            padding: 0.75rem 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+        .news-date {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+        .news-source {
+            font-weight: 600;
+            color: #1e40af;
+            font-size: 0.9rem;
+        }
+        .news-text {
+            font-size: 0.95rem;
+            color: #333;
+            line-height: 1.4;
+        }
+        .metrics-kd-section {
+            margin-bottom: 2rem;
+        }
+        .metrics-kd-section h3 {
+            font-size: 1.1rem;
+            color: #1e40af;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        .metrics-kd-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.25rem;
+        }
+        .metric-kd-card {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            border-radius: 12px;
+            padding: 1.5rem;
+            color: white;
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+        }
+        .metric-kd-card:nth-child(2) { background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); }
+        .metric-kd-card:nth-child(3) { background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%); }
+        .metric-kd-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .metric-kd-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }
+        .metric-kd-desc {
+            font-size: 0.85rem;
+            opacity: 0.95;
+            line-height: 1.4;
+        }
+        .metric-kd-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-top: 0.75rem;
+        }
+        .metrics-kd-note {
+            margin-top: 0.75rem;
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        .btn-primary {
+            padding: 0.6rem 1.1rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: #fff;
+        }
+        .btn-primary:hover { background: #1d4ed8; }
+        .nav-back {
+            max-width: 1200px;
+            margin: 0.75rem auto 0;
+            padding: 0 2rem;
+        }
+        .nav-back a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.7rem 1rem;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #1e40af;
+            text-decoration: none;
+            font-size: 0.92rem;
+            font-weight: 700;
+            border: 1px solid #bfdbfe;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12);
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+        }
+        .nav-back a:hover {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            box-shadow: 0 6px 18px rgba(37, 99, 235, 0.18);
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-link">
+                    <svg class="logo-img" viewBox="0 0 100 36" width="100" height="36" aria-hidden="true" focusable="false"><g fill="currentColor" opacity="0.78"><rect x="2" y="2" width="2.5" height="2.5"/><rect x="6" y="2" width="2.5" height="2.5"/><rect x="10" y="2" width="2.5" height="2.5"/><rect x="14" y="2" width="2.5" height="2.5"/><rect x="18" y="2" width="2.5" height="2.5"/><rect x="22" y="2" width="2.5" height="2.5"/><rect x="26" y="2" width="2.5" height="2.5"/><rect x="30" y="2" width="2.5" height="2.5"/><rect x="34" y="2" width="2.5" height="2.5"/><rect x="38" y="2" width="2.5" height="2.5"/><rect x="42" y="2" width="2.5" height="2.5"/><rect x="46" y="2" width="2.5" height="2.5"/><rect x="50" y="2" width="2.5" height="2.5"/><rect x="54" y="2" width="2.5" height="2.5"/><rect x="58" y="2" width="2.5" height="2.5"/><rect x="62" y="2" width="2.5" height="2.5"/><rect x="66" y="2" width="2.5" height="2.5"/><rect x="70" y="2" width="2.5" height="2.5"/><rect x="74" y="2" width="2.5" height="2.5"/><rect x="78" y="2" width="2.5" height="2.5"/><rect x="82" y="2" width="2.5" height="2.5"/><rect x="86" y="2" width="2.5" height="2.5"/><rect x="90" y="2" width="2.5" height="2.5"/><rect x="94" y="2" width="2.5" height="2.5"/><rect x="2" y="5.5" width="2.5" height="2.5"/><rect x="6" y="5.5" width="2.5" height="2.5"/><rect x="10" y="5.5" width="2.5" height="2.5"/><rect x="14" y="5.5" width="2.5" height="2.5"/><rect x="18" y="5.5" width="2.5" height="2.5"/><rect x="22" y="5.5" width="2.5" height="2.5"/><rect x="26" y="5.5" width="2.5" height="2.5"/><rect x="30" y="5.5" width="2.5" height="2.5"/><rect x="34" y="5.5" width="2.5" height="2.5"/><rect x="38" y="5.5" width="2.5" height="2.5"/><rect x="42" y="5.5" width="2.5" height="2.5"/><rect x="46" y="5.5" width="2.5" height="2.5"/><rect x="50" y="5.5" width="2.5" height="2.5"/><rect x="54" y="5.5" width="2.5" height="2.5"/><rect x="58" y="5.5" width="2.5" height="2.5"/><rect x="62" y="5.5" width="2.5" height="2.5"/><rect x="66" y="5.5" width="2.5" height="2.5"/><rect x="70" y="5.5" width="2.5" height="2.5"/><rect x="74" y="5.5" width="2.5" height="2.5"/><rect x="78" y="5.5" width="2.5" height="2.5"/><rect x="82" y="5.5" width="2.5" height="2.5"/><rect x="86" y="5.5" width="2.5" height="2.5"/><rect x="90" y="5.5" width="2.5" height="2.5"/><rect x="94" y="5.5" width="2.5" height="2.5"/><rect x="2" y="9" width="2.5" height="2.5"/><rect x="6" y="9" width="2.5" height="2.5"/><rect x="10" y="9" width="2.5" height="2.5"/><rect x="14" y="9" width="2.5" height="2.5"/><rect x="18" y="9" width="2.5" height="2.5"/><rect x="22" y="9" width="2.5" height="2.5"/><rect x="26" y="9" width="2.5" height="2.5"/><rect x="30" y="9" width="2.5" height="2.5"/><rect x="34" y="9" width="2.5" height="2.5"/><rect x="38" y="9" width="2.5" height="2.5"/><rect x="42" y="9" width="2.5" height="2.5"/><rect x="46" y="9" width="2.5" height="2.5"/><rect x="50" y="9" width="2.5" height="2.5"/><rect x="54" y="9" width="2.5" height="2.5"/><rect x="58" y="9" width="2.5" height="2.5"/><rect x="62" y="9" width="2.5" height="2.5"/><rect x="66" y="9" width="2.5" height="2.5"/><rect x="70" y="9" width="2.5" height="2.5"/><rect x="74" y="9" width="2.5" height="2.5"/><rect x="78" y="9" width="2.5" height="2.5"/><rect x="82" y="9" width="2.5" height="2.5"/><rect x="86" y="9" width="2.5" height="2.5"/><rect x="90" y="9" width="2.5" height="2.5"/><rect x="94" y="9" width="2.5" height="2.5"/></g><path d="M 0 14 Q 25 6 50 14 T 100 14" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/><text x="50" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="18" fill="currentColor">SKAI</text></svg>
+                    <h1 class="logo-title">База знаний рынка</h1>
+                </a>
+            </div>
+            <nav class="nav-tabs">
+                <a class="nav-tab" href="прототип_мониторинг_конкурентов.html">Мониторинг обновлений конкурентов</a>
+                <a class="nav-tab" href="прототип_анализ_джобов.html">Анализ клиентских работ</a>
+                <a class="nav-tab" href="прототип_приглашения.html?role=marketing">Персональные приглашения на мероприятия</a>
+                <a class="nav-tab" href="прототип_спикеры_и_участники_конференций.html">Спикеры и участники конференций</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="nav-back">
+        <a href="index.html">← На главную страницу базы знаний</a>
+    </div>
+
+    <div class="container">
+        <div class="dashboard-header">
+            <div>
+                <h2>Анализ рыночных трендов</h2>
+                <p style="color: #666; font-size: 1rem;">Обзор потенциальных клиентов, конкурентов и возможностей SKAI по рынку, а также среднесрочных и долгосрочных трендов отрасли для стратегического планирования продуктов и маркетинга.</p>
+            </div>
+            <button type="button" class="btn-primary">Обновить раздел</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">🏢</div>
+                <div>
+                    <div class="stat-value">247</div>
+                    <div class="stat-label">Всего компаний</div>
+                    <div class="stat-sub">Компании в базе рынка SKAI</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💰</div>
+                <div>
+                    <div class="stat-value">2.4М</div>
+                    <div class="stat-label">Потенциальная выручка</div>
+                    <div class="stat-sub">Суммарный потенциал сделок SKAI</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📈</div>
+                <div>
+                    <div class="stat-value">10</div>
+                    <div class="stat-label">Топ возможностей</div>
+                    <div class="stat-sub">Приоритизованные сделки и кейсы</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📍</div>
+                <div>
+                    <div class="stat-value">15</div>
+                    <div class="stat-label">Регионов</div>
+                    <div class="stat-sub">Регионы с потенциалом для SKAI</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Потенциал по регионам</h3>
+                <p class="stat-sub" style="margin:0 0 0.75rem;">Оценка возможной выручки SKAI по ключевым регионам — помогает понять, где сосредоточен основной спрос и куда стоит выходить в первую очередь.</p>
+                <div class="chart-bars">
+                    <div class="chart-bar-row">
+                        <span class="chart-bar-label">Москва</span>
+                        <div class="chart-bar-track"><div class="chart-bar-fill" style="width: 85%;"></div></div>
+                        <span class="chart-bar-value">850К</span>
+                    </div>
+                    <div class="chart-bar-row">
+                        <span class="chart-bar-label">Санкт-Петербург</span>
+                        <div class="chart-bar-track"><div class="chart-bar-fill" style="width: 62%;"></div></div>
+                        <span class="chart-bar-value">620К</span>
+                    </div>
+                    <div class="chart-bar-row">
+                        <span class="chart-bar-label">Екатеринбург</span>
+                        <div class="chart-bar-track"><div class="chart-bar-fill" style="width: 52%;"></div></div>
+                        <span class="chart-bar-value">520К</span>
+                    </div>
+                    <div class="chart-bar-row">
+                        <span class="chart-bar-label">Нижний Новгород</span>
+                        <div class="chart-bar-track"><div class="chart-bar-fill" style="width: 42%;"></div></div>
+                        <span class="chart-bar-value">420К</span>
+                    </div>
+                    <div class="chart-bar-row">
+                        <span class="chart-bar-label">Казань</span>
+                        <div class="chart-bar-track"><div class="chart-bar-fill" style="width: 34%;"></div></div>
+                        <span class="chart-bar-value">340К</span>
+                    </div>
+                    <div class="chart-bar-row">
+                        <span class="chart-bar-label">Новосибирск</span>
+                        <div class="chart-bar-track"><div class="chart-bar-fill" style="width: 28%;"></div></div>
+                        <span class="chart-bar-value">280К</span>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>Потенциал по сегментам</h3>
+                <p class="stat-sub" style="margin:0 0 0.75rem;">Распределение потенциала по типам клиентов (вендоры, интеграторы, телемедицина и др.) — показывает, какие сегменты рынка наиболее перспективны для развития продуктов и маркетинга.</p>
+                <div class="chart-donut-wrap">
+                    <div class="chart-donut"></div>
+                    <div class="chart-donut-legend">
+                        <span><span class="dot d1"></span> Вендоры — 45%</span>
+                        <span><span class="dot d2"></span> Интеграторы — 35%</span>
+                        <span><span class="dot d3"></span> Телемедицина — 20%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Потенциальные клиенты</h3>
+            <p class="page-subtitle" style="margin-bottom:0.75rem;">Список компаний, по которым есть сигналы о возможной потребности в решениях SKAI, с оценкой вероятности стать клиентом и ссылками на источники.</p>
+            <div class="table-wrap">
+                <div class="table-scroll" style="max-height:260px;">
+                    <table class="data-table" style="min-width:1040px; font-size:0.95rem;">
+                        <thead>
+                            <tr>
+                                <th>Компания</th>
+                                <th>Деятельность</th>
+                                <th>Почему потенциальный клиент</th>
+                                <th>Вероятность стать клиентом SKAI</th>
+                                <th>Важность</th>
+                                <th>Источник</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>ООО «РегионТранс»</td>
+                                <td>Грузоперевозки, 120+ ТС</td>
+                                <td>В новости партнёра указано внедрение базового мониторинга без видео и аналитики.</td>
+                                <td>
+                                    <select class="status-select" data-scheme="client">
+                                        <option selected>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="status-select" data-scheme="client">
+                                        <option selected>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                    <div style="font-size:0.8rem;color:#6b7280;margin-top:0.1rem;">крупный парк в ЦФО</div>
+                                </td>
+                                <td><a href="#" target="_blank" rel="noopener">Статья на сайте СКАУТ‑РС</a></td>
+                            </tr>
+                            <tr>
+                                <td>ПАО «ГородБас»</td>
+                                <td>Пассажирские перевозки</td>
+                                <td>Конкурс на систему видео‑безопасности, требования к ИИ‑детекциям.</td>
+                                <td>
+                                    <select class="status-select" data-scheme="client">
+                                        <option>Высокая</option>
+                                        <option selected>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="status-select" data-scheme="client">
+                                        <option>Высокая</option>
+                                        <option selected>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                    <div style="font-size:0.8rem;color:#6b7280;margin-top:0.1rem;">пилот на ограниченном количестве ТС</div>
+                                </td>
+                                <td><a href="#" target="_blank" rel="noopener">Тендер на сайте закупок</a></td>
+                            </tr>
+                            <tr>
+                                <td>АО «СтройЛогистик»</td>
+                                <td>Строительная логистика</td>
+                                <td>Кейс конкурента про оптимизацию маршрутов без глубокой интеграции с ERP.</td>
+                                <td>
+                                    <select class="status-select" data-scheme="client">
+                                        <option>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option selected>Низкая</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="status-select" data-scheme="client">
+                                        <option selected>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                    <div style="font-size:0.8rem;color:#6b7280;margin-top:0.1rem;">крупные капзатраты, сложные маршруты</div>
+                                </td>
+                                <td><a href="#" target="_blank" rel="noopener">Кейс на сайте конкурента</a></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top:1.75rem;">
+            <h3>Потенциальные конкуренты</h3>
+            <p class="page-subtitle" style="margin-bottom:0.75rem;">Компании, которые по продукту, сегментам или географии могут становиться конкурентами SKAI.</p>
+            <div class="table-wrap">
+                <div class="table-scroll" style="max-height:260px;">
+                    <table class="data-table" style="min-width:1040px; font-size:0.95rem;">
+                        <thead>
+                            <tr>
+                                <th>Компания</th>
+                                <th>Деятельность</th>
+                                <th>Почему потенциальный конкурент</th>
+                                <th>Вероятность стать конкурентом</th>
+                                <th>Степень риска</th>
+                                <th>Источник</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>ООО «ВидеоКонтроль»</td>
+                                <td>Видео‑аналитика для транспорта</td>
+                                <td>Акцент на ИИ‑детекциях и облачной платформе, выход в сегменты, где работает SKAI.</td>
+                                <td>
+                                    <select class="status-select" data-scheme="risk">
+                                        <option selected>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="status-select" data-scheme="risk">
+                                        <option selected>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                </td>
+                                <td><a href="#" target="_blank" rel="noopener">Пресс‑релиз о запуске решения</a></td>
+                            </tr>
+                            <tr>
+                                <td>«ТелеТрек»</td>
+                                <td>Классический мониторинг + интеграции</td>
+                                <td>Активно развивают интеграции с ERP/CRM, но пока слабая видео‑составляющая.</td>
+                                <td>
+                                    <select class="status-select" data-scheme="risk">
+                                        <option>Высокая</option>
+                                        <option selected>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="status-select" data-scheme="risk">
+                                        <option>Высокая</option>
+                                        <option selected>Средняя</option>
+                                        <option>Низкая</option>
+                                    </select>
+                                </td>
+                                <td><a href="#" target="_blank" rel="noopener">Кейс по интеграциям на сайте</a></td>
+                            </tr>
+                            <tr>
+                                <td>«SafeDrive AI»</td>
+                                <td>НИШЕВАЯ платформа видео‑аналитики</td>
+                                <td>Фокус на безопасности водителей, возможен выход в РФ / транспортную отрасль.</td>
+                                <td>
+                                    <select class="status-select" data-scheme="risk">
+                                        <option>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option selected>Низкая</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="status-select" data-scheme="risk">
+                                        <option>Высокая</option>
+                                        <option>Средняя</option>
+                                        <option selected>Низкая</option>
+                                    </select>
+                                </td>
+                                <td><a href="#" target="_blank" rel="noopener">Статья в отраслевом медиа</a></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="opportunities-section">
+            <h3>Среднесрочные тренды (1–2 года)</h3>
+            <button type="button" class="btn-primary" style="margin-top:0.75rem; margin-bottom:0.25rem;">Обновить</button>
+            <div class="table-wrap" style="margin-top:1rem;">
+                <div class="table-scroll">
+                    <table class="data-table" style="min-width:1040px; font-size:0.95rem;">
+                        <thead>
+                            <tr>
+                                <th>Период</th>
+                                <th>Тренд</th>
+                                <th>Пояснение</th>
+                                <th>Источник</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>1–2 года</td>
+                                <td>Рост спроса на видео‑безопасность</td>
+                                <td>Компании внедряют системы видео‑контроля на опасных маршрутах и в пассажирском транспорте.</td>
+                                <td><a href="#" target="_blank" rel="noopener">Отраслевые конференции и кейсы конкурентов</a></td>
+                            </tr>
+                            <tr>
+                                <td>1–2 года</td>
+                                <td>Интеграции с ERP/CRM</td>
+                                <td>Телематика всё чаще связывается с учётными системами, чтобы автоматизировать отчётность и биллинг.</td>
+                                <td><a href="#" target="_blank" rel="noopener">Публичные релизы интеграторов</a></td>
+                            </tr>
+                            <tr>
+                                <td>1–2 года</td>
+                                <td>Изменения требований регуляторов</td>
+                                <td>Появляются новые требования к хранению данных, отчётности по инцидентам и использованию видео в транспорте.</td>
+                                <td><a href="#" target="_blank" rel="noopener">Нормативные акты и разъяснения ведомств</a></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="opportunities-section">
+            <h3>Долгосрочные тренды (3–5 лет)</h3>
+            <button type="button" class="btn-primary" style="margin-top:0.75rem; margin-bottom:0.25rem;">Обновить</button>
+            <div class="table-wrap" style="margin-top:1rem;">
+                <div class="table-scroll">
+                    <table class="data-table" style="min-width:1040px; font-size:0.95rem;">
+                        <thead>
+                            <tr>
+                                <th>Период</th>
+                                <th>Тренд</th>
+                                <th>Пояснение</th>
+                                <th>Источник</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>3–5 лет</td>
+                                <td>Переход от мониторинга к аналитике</td>
+                                <td>Фокус смещается с «точек и треков» к аналитике аномалий, подсказкам ИИ и автоматическим действиям.</td>
+                                <td><a href="#" target="_blank" rel="noopener">Рынок решений с ИИ‑аналитикой</a></td>
+                            </tr>
+                            <tr>
+                                <td>3–5 лет</td>
+                                <td>Регуляторика и ESG</td>
+                                <td>Ужесточаются требования к хранению видео/логов, безопасности перевозок, экологии и раскрытию ESG‑показателей.</td>
+                                <td><a href="#" target="_blank" rel="noopener">Регуляторные инициативы и отчёты консалтинга</a></td>
+                            </tr>
+                            <tr>
+                                <td>3–5 лет</td>
+                                <td>Экономические циклы и оптимизация затрат</td>
+                                <td>Компании усиливают контроль затрат на транспорт, ищут решения, которые напрямую привязаны к экономическому эффекту.</td>
+                                <td><a href="#" target="_blank" rel="noopener">Макроэкономические обзоры и аналитика отрасли</a></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="opportunities-section">
+            <h3>Топ возможности по конкурентам</h3>
+            <p class="page-subtitle" style="margin-bottom:1rem; font-size:0.9rem; color:#4b5563;">
+                Рейтинг конкурентов, по клиентской базе которых у SKAI сейчас наибольший потенциал выручки. Номер показывает приоритет, синяя сумма — оценку возможной выручки SKAI.
+            </p>
+            <div class="opportunities-grid">
+                <div class="opportunity-card">
+                    <div class="opportunity-rank">#1</div>
+                    <div class="opportunity-content">
+                        <h4>СКАУТ-РС</h4>
+                        <div class="opportunity-details">
+                            <span>Санкт-Петербург</span>
+                            <span class="opportunity-revenue">1.2М ₽</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="opportunity-card">
+                    <div class="opportunity-rank">#2</div>
+                    <div class="opportunity-content">
+                        <h4>Форт-Телеком</h4>
+                        <div class="opportunity-details">
+                            <span>Москва</span>
+                            <span class="opportunity-revenue">980К ₽</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="opportunity-card">
+                    <div class="opportunity-rank">#3</div>
+                    <div class="opportunity-content">
+                        <h4>NAVITEL</h4>
+                        <div class="opportunity-details">
+                            <span>Москва</span>
+                            <span class="opportunity-revenue">850К ₽</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="opportunity-card">
+                    <div class="opportunity-rank">#4</div>
+                    <div class="opportunity-content">
+                        <h4>Автограф</h4>
+                        <div class="opportunity-details">
+                            <span>Москва</span>
+                            <span class="opportunity-revenue">720К ₽</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="opportunity-card">
+                    <div class="opportunity-rank">#5</div>
+                    <div class="opportunity-content">
+                        <h4>Омникомм</h4>
+                        <div class="opportunity-details">
+                            <span>Москва</span>
+                            <span class="opportunity-revenue">680К ₽</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="opportunity-card">
+                    <div class="opportunity-rank">#6</div>
+                    <div class="opportunity-content">
+                        <h4>ГЛОНАСС Софт</h4>
+                        <div class="opportunity-details">
+                            <span>Москва</span>
+                            <span class="opportunity-revenue">550К ₽</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const colorSchemes = {
+                client: {
+                    'Высокая': { bg: '#dcfce7', color: '#166534' },   // зелёный
+                    'Средняя': { bg: '#fef9c3', color: '#854d0e' },  // жёлтый
+                    'Низкая': { bg: '#e5e7eb', color: '#111827' }    // серый
+                },
+                risk: {
+                    'Высокая': { bg: '#fee2e2', color: '#b91c1c' },  // красный
+                    'Средняя': { bg: '#fef9c3', color: '#854d0e' },  // жёлтый
+                    'Низкая': { bg: '#e5e7eb', color: '#111827' }    // серый
+                }
+            };
+
+            function applyStatusColor(select) {
+                const schemeKey = select.dataset.scheme || 'risk';
+                const scheme = colorSchemes[schemeKey] || colorSchemes.risk;
+                const value = (select.value || '').trim();
+
+                if (scheme[value]) {
+                    select.style.backgroundColor = scheme[value].bg;
+                    select.style.color = scheme[value].color;
+                    select.style.borderColor = 'transparent';
+                } else {
+                    select.style.backgroundColor = '#ffffff';
+                    select.style.color = '#111827';
+                    select.style.borderColor = '#e5e7eb';
+                }
+            }
+
+            document.querySelectorAll('.status-select').forEach(function (select) {
+                applyStatusColor(select);
+                select.addEventListener('change', function () {
+                    applyStatusColor(select);
+                });
+            });
+        });
+    </script>
+
+</body>
+</html>

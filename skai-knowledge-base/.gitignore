@@ -1,0 +1,18 @@
+# OS / IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Secrets (если появятся)
+.env
+.env.*
+
+# Логи и временные файлы
+*.log
+*.tmp
+
+# Опционально: не коммитить тяжёлые бэкапы (раскомментируйте при необходимости)
+# *backup*.csv
+# *.zip

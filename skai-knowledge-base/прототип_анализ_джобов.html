@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний — Анализ клиентских работ</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f8fafc 100%);
+            color: #1e293b;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo { display: flex; align-items: center; gap: 1rem; }
+        .logo a.logo-link { display: flex; align-items: center; gap: 0.75rem; color: #fff; text-decoration: none; }
+        .logo .logo-img { height: 36px; width: auto; color: #fff; }
+        .logo .logo-title { display: none; }
+        .logo .logo-img rect, .logo .logo-img path { display: none; }
+        .logo .logo-img * { display: none !important; }
+        .logo .logo-img text { display: block !important; }
+        .logo .logo-title { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .nav-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .nav-tabs .nav-tab {
+            padding: 0.75rem 1.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+        .nav-tabs .nav-tab:hover:not(.active) { background: rgba(255, 255, 255, 0.25); }
+        .nav-tabs .nav-tab.active { background: white; color: #1e40af; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        .hero {
+            background: #fff;
+            border: 1px solid #dbeafe;
+            border-radius: 14px;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.08);
+            padding: 1.75rem 2rem;
+            margin-bottom: 1.5rem;
+        }
+        .page-title { font-size: 1.75rem; color: #1e293b; margin-bottom: 0.5rem; }
+        .page-subtitle { color: #64748b; font-size: 0.95rem; margin-bottom: 1.5rem; }
+        .hero .page-title {
+            margin: 0 0 0.55rem;
+            color: #1e40af;
+        }
+        .hero .page-subtitle {
+            margin: 0;
+            color: #334155;
+            line-height: 1.6;
+            max-width: 900px;
+        }
+        .top-filters {
+            background: white;
+            border-radius: 12px;
+            padding: 1.25rem 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            margin-bottom: 1.75rem;
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr);
+            gap: 1rem;
+            align-items: end;
+        }
+        .top-filters label {
+            display: block;
+            font-size: 0.8rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            margin-bottom: 0.25rem;
+        }
+        .top-filters select, .top-filters input {
+            width: 100%;
+            padding: 0.55rem 0.75rem;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.9rem;
+        }
+        .top-filters select:focus, .top-filters input:focus { outline: none; border-color: #2563eb; }
+        .upload-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .upload-actions .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.7rem 1.1rem;
+            border-radius: 999px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            white-space: nowrap;
+            width: 100%;
+        }
+        .upload-actions .btn-primary {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: #fff;
+        }
+        .upload-actions .btn-secondary {
+            background: #eff6ff;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+        }
+        .filters-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+        .query-search {
+            margin-top: 0.75rem;
+        }
+        .query-search textarea {
+            width: 100%;
+            padding: 0.65rem 0.8rem;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.9rem;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 44px;
+        }
+        .query-search textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+        .query-search-actions {
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .query-search-actions .btn-run {
+            padding: 0.6rem 1.1rem;
+            border-radius: 999px;
+            border: none;
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .query-search-actions .hint {
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 1.3fr 1.7fr;
+            gap: 1.5rem;
+            align-items: flex-start;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 1.25rem;
+        }
+        .card h3 { font-size: 1.05rem; margin-bottom: 0.75rem; color: #1e293b; }
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .kpi {
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            padding: 0.9rem 1rem;
+        }
+        .kpi .k { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+        .kpi .v { font-size: 1.15rem; font-weight: 700; color: #0f172a; margin-top: 0.25rem; }
+        .kpi .s { font-size: 0.8rem; color: #475569; margin-top: 0.2rem; }
+        .jobs-list { display: flex; flex-direction: column; gap: 0.75rem; }
+        .job-item {
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            padding: 0.85rem 1rem;
+            background: #f8fafc;
+        }
+        .job-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 0.2rem;
+        }
+        .job-meta {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-bottom: 0.35rem;
+        }
+        .job-text {
+            font-size: 0.9rem;
+            color: #374151;
+            line-height: 1.45;
+        }
+        .table-wrap {
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            background: white;
+            overflow: hidden;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 0.55rem 0.7rem;
+            text-align: left;
+        }
+        th {
+            background: #eff6ff;
+            color: #1e40af;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        tbody tr:nth-child(even) { background: #f8fafc; }
+        .note { font-size: 0.8rem; color: #64748b; margin-top: 0.6rem; }
+        .nav-back {
+            max-width: 1200px;
+            margin: 0.75rem auto 0;
+            padding: 0 2rem;
+        }
+        .nav-back a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.7rem 1rem;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #1e40af;
+            text-decoration: none;
+            font-size: 0.92rem;
+            font-weight: 700;
+            border: 1px solid #bfdbfe;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12);
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+        }
+        .nav-back a:hover {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            box-shadow: 0 6px 18px rgba(37, 99, 235, 0.18);
+            transform: translateY(-1px);
+        }
+        @media (max-width: 980px) {
+            .top-filters { grid-template-columns: 1fr; }
+            .filters-grid { grid-template-columns: 1fr; }
+            .layout { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-link">
+                    <svg class="logo-img" viewBox="0 0 100 36" width="100" height="36" aria-hidden="true" focusable="false"><g fill="currentColor" opacity="0.78"><rect x="2" y="2" width="2.5" height="2.5"/><rect x="6" y="2" width="2.5" height="2.5"/><rect x="10" y="2" width="2.5" height="2.5"/><rect x="14" y="2" width="2.5" height="2.5"/><rect x="18" y="2" width="2.5" height="2.5"/><rect x="22" y="2" width="2.5" height="2.5"/><rect x="26" y="2" width="2.5" height="2.5"/><rect x="30" y="2" width="2.5" height="2.5"/><rect x="34" y="2" width="2.5" height="2.5"/><rect x="38" y="2" width="2.5" height="2.5"/><rect x="42" y="2" width="2.5" height="2.5"/><rect x="46" y="2" width="2.5" height="2.5"/><rect x="50" y="2" width="2.5" height="2.5"/><rect x="54" y="2" width="2.5" height="2.5"/><rect x="58" y="2" width="2.5" height="2.5"/><rect x="62" y="2" width="2.5" height="2.5"/><rect x="66" y="2" width="2.5" height="2.5"/><rect x="70" y="2" width="2.5" height="2.5"/><rect x="74" y="2" width="2.5" height="2.5"/><rect x="78" y="2" width="2.5" height="2.5"/><rect x="82" y="2" width="2.5" height="2.5"/><rect x="86" y="2" width="2.5" height="2.5"/><rect x="90" y="2" width="2.5" height="2.5"/><rect x="94" y="2" width="2.5" height="2.5"/><rect x="2" y="5.5" width="2.5" height="2.5"/><rect x="6" y="5.5" width="2.5" height="2.5"/><rect x="10" y="5.5" width="2.5" height="2.5"/><rect x="14" y="5.5" width="2.5" height="2.5"/><rect x="18" y="5.5" width="2.5" height="2.5"/><rect x="22" y="5.5" width="2.5" height="2.5"/><rect x="26" y="5.5" width="2.5" height="2.5"/><rect x="30" y="5.5" width="2.5" height="2.5"/><rect x="34" y="5.5" width="2.5" height="2.5"/><rect x="38" y="5.5" width="2.5" height="2.5"/><rect x="42" y="5.5" width="2.5" height="2.5"/><rect x="46" y="5.5" width="2.5" height="2.5"/><rect x="50" y="5.5" width="2.5" height="2.5"/><rect x="54" y="5.5" width="2.5" height="2.5"/><rect x="58" y="5.5" width="2.5" height="2.5"/><rect x="62" y="5.5" width="2.5" height="2.5"/><rect x="66" y="5.5" width="2.5" height="2.5"/><rect x="70" y="5.5" width="2.5" height="2.5"/><rect x="74" y="5.5" width="2.5" height="2.5"/><rect x="78" y="5.5" width="2.5" height="2.5"/><rect x="82" y="5.5" width="2.5" height="2.5"/><rect x="86" y="5.5" width="2.5" height="2.5"/><rect x="90" y="5.5" width="2.5" height="2.5"/><rect x="94" y="5.5" width="2.5" height="2.5"/><rect x="2" y="9" width="2.5" height="2.5"/><rect x="6" y="9" width="2.5" height="2.5"/><rect x="10" y="9" width="2.5" height="2.5"/><rect x="14" y="9" width="2.5" height="2.5"/><rect x="18" y="9" width="2.5" height="2.5"/><rect x="22" y="9" width="2.5" height="2.5"/><rect x="26" y="9" width="2.5" height="2.5"/><rect x="30" y="9" width="2.5" height="2.5"/><rect x="34" y="9" width="2.5" height="2.5"/><rect x="38" y="9" width="2.5" height="2.5"/><rect x="42" y="9" width="2.5" height="2.5"/><rect x="46" y="9" width="2.5" height="2.5"/><rect x="50" y="9" width="2.5" height="2.5"/><rect x="54" y="9" width="2.5" height="2.5"/><rect x="58" y="9" width="2.5" height="2.5"/><rect x="62" y="9" width="2.5" height="2.5"/><rect x="66" y="9" width="2.5" height="2.5"/><rect x="70" y="9" width="2.5" height="2.5"/><rect x="74" y="9" width="2.5" height="2.5"/><rect x="78" y="9" width="2.5" height="2.5"/><rect x="82" y="9" width="2.5" height="2.5"/><rect x="86" y="9" width="2.5" height="2.5"/><rect x="90" y="9" width="2.5" height="2.5"/><rect x="94" y="9" width="2.5" height="2.5"/></g><path d="M 0 14 Q 25 6 50 14 T 100 14" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/><text x="50" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="18" fill="currentColor">SKAI</text></svg>
+                    <h1 class="logo-title">База знаний рынка</h1>
+                </a>
+            </div>
+            <nav class="nav-tabs">
+                <a class="nav-tab" href="прототип_мониторинг_конкурентов.html">Мониторинг обновлений конкурентов</a>
+                <a class="nav-tab" href="прототип_дашборд.html">Анализ рыночных трендов</a>
+                <a class="nav-tab" href="прототип_приглашения.html?role=marketing">Персональные приглашения на мероприятия</a>
+                <a class="nav-tab" href="прототип_спикеры_и_участники_конференций.html">Спикеры и участники конференций</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="nav-back">
+        <a href="index.html">← На главную страницу базы знаний</a>
+    </div>
+
+    <div class="container">
+        <div class="hero">
+            <h1 class="page-title">Анализ клиентских работ</h1>
+            <p class="page-subtitle">Сводка клиентских работ (jobs-to-be-done) по сегментам, отраслям и типам парка ТС, на основе данных CRM и интервью. В реальной системе здесь автоматически анализируются интервью, встречи и summary по клиентам для выявления ключевых потребностей и инсайтов.</p>
+        </div>
+
+        <div class="top-filters">
+            <div>
+                <label>Источники интервью / summary</label>
+                <div class="upload-actions">
+                    <button class="btn btn-primary">Загрузить файлы интервью и summary</button>
+                    <button class="btn btn-secondary" type="button">Открыть внешнюю базу файлов (интервью и summary)</button>
+                </div>
+            </div>
+            <div class="filters-grid">
+                <div>
+                    <label>По каким встречам и интервью готовить работы</label>
+                    <select>
+                        <option>Все доступные встречи и интервью</option>
+                        <option>Только интервью с клиентами</option>
+                        <option>Только встречи по активным сделкам</option>
+                        <option>Только внутренние обсуждения с аккаунт‑командами</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Период проведения встреч и интервью</label>
+                    <select>
+                        <option>За последние 30 дней</option>
+                        <option>За последний квартал</option>
+                        <option>За последний год</option>
+                        <option>Выбрать период в календаре</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Сегменты клиентов</label>
+                    <select>
+                        <option>Все сегменты</option>
+                        <option>Логистика и грузоперевозки</option>
+                        <option>Пассажирские перевозки</option>
+                        <option>Строительные и сервисные компании</option>
+                    </select>
+                </div>
+            </div>
+            <div class="query-search">
+                <label>Что вы хотите найти по выбранным данным</label>
+                <textarea placeholder="Например: основные клиентские работы по снижению списаний топлива у средних логистов за последний квартал, с примерами формулировок из интервью."></textarea>
+                <div class="query-search-actions">
+                    <button class="btn-run" type="button">Сформировать анализ работ</button>
+                    <div class="hint">В реальной системе после применения фильтров и запроса ниже обновятся паттерны, список работ и таблица триггеров.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="layout">
+            <div>
+                <div class="card">
+                    <h3>Ключевые паттерны по джобам</h3>
+                    <div class="kpi-grid">
+                        <div class="kpi">
+                            <div class="k">Основная джоба</div>
+                            <div class="v">Контроль топлива</div>
+                            <div class="s">Частота в воронке: 42% запросов</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="k">Связанная джоба</div>
+                            <div class="v">Безопасность и видео</div>
+                            <div class="s">Комбинируется с топливом в 60% кейсов</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="k">Типичный размер парка</div>
+                            <div class="v">50–150 ТС</div>
+                            <div class="s">Сегмент «средние логисты»</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="k">Потенциал выручки</div>
+                            <div class="v">1,8 млрд ₽</div>
+                            <div class="s">оценка по активным лидам и клиентам</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Типовые джобы клиентов</h3>
+                    <div class="jobs-list">
+                        <div class="job-item">
+                            <div class="job-title">«Снизить списания топлива без конфликтов с водителями»</div>
+                            <div class="job-meta">Сегмент: грузоперевозки, 50–200 ТС, директор по транспорту</div>
+                            <div class="job-text">
+                                Инсайт: компания уже использует классический мониторинг, но не доверяет данным по сливам.
+                                Ищут связку «датчики + видео + аналитика», чтобы <strong>доказать</strong> нарушения и изменить поведение водителей.
+                            </div>
+                        </div>
+                        <div class="job-item">
+                            <div class="job-title">«Сократить время на подготовку отчётов по парку для собственника»</div>
+                            <div class="job-meta">Сегмент: логистика, 20–80 ТС, операционный директор</div>
+                            <div class="job-text">
+                                Инсайт: отчёты собираются вручную из нескольких систем. Ожидание — единый дашборд и авто‑отчёты по KPI.
+                            </div>
+                        </div>
+                        <div class="job-item">
+                            <div class="job-title">«Повысить безопасность на опасных маршрутах»</div>
+                            <div class="job-meta">Сегмент: нефте- и газоперевозки, 100+ ТС, служба ББ</div>
+                            <div class="job-text">
+                                Инсайт: фокус на видео и анализе нарушений ПДД, важна интеграция с внутренними регламентами безопасности.
+                            </div>
+                        </div>
+                    </div>
+                    <p class="note">Эти джобы собираются из расшифровок интервью, комментариев в CRM и заметок менеджеров.</p>
+                </div>
+            </div>
+            <div>
+                <div class="card">
+                    <h3>Таблица джобов по сегментам</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Сегмент</th>
+                                    <th>Джоба</th>
+                                    <th>Частота</th>
+                                    <th>Типичные триггеры</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Грузоперевозки, 50–200 ТС</td>
+                                    <td>Снизить списания топлива</td>
+                                    <td>Высокая</td>
+                                    <td>Рост цен на топливо, новые тендеры, смена руководства</td>
+                                </tr>
+                                <tr>
+                                    <td>Пассажирские перевозки</td>
+                                    <td>Повысить безопасность и контроль водителей</td>
+                                    <td>Средняя</td>
+                                    <td>Инциденты на маршрутах, требования регуляторов</td>
+                                </tr>
+                                <tr>
+                                    <td>Строительные компании</td>
+                                    <td>Контролировать использование техники на объектах</td>
+                                    <td>Средняя</td>
+                                    <td>Запуск новых объектов, срыв сроков, перерасход техники</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="note">Таблица строится из CRM: джобы размечаются по сделкам, интервью и обратной связи от команд продаж.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

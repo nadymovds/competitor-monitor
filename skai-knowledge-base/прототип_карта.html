@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний - Карта интеграторов</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f8fafc 100%);
+            color: #1a1a1a;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .logo a.logo-link { display: flex; align-items: center; gap: 0.75rem; color: inherit; text-decoration: none; }
+        .logo .logo-img { height: 36px; width: auto; color: #fff; }
+        .logo .logo-title { display: none; }
+        .logo .logo-img rect, .logo .logo-img path { display: none; }
+        .logo .logo-img * { display: none !important; }
+        .logo .logo-img text { display: block !important; }
+.logo .logo-link { color: #fff; }
+        .logo .logo-title { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .nav-tabs {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .nav-tabs .nav-tab {
+            padding: 0.75rem 1.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .nav-tabs .nav-tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.25);
+        }
+        .nav-tabs .nav-tab.active {
+            background: white;
+            color: #1e40af;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .map-header {
+            margin-bottom: 1.5rem;
+        }
+        .map-header h2 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        .map-header p {
+            color: #666;
+        }
+        .map-layout {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        @media (max-width: 900px) {
+            .map-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        .map-wrapper {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            height: 560px;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            min-height: 560px;
+            pointer-events: none;
+        }
+        .sidebar {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .sidebar h3 {
+            font-size: 1.1rem;
+            color: #1e293b;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid #2563eb;
+        }
+        .company-list {
+            max-height: 480px;
+            overflow-y: auto;
+        }
+        .company-item {
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .company-item:hover {
+            background: #f0f9ff;
+            border-left-color: #2563eb;
+        }
+        .company-item .name {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.95rem;
+        }
+        .company-item .city {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+        .company-item .segment {
+            font-size: 0.75rem;
+            color: #2563eb;
+            margin-top: 0.2rem;
+        }
+        .legend-map {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #666;
+        }
+        .legend-map span {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+        }
+        .legend-map .dot-blue { background: #1e40af; }
+        .legend-map .dot-green { background: #0d9488; }
+        .legend-map .dot-orange { background: #f59e0b; }
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .leaflet-popup-content {
+            margin: 0.75rem 1rem;
+            min-width: 200px;
+        }
+        .popup-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 0.25rem;
+        }
+        .popup-city {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .popup-companies-title {
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 0.85rem;
+            margin: 0.75rem 0 0.35rem 0;
+            padding-top: 0.5rem;
+            border-top: 1px solid #e2e8f0;
+        }
+        .popup-segment {
+            font-size: 0.8rem;
+            color: #2563eb;
+            margin-top: 0.25rem;
+        }
+        .leaflet-tooltip.map-tooltip {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+            max-width: 280px;
+            white-space: normal;
+        }
+        .marker-count-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            min-height: 28px;
+            padding: 0 6px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.85rem;
+            line-height: 1;
+        }
+        .marker-count-wrap.many { min-width: 32px; min-height: 32px; font-size: 0.9rem; }
+        .marker-count-icon { background: none !important; border: none !important; }
+        .marker-cluster { background-color: rgba(30, 64, 175, 0.85) !important; }
+        .marker-cluster div { background-color: #1e40af !important; color: #fff !important; font-weight: 700 !important; border: 2px solid #fff !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+        .marker-cluster-small { width: 36px !important; height: 36px !important; margin-left: -18px !important; margin-top: -18px !important; }
+        .marker-cluster-small div { width: 32px !important; height: 32px !important; margin-left: 4px !important; margin-top: 4px !important; line-height: 30px !important; font-size: 0.9rem !important; }
+        .marker-cluster-medium { width: 44px !important; height: 44px !important; margin-left: -22px !important; margin-top: -22px !important; }
+        .marker-cluster-medium div { width: 38px !important; height: 38px !important; margin-left: 5px !important; margin-top: 5px !important; line-height: 36px !important; font-size: 1rem !important; }
+        .marker-cluster-large { width: 52px !important; height: 52px !important; margin-left: -26px !important; margin-top: -26px !important; }
+        .marker-cluster-large div { width: 44px !important; height: 44px !important; margin-left: 6px !important; margin-top: 6px !important; line-height: 42px !important; font-size: 1.1rem !important; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-link">
+                    <svg class="logo-img" viewBox="0 0 100 36" width="100" height="36" aria-hidden="true" focusable="false"><g fill="currentColor" opacity="0.78"><rect x="2" y="2" width="2.5" height="2.5"/><rect x="6" y="2" width="2.5" height="2.5"/><rect x="10" y="2" width="2.5" height="2.5"/><rect x="14" y="2" width="2.5" height="2.5"/><rect x="18" y="2" width="2.5" height="2.5"/><rect x="22" y="2" width="2.5" height="2.5"/><rect x="26" y="2" width="2.5" height="2.5"/><rect x="30" y="2" width="2.5" height="2.5"/><rect x="34" y="2" width="2.5" height="2.5"/><rect x="38" y="2" width="2.5" height="2.5"/><rect x="42" y="2" width="2.5" height="2.5"/><rect x="46" y="2" width="2.5" height="2.5"/><rect x="50" y="2" width="2.5" height="2.5"/><rect x="54" y="2" width="2.5" height="2.5"/><rect x="58" y="2" width="2.5" height="2.5"/><rect x="62" y="2" width="2.5" height="2.5"/><rect x="66" y="2" width="2.5" height="2.5"/><rect x="70" y="2" width="2.5" height="2.5"/><rect x="74" y="2" width="2.5" height="2.5"/><rect x="78" y="2" width="2.5" height="2.5"/><rect x="82" y="2" width="2.5" height="2.5"/><rect x="86" y="2" width="2.5" height="2.5"/><rect x="90" y="2" width="2.5" height="2.5"/><rect x="94" y="2" width="2.5" height="2.5"/><rect x="2" y="5.5" width="2.5" height="2.5"/><rect x="6" y="5.5" width="2.5" height="2.5"/><rect x="10" y="5.5" width="2.5" height="2.5"/><rect x="14" y="5.5" width="2.5" height="2.5"/><rect x="18" y="5.5" width="2.5" height="2.5"/><rect x="22" y="5.5" width="2.5" height="2.5"/><rect x="26" y="5.5" width="2.5" height="2.5"/><rect x="30" y="5.5" width="2.5" height="2.5"/><rect x="34" y="5.5" width="2.5" height="2.5"/><rect x="38" y="5.5" width="2.5" height="2.5"/><rect x="42" y="5.5" width="2.5" height="2.5"/><rect x="46" y="5.5" width="2.5" height="2.5"/><rect x="50" y="5.5" width="2.5" height="2.5"/><rect x="54" y="5.5" width="2.5" height="2.5"/><rect x="58" y="5.5" width="2.5" height="2.5"/><rect x="62" y="5.5" width="2.5" height="2.5"/><rect x="66" y="5.5" width="2.5" height="2.5"/><rect x="70" y="5.5" width="2.5" height="2.5"/><rect x="74" y="5.5" width="2.5" height="2.5"/><rect x="78" y="5.5" width="2.5" height="2.5"/><rect x="82" y="5.5" width="2.5" height="2.5"/><rect x="86" y="5.5" width="2.5" height="2.5"/><rect x="90" y="5.5" width="2.5" height="2.5"/><rect x="94" y="5.5" width="2.5" height="2.5"/><rect x="2" y="9" width="2.5" height="2.5"/><rect x="6" y="9" width="2.5" height="2.5"/><rect x="10" y="9" width="2.5" height="2.5"/><rect x="14" y="9" width="2.5" height="2.5"/><rect x="18" y="9" width="2.5" height="2.5"/><rect x="22" y="9" width="2.5" height="2.5"/><rect x="26" y="9" width="2.5" height="2.5"/><rect x="30" y="9" width="2.5" height="2.5"/><rect x="34" y="9" width="2.5" height="2.5"/><rect x="38" y="9" width="2.5" height="2.5"/><rect x="42" y="9" width="2.5" height="2.5"/><rect x="46" y="9" width="2.5" height="2.5"/><rect x="50" y="9" width="2.5" height="2.5"/><rect x="54" y="9" width="2.5" height="2.5"/><rect x="58" y="9" width="2.5" height="2.5"/><rect x="62" y="9" width="2.5" height="2.5"/><rect x="66" y="9" width="2.5" height="2.5"/><rect x="70" y="9" width="2.5" height="2.5"/><rect x="74" y="9" width="2.5" height="2.5"/><rect x="78" y="9" width="2.5" height="2.5"/><rect x="82" y="9" width="2.5" height="2.5"/><rect x="86" y="9" width="2.5" height="2.5"/><rect x="90" y="9" width="2.5" height="2.5"/><rect x="94" y="9" width="2.5" height="2.5"/></g><path d="M 0 14 Q 25 6 50 14 T 100 14" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/><text x="50" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="18" fill="currentColor">SKAI</text></svg>
+                    <h1 class="logo-title">База знаний рынка</h1>
+                </a>
+            </div>
+            <nav class="nav-tabs">
+                <span class="nav-tab">📊 Дашборд</span>
+                <span class="nav-tab">🔍 Компании</span>
+                <span class="nav-tab">⚔️ Сравнение</span>
+                <span class="nav-tab">🎯 Воронка</span>
+                <span class="nav-tab">⚖️ Бенчмарк</span>
+                <span class="nav-tab">🗺️ Регионы</span>
+                <span class="nav-tab active">📍 Карта</span>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="map-header">
+            <h2>Карта местонахождения компаний-интеграторов</h2>
+            <p>Точки на карте показывают города с представителями. При отдалении рядом расположенные города объединяются в один кружок с числом; при приближении появляются отдельные точки по городам. Клик по маркеру — детали.</p>
+        </div>
+
+        <div class="map-layout">
+            <div class="map-wrapper">
+                <div id="map"></div>
+            </div>
+            <div class="sidebar">
+                <h3>📍 Компании на карте</h3>
+                <div class="company-list" id="companyList"></div>
+                <div class="legend-map">
+                    <div style="margin-bottom: 0.5rem;"><strong>Легенда:</strong></div>
+                    <div><span class="dot-blue"></span> Партнёр SKAI</div>
+                    <div><span class="dot-green"></span> Крупный интегратор</div>
+                    <div><span class="dot-orange"></span> Региональный игрок</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
+    <script>
+        // Центр России, zoom для обзора страны
+        var map = L.map('map').setView([55.75, 45], 4);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        // Демо-данные: компании-интеграторы и их координаты (город)
+        var companies = [
+            { name: 'ООО "Интегратор Москва"', city: 'Москва', lat: 55.7558, lng: 37.6173, segment: 'Партнёр SKAI' },
+            { name: 'АйТи-Системы', city: 'Москва', lat: 55.7512, lng: 37.6185, segment: 'Крупный интегратор' },
+            { name: 'Цифровые решения СПб', city: 'Санкт-Петербург', lat: 59.9343, lng: 30.3351, segment: 'Партнёр SKAI' },
+            { name: 'Северо-Запад Технологии', city: 'Санкт-Петербург', lat: 59.9311, lng: 30.3609, segment: 'Региональный игрок' },
+            { name: 'ВолгаСофт', city: 'Нижний Новгород', lat: 56.2965, lng: 43.9361, segment: 'Крупный интегратор' },
+            { name: 'Казанский ИТ-центр', city: 'Казань', lat: 55.7887, lng: 49.1221, segment: 'Региональный игрок' },
+            { name: 'УралИнтеграция', city: 'Екатеринбург', lat: 56.8389, lng: 60.6057, segment: 'Партнёр SKAI' },
+            { name: 'СибирьТех', city: 'Новосибирск', lat: 55.0084, lng: 82.9357, segment: 'Крупный интегратор' },
+            { name: 'СамараСофт', city: 'Самара', lat: 53.1959, lng: 50.1002, segment: 'Региональный игрок' },
+            { name: 'Ростов-Дон ИТ', city: 'Ростов-на-Дону', lat: 47.2357, lng: 39.7015, segment: 'Региональный игрок' },
+            { name: 'Воронеж Авто Софт', city: 'Воронеж', lat: 51.6720, lng: 39.1843, segment: 'Партнёр SKAI' },
+            { name: 'Краснодар Интегратор', city: 'Краснодар', lat: 45.0353, lng: 38.9753, segment: 'Региональный игрок' }
+        ];
+
+        var segmentColors = {
+            'Партнёр SKAI': '#1e40af',
+            'Крупный интегратор': '#0d9488',
+            'Региональный игрок': '#d97706'
+        };
+
+        // Группируем по городу, считаем количество и берём координаты первого в группе
+        var byCity = {};
+        companies.forEach(function(c) {
+            if (!byCity[c.city]) {
+                byCity[c.city] = { count: 0, lat: c.lat, lng: c.lng, city: c.city, list: [], segment: c.segment };
+            }
+            byCity[c.city].count++;
+            byCity[c.city].list.push(c);
+        });
+
+        var clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
+        var listEl = document.getElementById('companyList');
+
+        Object.keys(byCity).forEach(function(city) {
+            var g = byCity[city];
+            var color = segmentColors[g.segment] || '#1e40af';
+            var icon = L.divIcon({
+                className: 'marker-count-icon',
+                html: '<div class="marker-count-wrap' + (g.count > 9 ? ' many' : '') + '" style="background-color:' + color + '">' + g.count + '</div>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+            var marker = L.marker([g.lat, g.lng], { icon: icon });
+            var popupContent = '<div class="popup-title">' + city + '</div><div class="popup-city">Представителей: ' + g.count + '</div>';
+            popupContent += '<div class="popup-companies-title">Компании:</div>';
+            g.list.forEach(function(c) {
+                popupContent += '<div class="popup-segment">' + c.name + ' — ' + c.segment + '</div>';
+            });
+            marker.bindPopup(popupContent);
+            var companyNamesList = g.list.map(function(c) { return c.name; }).join(', ');
+            marker.bindTooltip('<strong>' + city + '</strong> (' + g.count + ')<br>' + companyNamesList, {
+                direction: 'top',
+                offset: [0, -20],
+                className: 'map-tooltip'
+            });
+            clusterGroup.addLayer(marker);
+
+            var item = document.createElement('div');
+            item.className = 'company-item';
+            item.innerHTML = '<div class="name">' + city + '</div><div class="city">Представителей: ' + g.count + '</div><div class="segment">' + g.list.map(function(c) { return c.name; }).join(', ') + '</div>';
+            listEl.appendChild(item);
+        });
+
+        map.addLayer(clusterGroup);
+    </script>
+</body>
+</html>

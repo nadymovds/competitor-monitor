@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKAI База знаний - Детали компании</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 30%, #f8fafc 100%);
+            color: #1a1a1a;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .logo a.logo-link { display: flex; align-items: center; gap: 0.75rem; color: inherit; text-decoration: none; }
+        .logo .logo-img { height: 36px; width: auto; color: #fff; }
+        .logo .logo-title { display: none; }
+        .logo .logo-img rect, .logo .logo-img path { display: none; }
+        .logo .logo-img * { display: none !important; }
+        .logo .logo-img text { display: block !important; }
+.logo .logo-link { color: #fff; }
+        .logo .logo-title { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .container {
+            max-width: 900px;
+            margin: 2rem auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            position: relative;
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 2rem;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .modal-icon {
+            color: #2563eb;
+            font-size: 32px;
+        }
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: #333;
+            flex: 1;
+        }
+        .category-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: #f0f0f0;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.5rem;
+        }
+        .compare-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .compare-button:hover {
+            opacity: 0.9;
+            transform: scale(1.03);
+        }
+        .modal-body {
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+        .info-section h3 {
+            margin: 0 0 1rem 0;
+            font-size: 1.2rem;
+            color: #333;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+        .info-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .info-label {
+            font-weight: 600;
+            color: #666;
+        }
+        .fleet-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            border-radius: 12px;
+            color: white;
+        }
+        .fleet-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        .revenue-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .revenue-card {
+            padding: 1.5rem;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+        .revenue-card.potential {
+            background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+            color: white;
+        }
+        .revenue-label {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 0.5rem;
+        }
+        .revenue-card.potential .revenue-label {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        .revenue-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
+        }
+        .revenue-card.potential .revenue-value {
+            color: white;
+        }
+        .solutions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+        .solution-item {
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+        .solution-item.active {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .solution-item.inactive {
+            background: #f5f5f5;
+            color: #999;
+        }
+        .ai-section {
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+            border-radius: 12px;
+            border: 2px solid #e0e7ff;
+        }
+        .ai-section h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #2563eb;
+            margin-bottom: 1rem;
+        }
+        .priority-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        .ai-block {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+        }
+        .ai-block h4 {
+            margin: 0 0 0.75rem 0;
+            color: #333;
+            font-size: 1rem;
+        }
+        .ai-block ul {
+            margin: 0;
+            padding-left: 1.5rem;
+            color: #666;
+        }
+        .ai-block li {
+            margin-bottom: 0.5rem;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <a href="https://skai.online/" target="_blank" rel="noopener" class="logo-link">
+                    <svg class="logo-img" viewBox="0 0 100 36" width="100" height="36" aria-hidden="true" focusable="false"><g fill="currentColor" opacity="0.78"><rect x="2" y="2" width="2.5" height="2.5"/><rect x="6" y="2" width="2.5" height="2.5"/><rect x="10" y="2" width="2.5" height="2.5"/><rect x="14" y="2" width="2.5" height="2.5"/><rect x="18" y="2" width="2.5" height="2.5"/><rect x="22" y="2" width="2.5" height="2.5"/><rect x="26" y="2" width="2.5" height="2.5"/><rect x="30" y="2" width="2.5" height="2.5"/><rect x="34" y="2" width="2.5" height="2.5"/><rect x="38" y="2" width="2.5" height="2.5"/><rect x="42" y="2" width="2.5" height="2.5"/><rect x="46" y="2" width="2.5" height="2.5"/><rect x="50" y="2" width="2.5" height="2.5"/><rect x="54" y="2" width="2.5" height="2.5"/><rect x="58" y="2" width="2.5" height="2.5"/><rect x="62" y="2" width="2.5" height="2.5"/><rect x="66" y="2" width="2.5" height="2.5"/><rect x="70" y="2" width="2.5" height="2.5"/><rect x="74" y="2" width="2.5" height="2.5"/><rect x="78" y="2" width="2.5" height="2.5"/><rect x="82" y="2" width="2.5" height="2.5"/><rect x="86" y="2" width="2.5" height="2.5"/><rect x="90" y="2" width="2.5" height="2.5"/><rect x="94" y="2" width="2.5" height="2.5"/><rect x="2" y="5.5" width="2.5" height="2.5"/><rect x="6" y="5.5" width="2.5" height="2.5"/><rect x="10" y="5.5" width="2.5" height="2.5"/><rect x="14" y="5.5" width="2.5" height="2.5"/><rect x="18" y="5.5" width="2.5" height="2.5"/><rect x="22" y="5.5" width="2.5" height="2.5"/><rect x="26" y="5.5" width="2.5" height="2.5"/><rect x="30" y="5.5" width="2.5" height="2.5"/><rect x="34" y="5.5" width="2.5" height="2.5"/><rect x="38" y="5.5" width="2.5" height="2.5"/><rect x="42" y="5.5" width="2.5" height="2.5"/><rect x="46" y="5.5" width="2.5" height="2.5"/><rect x="50" y="5.5" width="2.5" height="2.5"/><rect x="54" y="5.5" width="2.5" height="2.5"/><rect x="58" y="5.5" width="2.5" height="2.5"/><rect x="62" y="5.5" width="2.5" height="2.5"/><rect x="66" y="5.5" width="2.5" height="2.5"/><rect x="70" y="5.5" width="2.5" height="2.5"/><rect x="74" y="5.5" width="2.5" height="2.5"/><rect x="78" y="5.5" width="2.5" height="2.5"/><rect x="82" y="5.5" width="2.5" height="2.5"/><rect x="86" y="5.5" width="2.5" height="2.5"/><rect x="90" y="5.5" width="2.5" height="2.5"/><rect x="94" y="5.5" width="2.5" height="2.5"/><rect x="2" y="9" width="2.5" height="2.5"/><rect x="6" y="9" width="2.5" height="2.5"/><rect x="10" y="9" width="2.5" height="2.5"/><rect x="14" y="9" width="2.5" height="2.5"/><rect x="18" y="9" width="2.5" height="2.5"/><rect x="22" y="9" width="2.5" height="2.5"/><rect x="26" y="9" width="2.5" height="2.5"/><rect x="30" y="9" width="2.5" height="2.5"/><rect x="34" y="9" width="2.5" height="2.5"/><rect x="38" y="9" width="2.5" height="2.5"/><rect x="42" y="9" width="2.5" height="2.5"/><rect x="46" y="9" width="2.5" height="2.5"/><rect x="50" y="9" width="2.5" height="2.5"/><rect x="54" y="9" width="2.5" height="2.5"/><rect x="58" y="9" width="2.5" height="2.5"/><rect x="62" y="9" width="2.5" height="2.5"/><rect x="66" y="9" width="2.5" height="2.5"/><rect x="70" y="9" width="2.5" height="2.5"/><rect x="74" y="9" width="2.5" height="2.5"/><rect x="78" y="9" width="2.5" height="2.5"/><rect x="82" y="9" width="2.5" height="2.5"/><rect x="86" y="9" width="2.5" height="2.5"/><rect x="90" y="9" width="2.5" height="2.5"/><rect x="94" y="9" width="2.5" height="2.5"/></g><path d="M 0 14 Q 25 6 50 14 T 100 14" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/><text x="50" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="18" fill="currentColor">SKAI</text></svg>
+                    <h1 class="logo-title">База знаний рынка</h1>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="modal-header">
+            <span class="modal-icon">🏢</span>
+            <div style="flex: 1;">
+                <h2>СКАУТ-РС</h2>
+                <span class="category-badge">вендор/интегратор</span>
+            </div>
+            <span class="compare-button">⚖️ Сравнить</span>
+        </div>
+
+        <div class="modal-body">
+            <div class="info-section">
+                <h3>Основная информация</h3>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Сайт:</span>
+                        <span>https://scout-gps.ru/</span>
+                    </div>
+                    <div class="info-item">
+                        <span>📍</span>
+                        <span>Санкт-Петербург</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Филиалы:</span>
+                        <span>56</span>
+                    </div>
+                    <div class="info-item">
+                        <span>🌍</span>
+                        <span>Россия, Казахстан</span>
+                    </div>
+                    <div class="info-item">
+                        <span>👥</span>
+                        <span>245 сотрудников</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <h3>Парк транспорта</h3>
+                <div class="fleet-info">
+                    <span style="font-size: 24px;">🚗</span>
+                    <span class="fleet-value">120 ТС</span>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <h3>Финансовые показатели</h3>
+                <div class="revenue-grid">
+                    <div class="revenue-card">
+                        <div class="revenue-label">Выручка 2024</div>
+                        <div class="revenue-value">450 тыс. ₽</div>
+                    </div>
+                    <div class="revenue-card potential">
+                        <div class="revenue-label">Потенциальная выручка SKAI</div>
+                        <div class="revenue-value">1.2 млн ₽</div>
+                    </div>
+                    <div class="revenue-card">
+                        <div class="revenue-label">Рост выручки</div>
+                        <div class="revenue-value">+25%</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <h3>Используемые решения</h3>
+                <div class="solutions-grid">
+                    <div class="solution-item active">✓ Видеомониторинг</div>
+                    <div class="solution-item active">✓ Мониторинг ТС</div>
+                    <div class="solution-item active">✓ Контроль топлива</div>
+                    <div class="solution-item active">✓ Безопасное вождение</div>
+                    <div class="solution-item active">✓ Диспетчерский центр</div>
+                    <div class="solution-item inactive">✗ Видеоаналитика</div>
+                </div>
+            </div>
+
+            <div class="ai-section">
+                <h3>
+                    Аналитика
+                </h3>
+                <div class="priority-badge">
+                    Приоритет: Высокий
+                </div>
+
+                <div class="ai-block">
+                    <h4>Инсайты</h4>
+                    <ul>
+                        <li>Крупная компания с высоким потенциалом выручки</li>
+                        <li>Широкая география присутствия (56 филиалов)</li>
+                        <li>Компания использует комплексные решения</li>
+                        <li>Работает с крупными корпоративными клиентами</li>
+                    </ul>
+                </div>
+
+                <div class="ai-block">
+                    <h4>Рекомендации</h4>
+                    <ul>
+                        <li>Рассмотреть региональную стратегию внедрения</li>
+                        <li>Предложить полный пакет решений SKAI</li>
+                        <li>Использовать референсы для привлечения</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
