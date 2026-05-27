@@ -5,6 +5,37 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+function normalizeTelegramId(value) {
+  if (value === null || value === undefined) return null
+  const normalized = String(value).trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+async function findFirstUserByTelegramId(telegramId) {
+  const normalizedId = normalizeTelegramId(telegramId)
+  if (!normalizedId) return null
+
+  const candidates = []
+  const numericId = Number(normalizedId)
+  if (Number.isSafeInteger(numericId)) {
+    candidates.push(numericId)
+  }
+  candidates.push(normalizedId)
+
+  for (const candidate of candidates) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('telegram_id', candidate)
+      .limit(1)
+
+    if (error) throw error
+    if (data?.length) return data[0]
+  }
+
+  return null
+}
+
 export async function getGroups() {
   const { data, error } = await supabase.from('groups').select('*').order('sort_order')
   if (error) throw error
@@ -103,27 +134,15 @@ export async function getRecentChanges(daysBack = 7, groupIds = null, changeType
 }
 
 export async function getUserByTelegramId(telegramId) {
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('telegram_id', telegramId)
-    .single()
-  if (error && error.code !== 'PGRST116') throw error
-  return data
+  return findFirstUserByTelegramId(telegramId)
 }
 
 export async function checkUserAccess(telegramUser) {
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('telegram_id', telegramUser.id)
-    .single()
-
-  if (error && error.code === 'PGRST116') {
+  const data = await findFirstUserByTelegramId(telegramUser?.id)
+  if (!data) {
     // Пользователь не найден в БД - доступ запрещён
     return { allowed: false, user: null }
   }
-  if (error) throw error
 
   // Пользователь найден - устанавливаем роль в auth metadata для JWT
   const userRole = data.role || 'viewer'
@@ -139,7 +158,7 @@ export async function checkUserAccess(telegramUser) {
   await supabase
     .from('users')
     .update({ last_seen_at: new Date().toISOString() })
-    .eq('telegram_id', telegramUser.id)
+    .eq('id', data.id)
 
   return { allowed: true, user: data }
 }

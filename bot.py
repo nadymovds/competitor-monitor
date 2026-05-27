@@ -46,17 +46,25 @@ pending_requests: dict = {}
 
 def is_user_allowed(telegram_id: int) -> bool:
     """Проверяет, есть ли пользователь в таблице users (как в мини-апп)."""
-    try:
-        result = (
-            supabase.table("users")
-            .select("id")
-            .eq("telegram_id", telegram_id)
-            .single()
-            .execute()
-        )
-        return result.data is not None
-    except Exception:
-        return False
+    candidates = [telegram_id]
+    if telegram_id is not None:
+        candidates.append(str(telegram_id))
+
+    for candidate in candidates:
+        try:
+            result = (
+                supabase.table("users")
+                .select("id")
+                .eq("telegram_id", candidate)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return True
+        except Exception:
+            continue
+
+    return False
 
 
 # ============================================================================

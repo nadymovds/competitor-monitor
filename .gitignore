@@ -23,6 +23,7 @@ optimized_prompt.txt
 
 # Design concepts
 platform-concept/
+boilerplate/
 
 # skai-knowledge-base: keep only prototypes
 skai-knowledge-base/воронка*.csv
