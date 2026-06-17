@@ -235,7 +235,7 @@ def send_app_button(chat_id: str = None) -> bool:
     """Отправляет кнопку для открытия Mini App"""
     if not TELEGRAM_BOT_TOKEN:
         return False
-    target_chat_id = chat_id or (TELEGRAM_GROUP_CHAT_IDS[0] if TELEGRAM_GROUP_CHAT_IDS else None)
+    target_chat_id = chat_id or TELEGRAM_CHAT_ID
     if not target_chat_id:
         return False
     try:
@@ -2466,19 +2466,6 @@ async def run_monitoring_async(mode='all'):
             send_telegram_message(msg, reply_markup=keyboard)
         else:
             send_telegram_document(pdf_path, msg, reply_markup=keyboard)
-        # Отправить сводку в групповые чаты (без inline-кнопки с callback_data)
-        if not TEST_MODE:
-            for group_chat_id in TELEGRAM_GROUP_CHAT_IDS:
-                try:
-                    if tg_meaningful_count == 0:
-                        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                        requests.post(tg_url, json={"chat_id": group_chat_id, "text": msg, "parse_mode": "HTML"}, timeout=30)
-                    else:
-                        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
-                        with open(pdf_path, 'rb') as f:
-                            requests.post(tg_url, data={"chat_id": group_chat_id, "caption": msg, "parse_mode": "HTML"}, files={"document": f}, timeout=60)
-                except:
-                    pass
         try:
             os.remove(pdf_path)
         except:

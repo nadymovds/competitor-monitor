@@ -325,9 +325,8 @@ def get_notification_recipients() -> list:
         print("⚠️ TEST MODE: уведомления только администратору")
         return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
     recipients = []
-    for chat_id in ([TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []) + TELEGRAM_GROUP_CHAT_IDS:
-        if chat_id:
-            recipients.append(chat_id)
+    if TELEGRAM_CHAT_ID:
+        recipients.append(TELEGRAM_CHAT_ID)
     try:
         result = supabase.table("users").select("telegram_id").execute()
         for row in result.data or []:
