@@ -37,6 +37,7 @@ name: News Monitor (KZ)
 
 jobs:
   monitor-news-kz:
+    if: false  # отключено
     runs-on: ubuntu-latest
 
     steps:
