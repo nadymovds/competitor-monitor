@@ -13,6 +13,7 @@ name: Mentions Monitor
 
 jobs:
   monitor-mentions:
+    if: false  # отключено
     runs-on: ubuntu-latest
 
     steps:

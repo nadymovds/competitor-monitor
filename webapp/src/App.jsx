@@ -4,7 +4,6 @@ import FeedScreen from './components/screens/FeedScreen'
 import ScansScreen from './components/screens/ScansScreen'
 import CompetitorsScreen from './components/screens/CompetitorsScreen'
 import SettingsScreen from './components/screens/SettingsScreen'
-import MentionsScreen from './components/screens/MentionsScreen'
 import BottomNav from './components/ui/BottomNav'
 import { getTelegramUser } from './services/telegram'
 import { checkUserAccess, getGroups } from './services/supabase'
@@ -147,8 +146,6 @@ export default function App() {
         return <FeedScreen user={user} groups={groups} onNavigateToCompetitor={navigateToCompetitorFromFeed} />
       case 'competitors':
         return <CompetitorsScreen user={user} groups={groups} onClearSelection={() => {}} />
-      case 'mentions':
-        return <MentionsScreen />
       case 'settings':
         if (settingsSubPage === 'scans') {
           return <ScansScreen onNavigateToCompetitor={navigateToCompetitorFromMonitoring} onBack={() => setSettingsSubPage(null)} />

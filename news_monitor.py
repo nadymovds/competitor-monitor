@@ -2514,15 +2514,7 @@ async def run_news_monitoring_async(tag_filter: str | None = None, delivery: str
         send_telegram_message(top_msg)
     elif pdf_path and os.path.exists(pdf_path):
         summary_msg += "\n\n📎 Во вложении TOP 5-7 релевантных новостей"
-        keyboard = None
-        if digest_id and not TEST_MODE:
-            keyboard = {
-                "inline_keyboard": [[
-                    {"text": f"📰 Читать все релевантные ({total_digest_posts}) — по одной",
-                     "callback_data": f"show_posts:{digest_id}:0"}
-                ]]
-            }
-        send_telegram_document(pdf_path, summary_msg, reply_markup=keyboard)
+        send_telegram_document(pdf_path, summary_msg)
         try:
             os.remove(pdf_path)
             print(f"🗑️ Временный файл удалён: {pdf_path}")

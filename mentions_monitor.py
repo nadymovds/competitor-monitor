@@ -1230,10 +1230,11 @@ def find_mentions_in_news_posts(scan_id: int | None, terms: list[str]) -> int:
 # ============================================================================
 
 async def run_mentions_monitoring():
-    start_time = time.time()
     print("\n" + "=" * 60)
-    print("МОНИТОРИНГ УПОМИНАНИЙ — СТАРТ")
+    print("МОНИТОРИНГ УПОМИНАНИЙ — ОТКЛЮЧЁН")
     print("=" * 60)
+    print("ℹ️ Мониторинг упоминаний временно отключён.")
+    return
 
     # 1. Создаём запись о запуске
     scan_id = create_scan()
@@ -1426,7 +1427,7 @@ async def run_mentions_monitoring():
 ⏱️ Время: {elapsed} сек"""
 
     print(f"\n{summary_msg}")
-    send_telegram_message(summary_msg)
+    # send_telegram_message(summary_msg)  # отключено
     print(f"\n✅ Мониторинг упоминаний завершён за {elapsed} сек")
 
 

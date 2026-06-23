@@ -5,7 +5,6 @@ export default function BottomNav({ activeTab, onTabChange, isAdmin = false }) {
   const tabs = [
     { id: 'feed', label: 'Лента', icon: '📊' },
     { id: 'competitors', label: 'Конкуренты', icon: '👥' },
-    { id: 'mentions', label: 'Упоминания', icon: '📣' },
     { id: 'settings', label: 'Настройки', icon: '⚙️' }
   ]
 

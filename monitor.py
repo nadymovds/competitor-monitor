@@ -2437,15 +2437,6 @@ async def run_monitoring_async(mode='all'):
 
     success_rate = round(total_ok / total_urls * 100, 1) if total_urls > 0 else 0
 
-    keyboard = None
-    if tg_meaningful_count > 0:
-        keyboard = {
-            "inline_keyboard": [[
-                {"text": f"📱 Читать TG-посты ({tg_meaningful_count}) — по одному",
-                 "callback_data": f"show_tg_posts:{summary_report_id}:0"}
-            ]]
-        }
-
     if mode == 'telegram':
         msg = f"""📱 <b>Мониторинг TG-каналов конкурентов завершён</b>
 
@@ -2460,12 +2451,8 @@ async def run_monitoring_async(mode='all'):
    📰 Новости: {len(categorized_changes[CATEGORY_NEWS])}
    📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}"""
         if tg_meaningful_count > 0:
-            msg += "\n\n📎 Сводка во вложении · подробно с фильтрами — в мини-приложении (кнопка ниже)"
-            wake_up_bot()
-        if tg_meaningful_count == 0:
-            send_telegram_message(msg, reply_markup=keyboard)
-        else:
-            send_telegram_document(pdf_path, msg, reply_markup=keyboard)
+            msg += "\n\n📎 Сводка во вложении"
+        send_telegram_document(pdf_path, msg)
         try:
             os.remove(pdf_path)
         except:
@@ -2496,16 +2483,12 @@ async def run_monitoring_async(mode='all'):
 ⚠️ <b>Неуспешно: {len(failed_sites)}</b>
 {error_stats_text}
 
-📎 Сводка во вложении · подробно с фильтрами — в мини-приложении (кнопка ниже)"""
-        if tg_meaningful_count > 0:
-            wake_up_bot()
-
-    send_telegram_document(pdf_path, msg, reply_markup=keyboard)
-    
-    try:
-        os.remove(pdf_path)
-    except:
-        pass
+📎 Сводка во вложении"""
+        send_telegram_document(pdf_path, msg)
+        try:
+            os.remove(pdf_path)
+        except:
+            pass
 
     print("✅ Готово!")
 
