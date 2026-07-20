@@ -163,21 +163,34 @@ def wake_up_bot(timeout: int = 90) -> None:
     except Exception as e:
         print(f"⚠️ Прогрев бота не удался: {e}")
 
-def get_notification_recipients() -> list:
-    if TEST_MODE:
-        print("⚠️ TEST MODE: уведомления только администратору")
-        return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
+def _is_private_chat_id(chat_id: str) -> bool:
+    try:
+        return int(chat_id) > 0
+    except (ValueError, TypeError):
+        return False
+
+def get_bot_user_recipients() -> list:
     recipients = []
-    if TELEGRAM_CHAT_ID:
-        recipients.append(TELEGRAM_CHAT_ID)
     try:
         result = supabase.table("users").select("telegram_id").execute()
         for row in result.data or []:
             tid = str(row["telegram_id"])
-            if tid not in recipients:
+            if _is_private_chat_id(tid) and tid not in recipients:
                 recipients.append(tid)
     except:
         pass
+    return recipients
+
+def get_notification_recipients(include_primary_chat: bool = True) -> list:
+    if TEST_MODE:
+        print("⚠️ TEST MODE: уведомления только администратору")
+        return [TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []
+    recipients = []
+    if include_primary_chat and TELEGRAM_CHAT_ID:
+        recipients.append(TELEGRAM_CHAT_ID)
+    for tid in get_bot_user_recipients():
+        if tid not in recipients:
+            recipients.append(tid)
     return recipients
 
 def _is_group_chat(chat_id: str) -> bool:
@@ -192,9 +205,9 @@ def _group_caption(caption: str) -> str:
         return caption + f"\n\n📲 <a href=\"{BOT_URL}\">Открыть подробности в боте</a>"
     return caption
 
-def send_telegram_message(message: str, reply_markup: dict = None) -> bool:
+def send_telegram_message(message: str, reply_markup: dict = None, include_primary_chat: bool = True) -> bool:
     success = False
-    chat_ids = get_notification_recipients()
+    chat_ids = get_notification_recipients(include_primary_chat=include_primary_chat)
     for chat_id in chat_ids:
         if chat_id:
             try:
@@ -211,9 +224,9 @@ def send_telegram_message(message: str, reply_markup: dict = None) -> bool:
                 pass
     return success
 
-def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict = None) -> bool:
+def send_telegram_document(file_path: str, caption: str = "", reply_markup: dict = None, include_primary_chat: bool = True) -> bool:
     success = False
-    chat_ids = get_notification_recipients()
+    chat_ids = get_notification_recipients(include_primary_chat=include_primary_chat)
     for chat_id in chat_ids:
         if chat_id:
             try:
@@ -2241,6 +2254,7 @@ print("✅ TG сканирование настроено")
 async def run_monitoring_async(mode='all'):
     print("🚀 Запуск мониторинга...")
     start_time = time.time()
+    notify_primary_chat = mode != 'telegram'
 
     init_semaphores()
 
@@ -2249,7 +2263,7 @@ async def run_monitoring_async(mode='all'):
     summary_report_id = create_summary_report(report_id, current_date)
 
     if not summary_report_id:
-        send_telegram_message("❌ Ошибка создания отчёта")
+        send_telegram_message("❌ Ошибка создания отчёта", include_primary_chat=notify_primary_chat)
         return
 
     try:
@@ -2258,7 +2272,7 @@ async def run_monitoring_async(mode='all'):
             '*, competitor_urls(id, url, label, is_active, sort_order, source_type, last_message_id)'
         ).eq('is_active', True).execute().data
     except Exception as e:
-        send_telegram_message(f"❌ Ошибка: {str(e)[:200]}")
+        send_telegram_message(f"❌ Ошибка: {str(e)[:200]}", include_primary_chat=notify_primary_chat)
         return
 
     total_competitors = len(competitors)
@@ -2452,7 +2466,7 @@ async def run_monitoring_async(mode='all'):
    📣 Продвижение: {len(categorized_changes[CATEGORY_PROMOTION])}"""
         if tg_meaningful_count > 0:
             msg += "\n\n📎 Сводка во вложении"
-        send_telegram_document(pdf_path, msg)
+        send_telegram_document(pdf_path, msg, include_primary_chat=False)
         try:
             os.remove(pdf_path)
         except:
