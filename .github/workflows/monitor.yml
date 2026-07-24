@@ -13,6 +13,7 @@ name: Competitor Monitor
 
 jobs:
   monitor:
+    if: false  # отключено
     runs-on: ubuntu-latest
     
     steps:

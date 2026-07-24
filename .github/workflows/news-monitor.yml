@@ -37,6 +37,7 @@ name: News Monitor
 
 jobs:
   monitor-news:
+    if: false  # отключено
     runs-on: ubuntu-latest
 
     steps:
